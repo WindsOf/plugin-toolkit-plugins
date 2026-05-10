@@ -19,3 +19,8 @@ captures
 **/xcshareddata/WorkspaceSettings.xcsettings
 node_modules/
 *.env
+/bettermanhwa/src/main/resources/scripts/To Release
+/bettermanhwa/src/main/resources/scripts/vapoursynth-portable
+PluginDevelopment.md
+/betterimg/src/main/resources/scripts/vapoursynth-portable
+/betterimg/src/main/resources/scripts/__pycache__

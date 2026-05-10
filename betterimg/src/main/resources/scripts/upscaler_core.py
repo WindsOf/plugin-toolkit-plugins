@@ -1,112 +1,10 @@
 import argparse
-import atexit
-import ctypes
 import os
-import signal
 import sys
 import multiprocessing
 from pathlib import Path
 from time import sleep
 from tqdm import tqdm
-
-_active_pool = None
-_job_handle = None
-
-
-def _setup_windows_job_object():
-    """
-    Crea un Job Object Windows con JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.
-    Quando il processo principale muore (anche via TerminateProcess da Kotlin),
-    l'OS chiude tutti i suoi handle → il job si chiude → tutti i processi
-    nel job vengono uccisi automaticamente.
-    """
-    if sys.platform != "win32":
-        return None
-
-    kernel32 = ctypes.windll.kernel32
-
-    job = kernel32.CreateJobObjectW(None, None)
-    if not job:
-        return None
-
-    class _BASIC(ctypes.Structure):
-        _fields_ = [
-            ("PerProcessUserTimeLimit", ctypes.c_longlong),
-            ("PerJobUserTimeLimit", ctypes.c_longlong),
-            ("LimitFlags", ctypes.c_ulong),
-            ("MinimumWorkingSetSize", ctypes.c_size_t),
-            ("MaximumWorkingSetSize", ctypes.c_size_t),
-            ("ActiveProcessLimit", ctypes.c_ulong),
-            ("Affinity", ctypes.c_size_t),
-            ("PriorityClass", ctypes.c_ulong),
-            ("SchedulingClass", ctypes.c_ulong),
-        ]
-
-    class _IO(ctypes.Structure):
-        _fields_ = [
-            (f, ctypes.c_ulonglong)
-            for f in (
-                "ReadOperationCount",
-                "WriteOperationCount",
-                "OtherOperationCount",
-                "ReadTransferCount",
-                "WriteTransferCount",
-                "OtherTransferCount",
-            )
-        ]
-
-    class _EXT(ctypes.Structure):
-        _fields_ = [
-            ("BasicLimitInformation", _BASIC),
-            ("IoInfo", _IO),
-            ("ProcessMemoryLimit", ctypes.c_size_t),
-            ("JobMemoryLimit", ctypes.c_size_t),
-            ("PeakProcessMemoryUsed", ctypes.c_size_t),
-            ("PeakJobMemoryUsed", ctypes.c_size_t),
-        ]
-
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
-    JobObjectExtendedLimitInformation = 9
-
-    info = _EXT()
-    info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-    if not kernel32.SetInformationJobObject(
-        job, JobObjectExtendedLimitInformation, ctypes.byref(info), ctypes.sizeof(info)
-    ):
-        kernel32.CloseHandle(job)
-        return None
-
-    kernel32.AssignProcessToJobObject(job, kernel32.GetCurrentProcess())
-
-    return job
-
-
-def _assign_pid_to_job(job_handle, pid):
-    if job_handle is None or sys.platform != "win32" or pid is None:
-        return
-    kernel32 = ctypes.windll.kernel32
-    PROCESS_ALL_ACCESS = 0x1F0FFF
-    handle = kernel32.OpenProcess(PROCESS_ALL_ACCESS, False, pid)
-    if handle:
-        kernel32.AssignProcessToJobObject(job_handle, handle)
-        kernel32.CloseHandle(handle)
-
-
-def _cleanup():
-    global _active_pool
-    if _active_pool is not None:
-        try:
-            _active_pool.terminate()
-            _active_pool.join()
-        except Exception:
-            pass
-        _active_pool = None
-
-
-def _signal_handler(signum, frame):
-    _cleanup()
-    sys.exit(1)
-
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
@@ -124,15 +22,15 @@ if hasattr(os, "add_dll_directory"):
         if os.path.exists(core_plugins_dir):
             os.add_dll_directory(core_plugins_dir)
     except Exception as e:
-        print(f"Avviso directory DLL: {e}")
+        print(f"DLL directory warning: {e}")
 
-import vapoursynth as vs
-from vsscale import ArtCNN
-from vsdeband import placebo_deband
-from vsdehalo import fine_dehalo
-from vskernels import Bilinear
-from vstools import depth, DitherType
-from vsmlrt import BackendV2
+import vapoursynth as vs  # noqa
+from vsscale import ArtCNN  # noqa
+from vsdeband import placebo_deband  # noqa
+from vsdehalo import fine_dehalo  # noqa
+from vskernels import Bilinear  # noqa
+from vstools import depth, DitherType  # noqa
+from vsmlrt import BackendV2  # noqa
 
 core = vs.core
 
@@ -156,7 +54,7 @@ def get_image_files(input_path):
 
 def get_best_backend_name():
     dummy_clip = core.std.BlankClip(format=vs.RGBS, width=128, height=128, length=1)
-    print("\nRicerca del miglior backend AI supportato dal sistema...")
+    print("\nSearching for the best AI backend supported by the system...")
     try:
         backend = BackendV2.TRT(
             static_shape=True,
@@ -169,7 +67,7 @@ def get_best_backend_name():
         ArtCNN.R8F64_JPEG444(
             kernel=Bilinear, tilesize=[128, 128], overlap=[8, 8], backend=backend
         ).scale(dummy_clip, width=128, height=128).get_frame(0)
-        print("[AI] Backend selezionato: TensorRT RTX (NVIDIA RTX)")
+        print("[AI] Selected backend: TensorRT RTX (NVIDIA RTX)")
         return "TRT_RTX"
     except Exception:
         pass
@@ -185,7 +83,7 @@ def get_best_backend_name():
         ArtCNN.R8F64_JPEG444(
             kernel=Bilinear, tilesize=[128, 128], overlap=[8, 8], backend=backend
         ).scale(dummy_clip, width=128, height=128).get_frame(0)
-        print("[AI] Backend selezionato: TensorRT (NVIDIA)")
+        print("[AI] Selected backend: TensorRT (NVIDIA)")
         return "TRT"
     except Exception:
         pass
@@ -195,7 +93,7 @@ def get_best_backend_name():
         ArtCNN.R8F64_JPEG444(
             kernel=Bilinear, tilesize=[128, 128], overlap=[8, 8], backend=backend
         ).scale(dummy_clip, width=128, height=128).get_frame(0)
-        print("[AI] Backend selezionato: ONNX-CUDA (NVIDIA Fallback)")
+        print("[AI] Selected backend: ONNX-CUDA (NVIDIA Fallback)")
         return "CUDA"
     except Exception:
         pass
@@ -205,7 +103,7 @@ def get_best_backend_name():
         ArtCNN.R8F64_JPEG444(
             kernel=Bilinear, tilesize=[128, 128], overlap=[8, 8], backend=backend
         ).scale(dummy_clip, width=128, height=128).get_frame(0)
-        print("[AI] Backend selezionato: ONNX-DirectML (AMD/Intel GPU)")
+        print("[AI] Selected backend: ONNX-DirectML (AMD/Intel GPU)")
         return "DML"
     except Exception:
         pass
@@ -215,12 +113,12 @@ def get_best_backend_name():
         ArtCNN.R8F64_JPEG444(
             kernel=Bilinear, tilesize=[128, 128], overlap=[8, 8], backend=backend
         ).scale(dummy_clip, width=128, height=128).get_frame(0)
-        print("[AI] Backend selezionato: NCNN-Vulkan (GPU Universale)")
+        print("[AI] Selected backend: NCNN-Vulkan (Universal GPU)")
         return "NCNN"
     except Exception:
         pass
 
-    print("[AI] Backend selezionato: CPU (Lento ma universale)")
+    print("[AI] Selected backend: CPU (Slow but universal)")
     return "CPU"
 
 
@@ -382,7 +280,7 @@ def run_processing(
     images = get_image_files(INPUT_PATH)
 
     if not images:
-        print("Nessuna immagine trovata da processare.")
+        print("No images found to process.")
         if on_complete:
             on_complete(False)
         return
@@ -390,7 +288,7 @@ def run_processing(
     best_backend_name = get_best_backend_name()
     if not cli_mode:
         print(
-            f"\nAvvio VapourSynth su {len(images)} immagini... ({vs_max_workers} worker)"
+            f"\nStarting VapourSynth on {len(images)} images... ({vs_max_workers} workers)"
         )
 
     completed = [0]
@@ -406,20 +304,13 @@ def run_processing(
     def _on_error(e):
         completed[0] += 1
         if cli_mode:
-            sys.stderr.write(f"Errore: {e}\n")
+            sys.stderr.write(f"Error: {e}\n")
             print(f"{completed[0] / total:.2f}", flush=True)
         else:
-            tqdm.write(f"Errore: {e}")
+            tqdm.write(f"Error: {e}")
             pbar.update(1)
 
-    global _active_pool
-    pool = multiprocessing.Pool(processes=vs_max_workers, maxtasksperchild=1)
-    _active_pool = pool
-    # Assegna esplicitamente ogni worker al Job Object (fallback se l'ereditarietà non basta)
-    for worker in pool._pool:
-        _assign_pid_to_job(_job_handle, worker.pid)
-    pool_closed = False
-    try:
+    with multiprocessing.Pool(processes=vs_max_workers, maxtasksperchild=1) as pool:
         if not cli_mode:
             pbar = tqdm(total=total, desc="VapourSynth", unit="img")
         for img_path in images:
@@ -441,42 +332,32 @@ def run_processing(
             )
         pool.close()
         pool.join()
-        pool_closed = True
         if not cli_mode:
             pbar.close()
-    except (KeyboardInterrupt, SystemExit):
-        if not pool_closed:
-            pool.terminate()
-            pool.join()
-        raise
-    finally:
-        _active_pool = None
-        if not pool_closed:
-            pool.terminate()
 
     if not cli_mode:
-        print(f"\nFinito! {len(images)} immagini processate.\n")
+        print(f"\nFinished! {len(images)} images processed.\n")
     if on_complete:
         on_complete(True)
 
 
 def run_cli():
-    print("Configurazione Upscaler (CLI)\n" + "-" * 30)
+    print("Upscaler Configuration (CLI)\n" + "-" * 30)
     while True:
         INPUT_PATH = (
             input(
-                "Inserisci il PATH dell'immagine o della cartella (con apici). Puoi anche trascinare il file/cartella: "
+                "Enter the image or folder PATH (with quotes). You can also drag and drop the file/folder: "
             )
             .strip()
             .strip('"')
         )
         if INPUT_PATH and os.path.exists(INPUT_PATH):
             break
-        print("[ERRORE] Percorso non valido.")
+        print("[ERROR] Invalid path.")
 
     w_in = (
         input(
-            "Larghezza [1x, 2x, 4x, 8x, o numero - default 1000]\nATTENZIONE: Non sono resposabile se l'immagine finale è troppo grande e manda in crash il vostro computer, fate i calcoli prima di usare 8x: "
+            "Width [1x, 2x, 4x, 8x, or number - default 1000]\nWARNING: I am not responsible if the final image is too large and crashes your computer, calculate before using 8x: "
         )
         .strip()
         .lower()
@@ -487,10 +368,10 @@ def run_cli():
         else (int(w_in) if w_in.isdigit() else 1000)
     )
 
-    g_in = input("Grain [Premi INVIO per default: 1]: ").strip()
+    g_in = input("Grain [Press ENTER for default: 1]: ").strip()
     grain = int(g_in) if g_in.isdigit() else 1
 
-    o_fmt = input("Formato (webp/png) [default: webp]: ").strip().lower()
+    o_fmt = input("Format (webp/png) [default: webp]: ").strip().lower()
     o_fmt = o_fmt if o_fmt in ["webp", "png"] else "webp"
 
     print("-" * 30)
@@ -500,31 +381,22 @@ def run_cli():
 if __name__ == "__main__":
     multiprocessing.freeze_support()
 
-    # Job Object Windows: garantisce il kill dei worker anche con TerminateProcess() da Kotlin
-    _job_handle = _setup_windows_job_object()
-
-    # Fallback segnali per Ctrl+C / Ctrl+Break interattivi
-    atexit.register(_cleanup)
-    signal.signal(signal.SIGINT, _signal_handler)
-    if hasattr(signal, "SIGBREAK"):
-        signal.signal(signal.SIGBREAK, _signal_handler)
-
     parser = argparse.ArgumentParser(
         prog="upscaler_core",
-        description="BetterManhwa Upscaler",
+        description="BetterIMG Upscaler",
     )
     parser.add_argument(
         "input",
         nargs="?",
         metavar="INPUT",
-        help="Percorso dell'immagine o della cartella da processare.",
+        help="Path to the image or folder to process.",
     )
     parser.add_argument(
         "-w",
         "--width",
         default="1000",
-        metavar="LARGHEZZA",
-        help="Larghezza target: numero di pixel (es. 1000) oppure moltiplicatore (1x, 2x, 4x, 8x). [default: 1000]",
+        metavar="WIDTH",
+        help="Target width: number of pixels (e.g. 1000) or multiplier (1x, 2x, 4x, 8x). [default: 1000]",
     )
     parser.add_argument(
         "-g",
@@ -532,7 +404,7 @@ if __name__ == "__main__":
         type=int,
         default=1,
         metavar="GRAIN",
-        help="Intensità del grain da aggiungere (intero). [default: 1]",
+        help="Intensity of grain to add (integer). [default: 1]",
     )
     parser.add_argument(
         "-f",
@@ -540,28 +412,28 @@ if __name__ == "__main__":
         choices=["webp", "png"],
         default="webp",
         dest="fmt",
-        metavar="FORMATO",
-        help="Formato di output: webp o png. [default: webp]",
+        metavar="FORMAT",
+        help="Output format: webp or png. [default: webp]",
     )
     parser.add_argument(
         "-o",
         "--output",
         default=None,
         metavar="OUTPUT",
-        help="Cartella di destinazione per le immagini processate. [default: <input>/upscaled]",
+        help="Destination folder for processed images. [default: <input>/upscaled]",
     )
 
     args = parser.parse_args()
 
     if args.input:
         if not os.path.exists(args.input):
-            parser.error(f"Percorso non valido: {args.input}")
+            parser.error(f"Invalid path: {args.input}")
 
         if args.output and not os.path.exists(args.output):
             try:
                 os.makedirs(args.output, exist_ok=True)
             except Exception as e:
-                parser.error(f"Impossibile creare la cartella di output: {e}")
+                parser.error(f"Unable to create output folder: {e}")
 
         w_in = args.width.strip().lower()
         SCALE_KEYWORDS = ["1x", "2x", "4x", "8x", "x1", "x2", "x4", "x8"]

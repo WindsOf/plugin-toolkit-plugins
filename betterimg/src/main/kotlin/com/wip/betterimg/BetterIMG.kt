@@ -1,4 +1,4 @@
-package com.wip.bettermanhwa
+package com.wip.betterimg
 
 import org.wip.plugintoolkit.api.annotations.Capability
 import org.wip.plugintoolkit.api.annotations.CapabilityParam
@@ -26,17 +26,17 @@ enum class Widths {
 }
 
 @PluginInfo(
-    id = "com.wip.bettwemanhwa",
-    name = "BetterManhwa",
-    version = "1.0.1",
-    description = "A plugin that processes manhwa images using the BetterManhwa CLI tool."
+    id = "com.wip.betterimg",
+    name = "BetterIMG",
+    version = "2.0.0",
+    description = "A plugin that processes images using the BetterIMG CLI tool."
 )
-class BetterManhwa {
+class BetterIMG {
     @Capability(
-        name = "Manhwa Processor",
-        description = "Process a folder of manhwa images using BetterManhwa CLI"
+        name = "Image Processor",
+        description = "Process a folder of images using BetterIMG CLI"
     )
-    fun manhwaProcessor(
+    fun imageProcessor(
         @CapabilityParam(description = "Folder to process") folder: String,
         @CapabilityParam(description = "Output width in pixels", defaultValue = "940") width: Int,
         @CapabilityParam(description = "Grain level for processing", defaultValue = "5") grain: Int,
@@ -165,16 +165,14 @@ class BetterManhwa {
         return try {
             val fileSystem = context.fileSystem
             val logger = context.logger
-            logger.info("Starting BetterManhwa setup...")
+            logger.info("Starting BetterIMG setup...")
 
             // Extract bundled resources from the JAR to the plugin's managed file area
             val resourcesToExtract = listOf(
-                "scripts/app_ui.py" to "app_ui.py",
                 "scripts/install.bat" to "install.bat",
                 "scripts/Install-Portable-VapourSynth-R73.ps1" to "Install-Portable-VapourSynth-R73.ps1",
                 "scripts/launchCLI.bat" to "launchCLI.bat",
                 "scripts/launchCLInoUpdate.bat" to "launchCLInoUpdate.bat",
-                "scripts/launchUI.bat" to "launchUI.bat",
                 "scripts/requirements.txt" to "requirements.txt",
                 "scripts/UPDATE.bat" to "UPDATE.bat",
                 "scripts/upscaler_core.py" to "upscaler_core.py",
@@ -244,7 +242,7 @@ class BetterManhwa {
                 return Result.failure(Exception("Core script not found. Please run setup."))
             }
 
-            logger.info("BetterManhwa validation passed - environment and core script found")
+            logger.info("BetterIMG validation passed - environment and core script found")
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -256,15 +254,16 @@ class BetterManhwa {
         return try {
             val logger = context.logger
             val fileSystem = context.fileSystem
-            logger.info("Starting BetterManhwa update...")
+            logger.info("Starting BetterIMG update...")
 
+            // Extract updated resources from the new JAR, overwriting existing files.
+            // NOTE: vapoursynth-portable is NOT managed here - it is handled by install.bat
+            //       and UPDATE.bat (called at runtime from the launch scripts).
             val resourcesToExtract = listOf(
-                "scripts/app_ui.py" to "app_ui.py",
                 "scripts/install.bat" to "install.bat",
                 "scripts/Install-Portable-VapourSynth-R73.ps1" to "Install-Portable-VapourSynth-R73.ps1",
                 "scripts/launchCLI.bat" to "launchCLI.bat",
                 "scripts/launchCLInoUpdate.bat" to "launchCLInoUpdate.bat",
-                "scripts/launchUI.bat" to "launchUI.bat",
                 "scripts/requirements.txt" to "requirements.txt",
                 "scripts/UPDATE.bat" to "UPDATE.bat",
                 "scripts/upscaler_core.py" to "upscaler_core.py",
@@ -272,7 +271,6 @@ class BetterManhwa {
                 "scripts/vsmlrt.py" to "vsmlrt.py",
             )
 
-            // Extract new resources from the JAR to the plugin's managed file area, overwriting existing ones
             for ((jarResource, targetPath) in resourcesToExtract) {
                 logger.info("Extracting resource: $jarResource -> $targetPath")
                 val result = fileSystem.extractResource(jarResource, targetPath)
@@ -281,32 +279,32 @@ class BetterManhwa {
                 }
             }
 
+            // Run install.bat to refresh Python dependencies after a JAR update.
+            // install.bat is non-interactive and skips VapourSynth if already installed.
             val basePath = fileSystem.getBasePath()
-            val updateScript = File(basePath, "UPDATE.bat")
+            val installScript = File(basePath, "install.bat")
 
-            if (updateScript.exists()) {
-                logger.info("Running update script: ${updateScript.absolutePath}")
+            if (installScript.exists()) {
+                logger.info("Running install script to refresh dependencies: ${installScript.absolutePath}")
                 val process = withContext(Dispatchers.IO) {
-                    ProcessBuilder("cmd", "/c", updateScript.absolutePath).directory(File(basePath))
-                        .redirectErrorStream(true).start()
+                    ProcessBuilder("cmd", "/c", installScript.absolutePath)
+                        .directory(File(basePath))
+                        .redirectErrorStream(true)
+                        .start()
                 }
 
                 process.inputStream.bufferedReader().use { reader ->
-                    reader.lines().forEach { line ->
-                        logger.debug(line)
-                    }
+                    reader.lines().forEach { line -> logger.debug(line) }
                 }
 
-                val exitCode = withContext(Dispatchers.IO) {
-                    process.waitFor()
-                }
+                val exitCode = withContext(Dispatchers.IO) { process.waitFor() }
                 if (exitCode != 0) {
-                    logger.error("Update script exited with code $exitCode")
-                    return Result.failure(RuntimeException("Update script failed with exit code $exitCode"))
+                    logger.error("Install script exited with code $exitCode during update")
+                    return Result.failure(RuntimeException("Dependency refresh failed with exit code $exitCode"))
                 }
-                logger.info("Update script completed successfully")
+                logger.info("Dependencies refreshed successfully")
             } else {
-                logger.warn("Update script not found at ${updateScript.absolutePath}, skipping update step")
+                logger.warn("install.bat not found at ${installScript.absolutePath}, skipping dependency refresh")
             }
 
             Result.success(Unit)
