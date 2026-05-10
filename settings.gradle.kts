@@ -51,3 +51,4 @@ plugins { id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 include(":slicer")
 
 include(":betterimg")
+include(":OCR_IA")

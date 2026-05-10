@@ -1,0 +1,77 @@
+{
+    "manifestVersion": "1.0",
+    "plugin": {
+        "id": "com.wip.ocr_ia",
+        "name": "OCR IA",
+        "version": "1.0.0",
+        "description": "Extract text from images using AI (Google GenAI Gemma-4-31b-it)"
+    },
+    "requirements": {
+        "minMemoryMb": 128,
+        "minExecutionTimeMs": 10
+    },
+    "capabilities": [
+        {
+            "name": "ocr",
+            "description": "Performs OCR on an image or a folder of images",
+            "parameters": {
+                "input": {
+                    "description": "Path to image or folder",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "save": {
+                    "defaultValue": true,
+                    "description": "Save output to .txt file",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "BOOLEAN"
+                    }
+                },
+                "outputDir": {
+                    "description": "Custom output directory",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "apiKey": {
+                    "description": "Google GenAI API Key (optional)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                }
+            },
+            "returnType": {
+                "type": "primitive",
+                "primitiveType": "STRING"
+            }
+        }
+    ],
+    "changelog": {
+        "releases": [
+            {
+                "version": "version: 1.0.0",
+                "date": "date: 2026-05-04",
+                "categories": {
+                    "Changes": [
+                        "Recompiled for 1.3.1",
+                        "Switched from including the plugin-api as a module to including it as a dependency"
+                    ],
+                    "Added": [
+                        "Slicer",
+                        "Valid cut distance checker"
+                    ],
+                    "Planned": [
+                        "Dynamic image loading in teh slicer to avoid loading all the images bitmap in ram"
+                    ]
+                }
+            }
+        ]
+    },
+    "hasUpdateHandler": true,
+    "hasSetupHandler": true
+}

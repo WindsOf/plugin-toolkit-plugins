@@ -13,6 +13,14 @@
       "minAppVersion": "1.0.0"
     },
     {
+      "name": "OCR IA",
+      "pkg": "com.wip.ocr_ia",
+      "version": "1.0.0",
+      "fileName": "OCR_IA.jar",
+      "description": "Extract text from images using AI (Google GenAI Gemma-4-31b-it)",
+      "minAppVersion": "1.0.0"
+    },
+    {
       "name": "Slicer",
       "pkg": "com.wip.operations.slicer",
       "version": "1.0.1",
