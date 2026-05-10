@@ -22,12 +22,13 @@ import org.wip.plugintoolkit.api.PluginSignal
 @PluginInfo(
         id = "com.wip.ocr_ia",
         name = "OCR IA",
-        version = "1.0.0",
-        description = "Extract text from images using AI (Google GenAI Gemma-4-31b-it)"
+        version = "1.1.0",
+        description = "Extract text from images using AI (Native Kotlin via Koog + Google Gemma-4-31b-it, or legacy Python)"
 )
+
 class OCR_IA {
 
-    @Capability(name = "ocr", description = "Performs OCR on an image or a folder of images")
+    @Capability(name = "ocr", description = "Performs OCR on an image or a folder of images using native Kotlin (Koog)")
     suspend fun ocr(
             @CapabilityParam(description = "Path to image or folder") input: String,
             @CapabilityParam(description = "Save output to .txt file", defaultValue = "true")
@@ -36,50 +37,63 @@ class OCR_IA {
             outputDir: String,
             @CapabilityParam(description = "Google GenAI API Key (optional)", defaultValue = "")
             apiKey: String,
+            @CapabilityParam(description = "Use legacy Python implementation", defaultValue = "false")
+            usePython: Boolean,
             context: PluginContext
+    ): String {
+        val logger = context.logger
+        
+        if (usePython) {
+            logger.info("Using legacy Python implementation...")
+            return runPythonOcr(input, save, outputDir, apiKey, context)
+        }
+
+        logger.info("Using native Kotlin (Koog) implementation...")
+        val service = KoogOcrService(context)
+        return service.performOcr(input, save, outputDir, apiKey)
+    }
+
+    private suspend fun runPythonOcr(
+        input: String,
+        save: Boolean,
+        outputDir: String,
+        apiKey: String,
+        context: PluginContext
     ): String {
         val logger = context.logger
         val fileSystem = context.fileSystem
         val progressReporter = context.progress
-
         val basePath = fileSystem.getBasePath()
         val pythonExe = findPythonExecutable(basePath)
         val mainScript = File(basePath, "main.py")
 
         if (!mainScript.exists()) {
             throw IllegalStateException(
-                    "main.py not found at ${mainScript.absolutePath}. Please run plugin setup."
+                "main.py not found. Please run plugin setup."
             )
         }
 
-        val command =
-                mutableListOf<String>().apply {
-                    add(pythonExe)
-                    add(mainScript.absolutePath)
-                    add(input)
-                    if (save) add("-s")
-                    if (outputDir.isNotBlank()) {
-                        add("-o")
-                        add(outputDir)
-                    }
-                    if (apiKey.isNotBlank()) {
-                        add("-k")
-                        add(apiKey)
-                    }
-                }
-
-        logger.info("Executing OCR command: ${command.joinToString(" ")}")
+        val command = mutableListOf<String>().apply {
+            add(pythonExe)
+            add(mainScript.absolutePath)
+            add(input)
+            if (save) add("-s")
+            if (outputDir.isNotBlank()) {
+                add("-o"); add(outputDir)
+            }
+            if (apiKey.isNotBlank()) {
+                add("-k"); add(apiKey)
+            }
+        }
 
         return withContext(Dispatchers.IO) {
-            val process =
-                    ProcessBuilder(command)
-                            .directory(File(basePath))
-                            .redirectErrorStream(true)
-                            .start()
+            val process = ProcessBuilder(command)
+                .directory(File(basePath))
+                .redirectErrorStream(true)
+                .start()
 
             context.signals.onSignal { signal ->
                 if (signal == PluginSignal.CANCEL || signal == PluginSignal.PAUSE) {
-                    logger.info("Received $signal signal. Terminating process...")
                     process.destroyForcibly()
                 }
             }
@@ -92,36 +106,23 @@ class OCR_IA {
                 reader.lines().forEach { line ->
                     logger.debug(line)
                     output.appendLine(line)
-
-                    // Parse total images
                     if (line.contains("Trovate ") && line.contains(" immagini")) {
                         val match = Regex("""Trovate (\d+) immagini""").find(line)
-                        match?.let {
-                            totalImages = it.groupValues[1].toInt()
-                            logger.info("Total images to process: $totalImages")
-                        }
+                        match?.let { totalImages = it.groupValues[1].toInt() }
                     }
-
-                    // Parse processing message
                     if (line.startsWith("Elaborazione: ")) {
                         processedImages++
-                        val progress = processedImages.toFloat() / totalImages.toFloat()
-                        progressReporter.report(progress.coerceIn(0f, 1f))
+                        progressReporter.report((processedImages.toFloat() / totalImages).coerceIn(0f, 1f))
                     }
                 }
             }
 
             val exitCode = process.waitFor()
-            if (exitCode != 0) {
-                val errorMsg = "OCR process failed with exit code $exitCode"
-                logger.error(errorMsg)
-                throw RuntimeException("$errorMsg\nOutput: $output")
-            }
-
-            logger.info("OCR completed successfully")
-            "OCR completed. Processed $processedImages images.\nOutput details:\n$output"
+            if (exitCode != 0) throw RuntimeException("Python OCR failed ($exitCode)\n$output")
+            "Python OCR completed. Processed $processedImages images.\n$output"
         }
     }
+
 
     private fun findPythonExecutable(basePath: String): String {
         // Try venv first (Windows)

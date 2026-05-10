@@ -23,6 +23,8 @@ dependencies {
     implementation(libs.kotlinx.io.core)
     implementation(libs.plugin.api)
     ksp(libs.plugin.api)
+    implementation(libs.koog.agents)
+    implementation(libs.koog.google)
 }
 
 tasks.withType<ProcessResources> {

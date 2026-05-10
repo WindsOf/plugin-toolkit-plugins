@@ -15,9 +15,9 @@
     {
       "name": "OCR IA",
       "pkg": "com.wip.ocr_ia",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "fileName": "OCR_IA.jar",
-      "description": "Extract text from images using AI (Google GenAI Gemma-4-31b-it)",
+      "description": "Extract text from images using AI (Native Kotlin via Koog + Google Gemma-4-31b-it, or legacy Python)",
       "minAppVersion": "1.0.0"
     },
     {
