@@ -9,6 +9,8 @@ param(
 
 $ConfirmPreference = 'None'
 $ErrorActionPreference = 'Continue'
+# Force unattended if not in a user-interactive session
+if (-not [System.Environment]::UserInteractive) { $Unattended = $true }
 $PythonVersionPatch = 0
 
 if ($PythonVersionMajor -ne 3) {
@@ -48,7 +50,7 @@ Write-Host "Fetching latest version information..."
 
 $ErrorActionPreference = "SilentlyContinue"
 
-$GithubVersion = Invoke-WebRequest -Uri "https://api.github.com/repos/vapoursynth/vapoursynth/releases" | ConvertFrom-Json 
+$GithubVersion = Invoke-WebRequest -UseBasicParsing -Uri "https://api.github.com/repos/vapoursynth/vapoursynth/releases" | ConvertFrom-Json 
 
 foreach ($Version in $GithubVersion) {
     if (-Not ($Version.prerelease)) {
@@ -62,16 +64,19 @@ $ErrorActionPreference = "Continue"
 if (!$Unattended) {
     if ($VSGithubVersion -eq "Unknown") {
         $Answer = Read-Host "Failed to retrieve VapourSynth version information from GitHub.`nProceed with install of R$VSVersion$VSVersionExtra anyway? (y/n)"
-    } elseif ($VSGithubVersion -eq "R$VSVersion$VSVersionExtra") {
+    }
+    elseif ($VSGithubVersion -eq "R$VSVersion$VSVersionExtra") {
         $Answer = Read-Host "Script will install the latest VapourSynth version.`nProceed with install of R$VSVersion$VSVersionExtra`? (y/n)"
-    } else {
+    }
+    else {
         $Answer = Read-Host "Script is for VapourSynth R$VSVersion$VSVersionExtra but the latest stable release available is $VSGithubVersion.`nProceed with install of R$VSVersion$VSVersionExtra anyway? (y/n)"
     }
 }
 
 if ($Answer -eq "y") {
     Write-Host "Installing..."
-} else {
+}
+else {
     Write-Host "Aborted by user"
     exit 0
 }
@@ -87,9 +92,10 @@ Write-Host "Determining latest Python $PythonVersionMajor.$PythonVersionMinor.x 
 for ($i = $PythonVersionPatch + 1; $i -le 10; $i++) {
     $PyUri = "https://www.python.org/ftp/python/$PythonVersionMajor.$PythonVersionMinor.$i/python-$PythonVersionMajor.$PythonVersionMinor.$i-embed-amd64.zip"
     try {
-        $PythonReply = Invoke-WebRequest -Uri $PyUri -Method head
+        $PythonReply = Invoke-WebRequest -UseBasicParsing -Uri $PyUri -Method head
         $PythonVersionPatch = $i
-    } catch {
+    }
+    catch {
         break
     }
 }
@@ -103,11 +109,11 @@ New-Item -Path "$DownloadFolder" -ItemType Directory -Force | Out-Null
 $ProgressPreference = 'Continue'
 
 Write-Host "Downloading Python..."
-Invoke-WebRequest -Uri "https://www.python.org/ftp/python/$PythonVersionMajor.$PythonVersionMinor.$PythonVersionPatch/python-$PythonVersionMajor.$PythonVersionMinor.$PythonVersionPatch-embed-amd64.zip" -OutFile "$DownloadFolder\python-$PythonVersionMajor.$PythonVersionMinor.$PythonVersionPatch-embed-amd64.zip"
+Invoke-WebRequest -UseBasicParsing -Uri "https://www.python.org/ftp/python/$PythonVersionMajor.$PythonVersionMinor.$PythonVersionPatch/python-$PythonVersionMajor.$PythonVersionMinor.$PythonVersionPatch-embed-amd64.zip" -OutFile "$DownloadFolder\python-$PythonVersionMajor.$PythonVersionMinor.$PythonVersionPatch-embed-amd64.zip"
 Write-Host "Downloading VapourSynth..."
-Invoke-WebRequest -Uri "https://github.com/vapoursynth/vapoursynth/releases/download/R$VSVersion$VSVersionExtra/VapourSynth64-Portable-R$VSVersion$VSVersionExtra.zip" -OutFile "$DownloadFolder\VapourSynth64-Portable-R$VSVersion$VSVersionExtra.zip"
+Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/vapoursynth/vapoursynth/releases/download/R$VSVersion$VSVersionExtra/VapourSynth64-Portable-R$VSVersion$VSVersionExtra.zip" -OutFile "$DownloadFolder\VapourSynth64-Portable-R$VSVersion$VSVersionExtra.zip"
 Write-Host "Downloading Pip..."
-Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$DownloadFolder\get-pip.py"
+Invoke-WebRequest -UseBasicParsing -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile "$DownloadFolder\get-pip.py"
 
 # Expand-Archive requires the global scope variable to be set and not just the local one because why not?
 $global:ProgressPreference = 'SilentlyContinue'
@@ -125,15 +131,17 @@ Write-Host "Extracting VapourSynth..."
 Expand-Archive -LiteralPath "$DownloadFolder\VapourSynth64-Portable-R$VSVersion$VSVersionExtra.zip" -DestinationPath "$TargetFolder" -Force
 if ($PythonVersionMinor -eq 8) {
     Move-Item -Path "$TargetFolder\VSScriptPython38.dll" -Destination "$TargetFolder\VSScript.dll" -Force
-} else {
+}
+else {
     Remove-Item -Path "$TargetFolder\VSScriptPython38.dll"
 }
 Write-Host "Installing VapourSynth..."
 
 if ($PythonVersionMinor -eq 8) {
-& "$TargetFolder\python.exe" "-m" "pip" "install" "$TargetFolder\wheel\VapourSynth-$VSVersion-cp$PythonVersionMajor$PythonVersionMinor-cp$PythonVersionMajor$PythonVersionMinor-win_amd64.whl"
-} else {
-& "$TargetFolder\python.exe" "-m" "pip" "install" "$TargetFolder\wheel\VapourSynth-$VSVersion-cp312-abi3-win_amd64.whl"
+    & "$TargetFolder\python.exe" "-m" "pip" "install" "$TargetFolder\wheel\VapourSynth-$VSVersion-cp$PythonVersionMajor$PythonVersionMinor-cp$PythonVersionMajor$PythonVersionMinor-win_amd64.whl"
+}
+else {
+    & "$TargetFolder\python.exe" "-m" "pip" "install" "$TargetFolder\wheel\VapourSynth-$VSVersion-cp312-abi3-win_amd64.whl"
 }
 
 Write-Host "Installation complete" -ForegroundColor Green

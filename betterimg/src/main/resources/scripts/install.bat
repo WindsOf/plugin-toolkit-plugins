@@ -11,7 +11,7 @@ set DLL_FOLDER="%CORE_PLUGINS_DIR%\models"
 if not exist %VS_DIR% (
     echo.
     echo [1/4] Starting VapourSynth and Python installation...
-    PowerShell -NoProfile -ExecutionPolicy Bypass -File ".\Install-Portable-VapourSynth-R73.ps1" -Unattended
+    PowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ".\Install-Portable-VapourSynth-R73.ps1" -Unattended
 )
 
 if not exist %PYTHON_EXE% (
