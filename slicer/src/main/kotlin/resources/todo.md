@@ -1,0 +1,1 @@
+- Dynamic image loading in teh slicer to avoid loading all the images bitmap in ram
