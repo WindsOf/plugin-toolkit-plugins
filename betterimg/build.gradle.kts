@@ -24,3 +24,7 @@ dependencies {
     implementation(libs.plugin.api)
     ksp(libs.plugin.api)
 }
+
+tasks.processResources {
+    exclude("scripts/vapoursynth-portable/**")
+}

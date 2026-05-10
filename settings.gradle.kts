@@ -35,13 +35,13 @@ dependencyResolutionManagement {
             }
         }
         mavenCentral()
-        //maven {
-        //    url = uri("https://maven.pkg.github.com/Wip-Sama/plugin-toolkit")
-        //    credentials {
-        //        username = getEnv("GITHUB_ACTOR")
-        //        password = getEnv("GITHUB_TOKEN")
-        //    }
-        //}
+        maven {
+            url = uri("https://maven.pkg.github.com/Wip-Sama/plugin-toolkit")
+            credentials {
+                username = getEnv("GITHUB_ACTOR")
+                password = getEnv("GITHUB_TOKEN")
+            }
+        }
         maven { url = uri("https://jitpack.io") }
     }
 }
@@ -50,4 +50,4 @@ plugins { id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 
 include(":slicer")
 
-include(":bettermanhwa")
+include(":betterimg")

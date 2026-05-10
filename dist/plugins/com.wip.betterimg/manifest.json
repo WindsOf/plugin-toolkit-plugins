@@ -1,0 +1,94 @@
+{
+    "manifestVersion": "1.0",
+    "plugin": {
+        "id": "com.wip.betterimg",
+        "name": "BetterIMG",
+        "version": "2.0.0",
+        "description": "A plugin that processes images using the BetterIMG CLI tool."
+    },
+    "requirements": {
+        "minMemoryMb": 128,
+        "minExecutionTimeMs": 10
+    },
+    "capabilities": [
+        {
+            "name": "Image Processor",
+            "description": "Process a folder of images using BetterIMG CLI",
+            "parameters": {
+                "folder": {
+                    "description": "Folder to process",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "width": {
+                    "defaultValue": 940,
+                    "description": "Output width in pixels",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "INT"
+                    }
+                },
+                "grain": {
+                    "defaultValue": 5,
+                    "description": "Grain level for processing",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "INT"
+                    }
+                },
+                "outputFormat": {
+                    "defaultValue": "WEBP",
+                    "description": "Output image format",
+                    "type": {
+                        "type": "enum",
+                        "className": "com.wip.betterimg.OutputFormat",
+                        "options": [
+                            "PNG",
+                            "WEBP"
+                        ]
+                    }
+                },
+                "outFolder": {
+                    "defaultValue": null,
+                    "description": "Output folder (leave null to auto-create)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "resumeState": {
+                    "description": "",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "ANY"
+                    }
+                }
+            },
+            "returnType": {
+                "type": "primitive",
+                "primitiveType": "STRING"
+            },
+            "isPausable": true
+        }
+    ],
+    "changelog": {
+        "releases": [
+            {
+                "version": "1.0.0",
+                "date": "2026-05-01",
+                "categories": {
+                    "Added": [
+                        "First release"
+                    ],
+                    "Changes": [
+                        "Recompiled for 1.3.1"
+                    ]
+                }
+            }
+        ]
+    },
+    "hasUpdateHandler": true,
+    "hasSetupHandler": true
+}
