@@ -1,0 +1,5 @@
+{
+  "name": "WindsOf Plugin Toolkit Repository",
+  "url": "https://raw.githubusercontent.com/WindsOf/plugin-toolkit-plugins/repo/dist/",
+  "out": "dist"
+}

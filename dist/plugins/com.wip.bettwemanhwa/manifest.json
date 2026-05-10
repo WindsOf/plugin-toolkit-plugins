@@ -1,0 +1,94 @@
+{
+    "manifestVersion": "1.0",
+    "plugin": {
+        "id": "com.wip.bettwemanhwa",
+        "name": "BetterManhwa",
+        "version": "1.0.1",
+        "description": "A plugin that processes manhwa images using the BetterManhwa CLI tool."
+    },
+    "requirements": {
+        "minMemoryMb": 128,
+        "minExecutionTimeMs": 10
+    },
+    "capabilities": [
+        {
+            "name": "Manhwa Processor",
+            "description": "Process a folder of manhwa images using BetterManhwa CLI",
+            "parameters": {
+                "folder": {
+                    "description": "Folder to process",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "width": {
+                    "defaultValue": 940,
+                    "description": "Output width in pixels",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "INT"
+                    }
+                },
+                "grain": {
+                    "defaultValue": 5,
+                    "description": "Grain level for processing",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "INT"
+                    }
+                },
+                "outputFormat": {
+                    "defaultValue": "WEBP",
+                    "description": "Output image format",
+                    "type": {
+                        "type": "enum",
+                        "className": "com.wip.bettermanhwa.OutputFormat",
+                        "options": [
+                            "PNG",
+                            "WEBP"
+                        ]
+                    }
+                },
+                "outFolder": {
+                    "defaultValue": null,
+                    "description": "Output folder (leave null to auto-create)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "resumeState": {
+                    "description": "",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "ANY"
+                    }
+                }
+            },
+            "returnType": {
+                "type": "primitive",
+                "primitiveType": "STRING"
+            },
+            "isPausable": true
+        }
+    ],
+    "changelog": {
+        "releases": [
+            {
+                "version": "1.0.0",
+                "date": "2026-05-01",
+                "categories": {
+                    "Changes": [
+                        "Recompiled for 1.3.1"
+                    ],
+                    "Added": [
+                        "First release"
+                    ]
+                }
+            }
+        ]
+    },
+    "hasUpdateHandler": true,
+    "hasSetupHandler": true
+}

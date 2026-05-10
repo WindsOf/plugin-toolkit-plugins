@@ -1,0 +1,24 @@
+{
+  "name": "WindsOf Plugin Toolkit Repository",
+  "url": "https://raw.githubusercontent.com/WindsOf/plugin-toolkit-plugins/repo/dist/index.json",
+  "schemaVersion": 1,
+  "pluginsFolder": "plugins",
+  "plugins": [
+    {
+      "name": "BetterManhwa",
+      "pkg": "com.wip.bettwemanhwa",
+      "version": "1.0.1",
+      "fileName": "bettermanhwa.jar",
+      "description": "A plugin that processes manhwa images using the BetterManhwa CLI tool.",
+      "minAppVersion": "1.0.0"
+    },
+    {
+      "name": "Slicer",
+      "pkg": "com.wip.operations.slicer",
+      "version": "1.0.1",
+      "fileName": "slicer.jar",
+      "description": "A plugin that provides vertical images sliding capabilities for manhwa.",
+      "minAppVersion": "1.0.0"
+    }
+  ]
+}

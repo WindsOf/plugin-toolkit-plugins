@@ -104,10 +104,9 @@ def generate_repo(name, url, output_dir):
             print(f"No JAR found for {plugin_dir.name} in {jar_dir}, skipping.")
             continue
         
-        # Take the most recent or best named JAR
-        # Usually it's {plugin_dir.name}-{version}.jar or just {plugin_dir.name}.jar
-        source_jar = jars[0] # Simple heuristic
-        jar_name = f"plugin-{version}.jar" # Standardize name in repo #TODO: coule be avoided
+        # Use the original JAR name from the build output
+        source_jar = jars[0]
+        jar_name = source_jar.name
         
         # Create plugin folder in dist
         pkg_dist_path = plugins_dist_path / pkg
@@ -152,9 +151,29 @@ def generate_repo(name, url, output_dir):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate a static plugin repository.")
-    parser.add_argument("--name", default="My Plugin Repository", help="Repository name")
-    parser.add_argument("--url", default="http://localhost:8080", help="Base URL of the repository")
-    parser.add_argument("--out", default="dist", help="Output directory")
+    parser.add_argument("--name", help="Repository name")
+    parser.add_argument("--url", help="Base URL of the repository")
+    parser.add_argument("--out", help="Output directory")
     
     args = parser.parse_args()
-    generate_repo(args.name, args.url, args.out)
+    
+    # Default values
+    config = {
+        "name": "My Plugin Repository",
+        "url": "http://localhost:8080",
+        "out": "dist"
+    }
+    
+    # Load from config file if exists
+    config_path = Path("repo_config.json")
+    if config_path.exists():
+        with open(config_path, "r") as f:
+            file_config = json.load(f)
+            config.update(file_config)
+            
+    # Override with CLI args if provided
+    if args.name: config["name"] = args.name
+    if args.url: config["url"] = args.url
+    if args.out: config["out"] = args.out
+    
+    generate_repo(config["name"], config["url"], config["out"])
