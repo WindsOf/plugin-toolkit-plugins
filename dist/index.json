@@ -20,5 +20,7 @@
       "description": "A plugin that provides vertical images sliding capabilities for manhwa.",
       "minAppVersion": "1.0.0"
     }
-  ]
+  ],
+  "signPublicKey": "null",
+  "signAlgorithm": "null"
 }
