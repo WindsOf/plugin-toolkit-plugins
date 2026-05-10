@@ -1,6 +1,6 @@
 {
   "name": "WindsOf Plugin Toolkit Repository",
-  "url": "https://raw.githubusercontent.com/WindsOf/plugin-toolkit-plugins/repo/dist/index.json",
+  "url": "https://raw.githubusercontent.com/WindsOf/plugin-toolkit-plugins/master/dist/index.json",
   "schemaVersion": 1,
   "pluginsFolder": "plugins",
   "plugins": [
