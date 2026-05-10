@@ -15,9 +15,9 @@
     {
       "name": "OCR IA",
       "pkg": "com.wip.ocr_ia",
-      "version": "1.1.0",
+      "version": "2.0.0",
       "fileName": "OCR_IA.jar",
-      "description": "Extract text from images using AI (Native Kotlin via Koog + Google Gemma-4-31b-it, or legacy Python)",
+      "description": "Extract text from images using Google Gemma-4-31b-it via Koog (Kotlin)",
       "minAppVersion": "1.0.0"
     },
     {

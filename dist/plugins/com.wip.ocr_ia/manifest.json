@@ -3,8 +3,8 @@
     "plugin": {
         "id": "com.wip.ocr_ia",
         "name": "OCR IA",
-        "version": "1.1.0",
-        "description": "Extract text from images using AI (Native Kotlin via Koog + Google Gemma-4-31b-it, or legacy Python)"
+        "version": "2.0.0",
+        "description": "Extract text from images using Google Gemma-4-31b-it via Koog (Kotlin)"
     },
     "requirements": {
         "minMemoryMb": 128,
@@ -13,7 +13,7 @@
     "capabilities": [
         {
             "name": "ocr",
-            "description": "Performs OCR on an image or a folder of images using native Kotlin (Koog)",
+            "description": "Performs OCR on an image or a folder of images using Google Gemma-4-31b-it",
             "parameters": {
                 "input": {
                     "description": "Path to image or folder",
@@ -24,32 +24,24 @@
                 },
                 "save": {
                     "defaultValue": true,
-                    "description": "Save output to .txt file",
+                    "description": "Save output to a .txt file alongside each image",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "BOOLEAN"
                     }
                 },
                 "outputDir": {
-                    "description": "Custom output directory",
+                    "description": "Custom output directory (optional)",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
                     }
                 },
                 "apiKey": {
-                    "description": "Google GenAI API Key (optional)",
+                    "description": "Google GenAI API Key (optional, can also use API_KEY env var)",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
-                    }
-                },
-                "usePython": {
-                    "defaultValue": false,
-                    "description": "Use legacy Python implementation",
-                    "type": {
-                        "type": "primitive",
-                        "primitiveType": "BOOLEAN"
                     }
                 }
             },
