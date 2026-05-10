@@ -7,6 +7,8 @@ param(
     [switch]$Unattended
 )
 
+$ConfirmPreference = 'None'
+$ErrorActionPreference = 'Continue'
 $PythonVersionPatch = 0
 
 if ($PythonVersionMajor -ne 3) {
