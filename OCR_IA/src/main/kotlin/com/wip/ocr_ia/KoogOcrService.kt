@@ -69,15 +69,35 @@ class KoogOcrService(private val context: PluginContext) {
         logger.info("Found ${files.size} image(s) to process.")
 
         // ── API Key ────────────────────────────────────────────────────
-        val effectiveApiKey = apiKey.ifBlank { System.getenv("API_KEY") ?: "" }
+        logger.info("Resolving API key...")
+        val effectiveApiKey = try {
+            apiKey.ifBlank { System.getenv("API_KEY") ?: "" }
+        } catch (e: Exception) {
+            logger.error("Error accessing environment variables: ${e.message}")
+            throw e
+        }
+
         if (effectiveApiKey.isBlank()) {
             val msg = "API Key not found. Pass it via 'apiKey' parameter or set the API_KEY environment variable."
             logger.error(msg)
             throw IllegalArgumentException(msg)
         }
+        logger.info("API key resolved (length: ${effectiveApiKey.length}).")
 
         // ── Executor + Model ───────────────────────────────────────────
-        val executor = simpleGoogleAIExecutor(effectiveApiKey)
+        logger.info("Initializing Koog executor (simpleGoogleAIExecutor)...")
+        val executor = try {
+            simpleGoogleAIExecutor(effectiveApiKey)
+        } catch (e: Throwable) {
+            logger.error("Failed to initialize executor: ${e::class.simpleName}: ${e.message}")
+            if (e is NoClassDefFoundError || e is ClassNotFoundException) {
+                logger.error("Missing dependency: ${e.message}. Ensure all required libraries are included in the plugin JAR.")
+            }
+            throw e
+        }
+        logger.info("Executor initialized.")
+
+        logger.info("Defining LLModel: gemma-4-31b-it")
         val model = LLModel(
             provider = LLMProvider.Google,
             id = "gemma-4-31b-it",
@@ -87,7 +107,7 @@ class KoogOcrService(private val context: PluginContext) {
                 LLMCapability.Vision.Image,
             )
         )
-        logger.info("Using model: ${model.id}")
+        logger.info("Model definition complete: ${model.id}")
 
         // ── Prompt ─────────────────────────────────────────────────────
         val promptInstructions =
@@ -99,6 +119,7 @@ class KoogOcrService(private val context: PluginContext) {
         val results = StringBuilder()
         val total = files.size
 
+        logger.info("Starting processing loop for $total image(s)...")
         files.forEachIndexed { index, file ->
             if (isCancelled) {
                 logger.info("Processing stopped at image ${index + 1}/$total.")

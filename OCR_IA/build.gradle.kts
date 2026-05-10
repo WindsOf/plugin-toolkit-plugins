@@ -34,16 +34,21 @@ tasks.withType<ProcessResources> {
 }
 
 tasks.jar {
-    archiveFileName.set("OCR_IA.jar")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    
-    // Include dependencies in the JAR
-    from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) }) {
-        exclude("META-INF/*.SF")
-        exclude("META-INF/*.DSA")
-        exclude("META-INF/*.RSA")
-    }
-    
+
+    // Include all dependencies in the JAR except those provided by the host toolkit
+    // Note: .filter is just to have a smaller jar, you can technically remove it for ease of configuration
+    from(configurations.runtimeClasspath.get().filter { file ->
+        val path = file.path
+        !path.contains("plugin-api") &&
+        !path.contains("kotlin-stdlib") &&
+        !path.contains("kotlinx-coroutines") &&
+        !path.contains("kotlinx-serialization") &&
+        !path.contains("koin-core") &&
+        !path.contains("slf4j")
+    }.map { if (it.isDirectory) it else zipTree(it) })
+
     exclude("**/.venv/**")
     exclude("**/.env")
 }
+

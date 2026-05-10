@@ -186,7 +186,7 @@ class BetterIMG {
                     listOf(
                             "scripts/install.bat" to "install.bat",
                             "scripts/Install-Portable-VapourSynth-R73.ps1" to
-                                    "Install-Portable-VapourSynth-R73.ps1",
+                                "Install-Portable-VapourSynth-R73.ps1",
                             "scripts/launchCLI.bat" to "launchCLI.bat",
                             "scripts/launchCLInoUpdate.bat" to "launchCLInoUpdate.bat",
                             "scripts/requirements.txt" to "requirements.txt",
@@ -200,9 +200,9 @@ class BetterIMG {
                 logger.info("Extracting resource: $jarResource -> $targetPath")
                 val result = fileSystem.extractResource(jarResource, targetPath)
                 if (result.isFailure) {
-                    logger.warn(
-                            "Failed to extract $jarResource: ${result.exceptionOrNull()?.message}"
-                    )
+                    val error = "Failed to extract $jarResource: ${result.exceptionOrNull()?.message}"
+                    logger.error(error)
+                    return Result.failure(RuntimeException(error))
                 }
             }
 
@@ -233,9 +233,9 @@ class BetterIMG {
                 }
                 logger.info("Install script completed successfully")
             } else {
-                logger.warn(
-                        "Install script not found at ${installScript.absolutePath}, skipping installation step"
-                )
+                val error = "Install script not found at ${installScript.absolutePath}"
+                logger.error(error)
+                return Result.failure(RuntimeException(error))
             }
 
             Result.success(Unit)
@@ -297,9 +297,9 @@ class BetterIMG {
                 logger.info("Extracting resource: $jarResource -> $targetPath")
                 val result = fileSystem.extractResource(jarResource, targetPath)
                 if (result.isFailure) {
-                    logger.warn(
-                            "Failed to extract $jarResource: ${result.exceptionOrNull()?.message}"
-                    )
+                    val error = "Failed to extract $jarResource during update: ${result.exceptionOrNull()?.message}"
+                    logger.error(error)
+                    return Result.failure(RuntimeException(error))
                 }
             }
 
@@ -331,9 +331,9 @@ class BetterIMG {
                 }
                 logger.info("Dependencies refreshed successfully")
             } else {
-                logger.warn(
-                        "install.bat not found at ${installScript.absolutePath}, skipping dependency refresh"
-                )
+                val error = "install.bat not found at ${installScript.absolutePath} during update"
+                logger.error(error)
+                return Result.failure(RuntimeException(error))
             }
 
             Result.success(Unit)

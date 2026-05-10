@@ -18,13 +18,12 @@ pluginManagement {
 
 dependencyResolutionManagement {
     repositories {
-        val env =
-                java.util.Properties().apply {
-                    val envFile = file(".env")
-                    if (envFile.exists()) {
-                        envFile.inputStream().use { load(it) }
-                    }
-                }
+        val env = java.util.Properties().apply {
+            val envFile = file(".env")
+            if (envFile.exists()) {
+                envFile.inputStream().use { load(it) }
+            }
+        }
         fun getEnv(key: String): String? = env.getProperty(key) ?: System.getenv(key)
 
         google {
@@ -49,6 +48,5 @@ dependencyResolutionManagement {
 plugins { id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0" }
 
 include(":slicer")
-
 include(":betterimg")
 include(":OCR_IA")

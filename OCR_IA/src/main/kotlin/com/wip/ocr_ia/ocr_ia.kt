@@ -11,7 +11,7 @@ import org.wip.plugintoolkit.api.annotations.PluginValidate
 @PluginInfo(
         id = "com.wip.ocr_ia",
         name = "OCR IA",
-        version = "2.0.0",
+        version = "2.0.2",
         description = "Extract text from images using Google Gemma-4-31b-it via Koog (Kotlin)"
 )
 class OCR_IA {
@@ -34,9 +34,12 @@ class OCR_IA {
         return try {
             val service = KoogOcrService(context)
             service.performOcr(input, save, outputDir, apiKey)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             val msg = "OCR failed: ${e::class.simpleName}: ${e.message}"
             logger.error(msg)
+            if (e is Error) {
+                logger.error("A critical Error occurred: ${e.stackTraceToString()}")
+            }
             throw RuntimeException(msg, e)
         }
     }
