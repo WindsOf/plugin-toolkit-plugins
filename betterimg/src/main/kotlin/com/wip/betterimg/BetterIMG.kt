@@ -1,54 +1,64 @@
 package com.wip.betterimg
 
-import org.wip.plugintoolkit.api.annotations.Capability
-import org.wip.plugintoolkit.api.annotations.CapabilityParam
-import org.wip.plugintoolkit.api.annotations.PluginInfo
-import org.wip.plugintoolkit.api.annotations.ResumeState
-import org.wip.plugintoolkit.api.annotations.PluginSetup
-import org.wip.plugintoolkit.api.annotations.PluginValidate
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import org.wip.plugintoolkit.api.PluginContext
-import org.wip.plugintoolkit.api.PluginLogger
-import org.wip.plugintoolkit.api.PluginFileSystem
-import org.wip.plugintoolkit.api.ProgressReporter
 import org.wip.plugintoolkit.api.PluginSignal
+import org.wip.plugintoolkit.api.annotations.Capability
+import org.wip.plugintoolkit.api.annotations.CapabilityParam
+import org.wip.plugintoolkit.api.annotations.PluginInfo
+import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
-import java.io.File
+import org.wip.plugintoolkit.api.annotations.PluginValidate
+import org.wip.plugintoolkit.api.annotations.ResumeState
 
 enum class OutputFormat {
-    PNG, WEBP
+    PNG,
+    WEBP
 }
 
 enum class Widths {
-    x1, x2, x4, x8
+    x1,
+    x2,
+    x4,
+    x8
 }
 
 @PluginInfo(
-    id = "com.wip.betterimg",
-    name = "BetterIMG",
-    version = "2.0.0",
-    description = "A plugin that processes images using the BetterIMG CLI tool."
+        id = "com.wip.betterimg",
+        name = "BetterIMG",
+        version = "2.0.0",
+        description = "A plugin that processes images using the BetterIMG CLI tool."
 )
 class BetterIMG {
     @Capability(
-        name = "Image Processor",
-        description = "Process a folder of images using BetterIMG CLI"
+            name = "Image Processor",
+            description = "Process a folder of images using BetterIMG CLI"
     )
     fun imageProcessor(
-        @CapabilityParam(description = "Folder to process") folder: String,
-        @CapabilityParam(description = "Output width in pixels", defaultValue = "940") width: Int,
-        @CapabilityParam(description = "Grain level for processing", defaultValue = "5") grain: Int,
-        @CapabilityParam(description = "Output image format", defaultValue = "WEBP") outputFormat: OutputFormat,
-        @CapabilityParam(description = "Output folder (leave null to auto-create)", defaultValue = "null") outFolder: String? = null,
-        @ResumeState resumeState: JsonElement? = null,
-        context: PluginContext
+            @CapabilityParam(description = "Folder to process") folder: String,
+            @CapabilityParam(description = "Output width in pixels", defaultValue = "940")
+            width: Int,
+            @CapabilityParam(description = "Grain level for processing", defaultValue = "5")
+            grain: Int,
+            @CapabilityParam(description = "Output image format", defaultValue = "WEBP")
+            outputFormat: OutputFormat,
+            @CapabilityParam(
+                    description = "Output folder (leave null to auto-create)",
+                    defaultValue = "null"
+            )
+            outFolder: String? = null,
+            @ResumeState resumeState: JsonElement? = null,
+            context: PluginContext
     ): String {
         // Validate input folder
         val inputDir = File(folder)
         if (!inputDir.exists() || !inputDir.isDirectory) {
-            throw IllegalArgumentException("Input folder does not exist or is not a directory: $folder")
+            throw IllegalArgumentException(
+                    "Input folder does not exist or is not a directory: $folder"
+            )
         }
 
         val logger = context.logger
@@ -56,11 +66,12 @@ class BetterIMG {
         val progressReporter = context.progress
 
         // Determine output folder
-        val outputDir = if (!outFolder.isNullOrBlank() && outFolder != "null") {
-            File(outFolder)
-        } else {
-            File(inputDir.parent, "${inputDir.name}_output")
-        }
+        val outputDir =
+                if (!outFolder.isNullOrBlank() && outFolder != "null") {
+                    File(outFolder)
+                } else {
+                    File(inputDir.parent, "${inputDir.name}_output")
+                }
 
         if (!outputDir.exists()) {
             outputDir.mkdirs()
@@ -77,33 +88,38 @@ class BetterIMG {
 
         if (!pythonExe.exists()) {
             throw IllegalStateException(
-                "Python environment not found at ${pythonExe.absolutePath}. " + "Please run plugin setup first."
+                    "Python environment not found at ${pythonExe.absolutePath}. " +
+                            "Please run plugin setup first."
             )
         }
 
         if (!coreScript.exists()) {
             throw IllegalStateException(
-                "upscaler_core.py not found at ${coreScript.absolutePath}. " + "Please run plugin setup first."
+                    "upscaler_core.py not found at ${coreScript.absolutePath}. " +
+                            "Please run plugin setup first."
             )
         }
 
         // Build the command
-        val command = mutableListOf(
-            pythonExe.absolutePath,
-            coreScript.absolutePath,
-            inputDir.absolutePath,
-            "--output", outputDir.absolutePath,
-            "--width", width.toString(),
-            "--grain", grain.toString(),
-            "--format", outputFormat.name.lowercase()
-        )
+        val command =
+                mutableListOf(
+                        pythonExe.absolutePath,
+                        coreScript.absolutePath,
+                        inputDir.absolutePath,
+                        "--output",
+                        outputDir.absolutePath,
+                        "--width",
+                        width.toString(),
+                        "--grain",
+                        grain.toString(),
+                        "--format",
+                        outputFormat.name.lowercase()
+                )
 
         logger.info("Executing: ${command.joinToString(" ")}")
 
-        val process = ProcessBuilder(command)
-            .directory(File(basePath))
-            .redirectErrorStream(true)
-            .start()
+        val process =
+                ProcessBuilder(command).directory(File(basePath)).redirectErrorStream(true).start()
 
         fun executeProcess(process: Process) {
             val output = StringBuilder()
@@ -131,9 +147,7 @@ class BetterIMG {
                     logger.error(errorMsg)
                     throw RuntimeException(errorMsg)
                 }
-            } catch (
-                e: Exception
-            ) {
+            } catch (e: Exception) {
                 val errorMsg = "Error while waiting for process to finish: ${e.message}"
                 logger.error(errorMsg, e)
                 throw RuntimeException(e)
@@ -143,7 +157,7 @@ class BetterIMG {
         }
 
         context.signals.onSignal { signal ->
-            when(signal) {
+            when (signal) {
                 PluginSignal.PAUSE -> {
                     logger.info("Received pause signal. Killing process...")
                     process.destroyForcibly()
@@ -168,23 +182,27 @@ class BetterIMG {
             logger.info("Starting BetterIMG setup...")
 
             // Extract bundled resources from the JAR to the plugin's managed file area
-            val resourcesToExtract = listOf(
-                "scripts/install.bat" to "install.bat",
-                "scripts/Install-Portable-VapourSynth-R73.ps1" to "Install-Portable-VapourSynth-R73.ps1",
-                "scripts/launchCLI.bat" to "launchCLI.bat",
-                "scripts/launchCLInoUpdate.bat" to "launchCLInoUpdate.bat",
-                "scripts/requirements.txt" to "requirements.txt",
-                "scripts/UPDATE.bat" to "UPDATE.bat",
-                "scripts/upscaler_core.py" to "upscaler_core.py",
-                "scripts/version.json" to "version.json",
-                "scripts/vsmlrt.py" to "vsmlrt.py",
-            )
+            val resourcesToExtract =
+                    listOf(
+                            "scripts/install.bat" to "install.bat",
+                            "scripts/Install-Portable-VapourSynth-R73.ps1" to
+                                    "Install-Portable-VapourSynth-R73.ps1",
+                            "scripts/launchCLI.bat" to "launchCLI.bat",
+                            "scripts/launchCLInoUpdate.bat" to "launchCLInoUpdate.bat",
+                            "scripts/requirements.txt" to "requirements.txt",
+                            "scripts/UPDATE.bat" to "UPDATE.bat",
+                            "scripts/upscaler_core.py" to "upscaler_core.py",
+                            "scripts/version.json" to "version.json",
+                            "scripts/vsmlrt.py" to "vsmlrt.py",
+                    )
 
             for ((jarResource, targetPath) in resourcesToExtract) {
                 logger.info("Extracting resource: $jarResource -> $targetPath")
                 val result = fileSystem.extractResource(jarResource, targetPath)
                 if (result.isFailure) {
-                    logger.warn("Failed to extract $jarResource: ${result.exceptionOrNull()?.message}")
+                    logger.warn(
+                            "Failed to extract $jarResource: ${result.exceptionOrNull()?.message}"
+                    )
                 }
             }
 
@@ -194,27 +212,30 @@ class BetterIMG {
 
             if (installScript.exists()) {
                 logger.info("Running install script: ${installScript.absolutePath}")
-                val process = withContext(Dispatchers.IO) {
-                    ProcessBuilder("cmd", "/c", installScript.absolutePath).directory(File(basePath))
-                        .redirectErrorStream(true).start()
-                }
+                val process =
+                        withContext(Dispatchers.IO) {
+                            ProcessBuilder("cmd", "/c", installScript.absolutePath)
+                                    .directory(File(basePath))
+                                    .redirectErrorStream(true)
+                                    .start()
+                        }
 
                 process.inputStream.bufferedReader().use { reader ->
-                    reader.lines().forEach { line ->
-                        logger.debug(line)
-                    }
+                    reader.lines().forEach { line -> logger.debug(line) }
                 }
 
-                val exitCode = withContext(Dispatchers.IO) {
-                    process.waitFor()
-                }
+                val exitCode = withContext(Dispatchers.IO) { process.waitFor() }
                 if (exitCode != 0) {
                     logger.error("Install script exited with code $exitCode")
-                    return Result.failure(RuntimeException("Install script failed with exit code $exitCode"))
+                    return Result.failure(
+                            RuntimeException("Install script failed with exit code $exitCode")
+                    )
                 }
                 logger.info("Install script completed successfully")
             } else {
-                logger.warn("Install script not found at ${installScript.absolutePath}, skipping installation step")
+                logger.warn(
+                        "Install script not found at ${installScript.absolutePath}, skipping installation step"
+                )
             }
 
             Result.success(Unit)
@@ -256,42 +277,46 @@ class BetterIMG {
             val fileSystem = context.fileSystem
             logger.info("Starting BetterIMG update...")
 
-            // Extract updated resources from the new JAR, overwriting existing files.
-            // NOTE: vapoursynth-portable is NOT managed here - it is handled by install.bat
-            //       and UPDATE.bat (called at runtime from the launch scripts).
-            val resourcesToExtract = listOf(
-                "scripts/install.bat" to "install.bat",
-                "scripts/Install-Portable-VapourSynth-R73.ps1" to "Install-Portable-VapourSynth-R73.ps1",
-                "scripts/launchCLI.bat" to "launchCLI.bat",
-                "scripts/launchCLInoUpdate.bat" to "launchCLInoUpdate.bat",
-                "scripts/requirements.txt" to "requirements.txt",
-                "scripts/UPDATE.bat" to "UPDATE.bat",
-                "scripts/upscaler_core.py" to "upscaler_core.py",
-                "scripts/version.json" to "version.json",
-                "scripts/vsmlrt.py" to "vsmlrt.py",
-            )
+            val resourcesToExtract =
+                    listOf(
+                            "scripts/install.bat" to "install.bat",
+                            "scripts/Install-Portable-VapourSynth-R73.ps1" to
+                                    "Install-Portable-VapourSynth-R73.ps1",
+                            "scripts/launchCLI.bat" to "launchCLI.bat",
+                            "scripts/launchCLInoUpdate.bat" to "launchCLInoUpdate.bat",
+                            "scripts/requirements.txt" to "requirements.txt",
+                            "scripts/UPDATE.bat" to "UPDATE.bat",
+                            "scripts/upscaler_core.py" to "upscaler_core.py",
+                            "scripts/version.json" to "version.json",
+                            "scripts/vsmlrt.py" to "vsmlrt.py",
+                    )
 
+            // Extract new resources from the JAR to the plugin's managed file area, overwriting
+            // existing ones
             for ((jarResource, targetPath) in resourcesToExtract) {
                 logger.info("Extracting resource: $jarResource -> $targetPath")
                 val result = fileSystem.extractResource(jarResource, targetPath)
                 if (result.isFailure) {
-                    logger.warn("Failed to extract $jarResource: ${result.exceptionOrNull()?.message}")
+                    logger.warn(
+                            "Failed to extract $jarResource: ${result.exceptionOrNull()?.message}"
+                    )
                 }
             }
 
-            // Run install.bat to refresh Python dependencies after a JAR update.
-            // install.bat is non-interactive and skips VapourSynth if already installed.
             val basePath = fileSystem.getBasePath()
             val installScript = File(basePath, "install.bat")
 
             if (installScript.exists()) {
-                logger.info("Running install script to refresh dependencies: ${installScript.absolutePath}")
-                val process = withContext(Dispatchers.IO) {
-                    ProcessBuilder("cmd", "/c", installScript.absolutePath)
-                        .directory(File(basePath))
-                        .redirectErrorStream(true)
-                        .start()
-                }
+                logger.info(
+                        "Running install script to refresh dependencies: ${installScript.absolutePath}"
+                )
+                val process =
+                        withContext(Dispatchers.IO) {
+                            ProcessBuilder("cmd", "/c", installScript.absolutePath)
+                                    .directory(File(basePath))
+                                    .redirectErrorStream(true)
+                                    .start()
+                        }
 
                 process.inputStream.bufferedReader().use { reader ->
                     reader.lines().forEach { line -> logger.debug(line) }
@@ -300,11 +325,15 @@ class BetterIMG {
                 val exitCode = withContext(Dispatchers.IO) { process.waitFor() }
                 if (exitCode != 0) {
                     logger.error("Install script exited with code $exitCode during update")
-                    return Result.failure(RuntimeException("Dependency refresh failed with exit code $exitCode"))
+                    return Result.failure(
+                            RuntimeException("Dependency refresh failed with exit code $exitCode")
+                    )
                 }
                 logger.info("Dependencies refreshed successfully")
             } else {
-                logger.warn("install.bat not found at ${installScript.absolutePath}, skipping dependency refresh")
+                logger.warn(
+                        "install.bat not found at ${installScript.absolutePath}, skipping dependency refresh"
+                )
             }
 
             Result.success(Unit)
