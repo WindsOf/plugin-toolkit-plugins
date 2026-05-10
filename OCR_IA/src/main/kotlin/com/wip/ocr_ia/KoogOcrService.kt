@@ -143,7 +143,7 @@ class KoogOcrService(private val context: PluginContext) {
                 results.appendLine(extractedText)
                 results.appendLine()
 
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 logger.error("Error processing '${file.name}': ${e::class.simpleName}: ${e.message}")
                 results.appendLine("=== ${file.name} (ERROR) ===")
                 results.appendLine("${e::class.simpleName}: ${e.message}")
