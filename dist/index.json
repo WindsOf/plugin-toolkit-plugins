@@ -7,7 +7,7 @@
     {
       "name": "BetterIMG",
       "pkg": "com.wip.betterimg",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "fileName": "betterimg.jar",
       "description": "A plugin that processes images using the BetterIMG CLI tool.",
       "minAppVersion": "1.0.0"
@@ -15,7 +15,7 @@
     {
       "name": "OCR IA",
       "pkg": "com.wip.ocr_ia",
-      "version": "2.0.2",
+      "version": "2.0.3",
       "fileName": "OCR_IA.jar",
       "description": "Extract text from images using Google Gemma-4-31b-it via Koog (Kotlin)",
       "minAppVersion": "1.0.0"
@@ -23,7 +23,7 @@
     {
       "name": "Slicer",
       "pkg": "com.wip.operations.slicer",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "fileName": "slicer.jar",
       "description": "A plugin that provides vertical images sliding capabilities for manhwa.",
       "minAppVersion": "1.0.0"
