@@ -18,7 +18,7 @@ import java.awt.image.BufferedImage
 @PluginInfo(
     id = "com.wip.operations.slicer",
     name = "Slicer",
-    version = "1.0.1",
+    version = "1.0.2",
     description = "A plugin that provides vertical images sliding capabilities for manhwa."
 )
 class Slicer {

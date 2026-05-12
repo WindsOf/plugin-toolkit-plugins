@@ -4,6 +4,7 @@ enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 pluginManagement {
     repositories {
+        mavenLocal()
         google {
             mavenContent {
                 includeGroupAndSubgroups("androidx")
@@ -26,6 +27,7 @@ dependencyResolutionManagement {
         }
         fun getEnv(key: String): String? = env.getProperty(key) ?: System.getenv(key)
 
+        mavenLocal()
         google {
             mavenContent {
                 includeGroupAndSubgroups("androidx")

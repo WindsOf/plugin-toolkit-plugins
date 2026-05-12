@@ -4,18 +4,27 @@ import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.annotations.Capability
 import org.wip.plugintoolkit.api.annotations.PluginInfo
 import org.wip.plugintoolkit.api.annotations.CapabilityParam
+import org.wip.plugintoolkit.api.annotations.PluginSetting
 import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
 
+data class OcrIASettings(
+    @PluginSetting(
+        description = "API Key for Google services",
+        required = true,
+        secret = true
+    )
+    val googleApiKey: String = "",
+)
+
 @PluginInfo(
         id = "com.wip.ocr_ia",
         name = "OCR IA",
-        version = "2.0.2",
+        version = "2.0.3",
         description = "Extract text from images using Google Gemma-4-31b-it via Koog (Kotlin)"
 )
-class OCR_IA {
-
+class OCR_IA(val settings: OcrIASettings) {
     @Capability(name = "ocr", description = "Performs OCR on an image or a folder of images using Google Gemma-4-31b-it")
     suspend fun ocr(
             @CapabilityParam(description = "Path to image or folder") input: String,
@@ -23,8 +32,6 @@ class OCR_IA {
             save: Boolean,
             @CapabilityParam(description = "Custom output directory (optional)", defaultValue = "")
             outputDir: String,
-            @CapabilityParam(description = "Google GenAI API Key (optional, can also use API_KEY env var)", defaultValue = "")
-            apiKey: String,
             context: PluginContext
     ): String {
         val logger = context.logger
@@ -33,7 +40,7 @@ class OCR_IA {
 
         return try {
             val service = KoogOcrService(context)
-            service.performOcr(input, save, outputDir, apiKey)
+            service.performOcr(input, save, outputDir, settings.googleApiKey)
         } catch (e: Throwable) {
             val msg = "OCR failed: ${e::class.simpleName}: ${e.message}"
             logger.error(msg)

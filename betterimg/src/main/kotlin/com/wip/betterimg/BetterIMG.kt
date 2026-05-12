@@ -29,7 +29,7 @@ enum class Widths {
 @PluginInfo(
         id = "com.wip.betterimg",
         name = "BetterIMG",
-        version = "2.0.0",
+        version = "2.0.1",
         description = "A plugin that processes images using the BetterIMG CLI tool."
 )
 class BetterIMG {
