@@ -3,30 +3,49 @@
   "url": "https://raw.githubusercontent.com/WindsOf/plugin-toolkit-plugins/master/dist/index.json",
   "schemaVersion": 1,
   "pluginsFolder": "plugins",
+  "flowsFolder": "flows",
   "plugins": [
     {
       "name": "BetterIMG",
       "pkg": "com.wip.betterimg",
-      "version": "2.0.1",
+      "version": "2.0.3",
       "fileName": "betterimg.jar",
       "description": "A plugin that processes images using the BetterIMG CLI tool.",
-      "minAppVersion": "1.0.0"
+      "targetAppVersion": "1.0.0",
+      "hash": "1d2c42a9e09b652ac1b2928f6ceee20bbb01f2cd6aee12a3a93565bba3aa8f0e",
+      "signature": "BGQdJ1o51EUZZksZzLi/djuM6Ma+y1qXujgm4Cf5A1pbmPLDdeF94e5LEYh3Y6RAAgIkOSJLif1Qscf0x94UBj3LcfRivH1w9bkRPxXDp6qcRPJ/00vSu8rXp6WslZczDR/XDrPcz7rrck2Z2Z8n6SE1IjxfQP4ljGxu6j7FAiv/S+MFJhjO0S8C3J71kUNF9aFd9CAD0QGBHSDfqDn7KCEUhEs2LwpOIYx4+zclMG0s3+LNMCE4kcW3RE8OdXO6j2KOKmmQsNjnO6QfqxyljtpyZ1/9fdSq0RrY77UKtkw8epWHbbtHyzew2HQdjy4/JXUp42jKcfKWuwzZgYwaCw=="
     },
     {
       "name": "OCR IA",
       "pkg": "com.wip.ocr_ia",
-      "version": "2.0.3",
+      "version": "2.0.6",
       "fileName": "OCR_IA.jar",
       "description": "Extract text from images using Google Gemma-4-31b-it via Koog (Kotlin)",
-      "minAppVersion": "1.0.0"
+      "targetAppVersion": "1.0.0",
+      "hash": "cf2bc42e1f6f64ad602c37afb88c561c66b4da20ada5e6afe9ad0e7b22cd45b6",
+      "signature": "lXfAJpEq249iyNIMw/ReY8HV4ng/3KWdzTdzdNVrl3EitpOzitFEgsaV3xzbqdvnq1n6jthp0+jIULEfeP7IRQSFyZwYXRHzgjRuvxmT2w2yxuyE88Rf5o6/BU7m64OIyxcOGoYBATtvlYG/Sg68fsAea/BnvIbdlGAe+xVbSrJySt1um/lyroJQtMX4tjm561yX1vmPdOL012PDba8B5ZVe1OqW+moTEX5bK0PzJm1Dkp3bal+vfeq0boqNEQNZ5c5BlodLoQB3WIvql8WGxyaJk9sfdAWcP2WJ13eUVNlJe+BhMTp+LWhbr264lqsN+GDwtfX4NpwWX+Bak8OAuA=="
     },
     {
       "name": "Slicer",
       "pkg": "com.wip.operations.slicer",
-      "version": "1.0.2",
+      "version": "1.0.5",
       "fileName": "slicer.jar",
       "description": "A plugin that provides vertical images sliding capabilities for manhwa.",
-      "minAppVersion": "1.0.0"
+      "targetAppVersion": "1.0.0",
+      "hash": "7f227fe3a882e4d17c884a4feccfb08df77957c3c5ed2c2553e02af0cc8e7815",
+      "signature": "IHzmAFh7KOJgd61ZiohE6zX/hWfAwvRJuiGDkI78wFH5ORkQldxQNYgfr8W0jZ4DzrufiGFD440TCXkkKvW4BIXg/97CE2PN2doRbJeKkrs9vhr/BdUTT9yn5vswtZ7VFJoKCklWzVLxoKTyPV7KO8RX3b98+ASOWdKAz8+umLVq93nNdoB+LxXapozaaWQSyAo5eryt5piiFcxuV2GRfdrfOONrgPzDPm8+50CKVnGWARXyp/CIaJhwEbNcCN9gA/S5PjUflTJmRMwUC7KqkrWSVx+VwXJYSq6CK69xOVbUJnlRJ6JBhIrK/eQLliROreU+dGG4IRO/l8sAgLk0pQ=="
     }
-  ]
+  ],
+  "flows": [
+    {
+      "name": "Test Flow",
+      "fileName": "test_flow.json",
+      "version": "1.0.5",
+      "description": "A simple test flow for repository generation",
+      "hash": "d8eab8bfb25a9ea4004591ac30bd103761a551ff34d682a63d9e97728a4a247e",
+      "signature": "IzqrOduYIiKCVTYVeWKd4renoidWtBfOY451apkMqHy7Wk8GRY7fV/IHibUpj5ggSpNF6g9NCd+ZAbbIbBQtUEHJ7CN/Vj8F2PCh5OnC5OqqdyVZgIn2InbmZrZsql+5BqX654P0cVBLE07P2oaGJ2mxWVpNx5XxUybi9wrpBAldcFHg+oxy5TeyTPU+Kx04p7xGZKeJidukbNqN4WSFsEsAm4a+/nM+607fHspJFWYj9/wzBYQqC5DzrCx8x9ZMA9LnuKBc8PFPOj3R3O+lNEyGgGw+4tMhL6OwsphKB7lFJbhcJCgjPinVugj8GT0LCR2Gpwpg/so4mMj2kaRGEg=="
+    }
+  ],
+  "signPublicKey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtBeECp5qqAsmv+6EqOOrniZet5dSiuaTQqhnNwp2Ij/LxPn6NaHTRegIvKDmbVKZhnVz2nWkAvRNPjieJG+anZPks1RtMIGSnQndA+XbrU6JzDGo8PiQhkPdr+2604NHrTnY0SRgBtSHwOKFcDUOFOyE1ZbDTgXvii5NnfFlvALwrpRj2NsqZwdnX5oAcd4boAHLGU9Z4yWocYHP29/6ACshtgI0ysJNTsDIFnccScr/O+0vXZyHcr3vrC6esogarc/1qRxRQbH0QKwTliqUWb/ax4z0bZxc3X76iF4A88wpKWxCSLlM9jX7uq14PgWTPBi9XpUvasAVh6qzDpoThQIDAQAB",
+  "signAlgorithm": "SHA256"
 }

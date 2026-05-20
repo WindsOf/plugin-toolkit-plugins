@@ -2,18 +2,170 @@ import json
 import shutil
 import subprocess
 import argparse
+import os
+import hashlib
+import base64
+import tempfile
+import re
+import zipfile
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+PRIVATE_KEY_B64 = os.getenv("PLUGIN_PRIVATE_SIGNING_KEY")
+PUBLIC_KEY_B64 = os.getenv("PLUGIN_PUBLIC_SIGNING_KEY")
+
+
+def extract_plugin_info_from_source(plugin_dir):
+    """
+    Scans Kotlin source files in plugin_dir/src to extract plugin ID and version 
+    from the @PluginInfo annotation.
+    """
+    plugin_info_pattern = re.compile(r'@PluginInfo\s*\((.*?)\)', re.DOTALL)
+    id_pattern = re.compile(r'\bid\s*=\s*["\']([^"\']+)["\']')
+    version_pattern = re.compile(r'\bversion\s*=\s*["\']([^"\']+)["\']')
+    name_pattern = re.compile(r'\bname\s*=\s*["\']([^"\']+)["\']')
+    description_pattern = re.compile(r'\bdescription\s*=\s*["\']([^"\']+)["\']')
+
+    src_dir = plugin_dir / "src"
+    if not src_dir.exists():
+        return None
+
+    for path in src_dir.rglob("*.kt"):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception:
+            continue
+
+        match = plugin_info_pattern.search(content)
+        if match:
+            args_str = match.group(1)
+            id_match = id_pattern.search(args_str)
+            version_match = version_pattern.search(args_str)
+            name_match = name_pattern.search(args_str)
+            desc_match = description_pattern.search(args_str)
+
+            if id_match and version_match:
+                return {
+                    "id": id_match.group(1),
+                    "version": version_match.group(1),
+                    "name": name_match.group(1) if name_match else plugin_dir.name,
+                    "description": desc_match.group(1) if desc_match else ""
+                }
+    return None
+
 
 
 def run_command(command, cwd=None):
+    env = os.environ.copy()
+    # Fix for broken OPENSSL_CONF on some systems (like the one we're running on)
+    if "OPENSSL_CONF" in env and not os.path.exists(env["OPENSSL_CONF"]):
+        # print(f"Clearing invalid OPENSSL_CONF: {env['OPENSSL_CONF']}")
+        del env["OPENSSL_CONF"]
+
+    # Try to use jarsigner if it's not in path but we know common JDK locations
+    if command[0] == "jarsigner":
+        # Check if jarsigner is in PATH
+        if shutil.which("jarsigner") is None:
+            # Try common JDK locations
+            common_paths = [
+                r"C:\Program Files\Java\jdk-26\bin\jarsigner.exe",
+                r"C:\Program Files\Java\jdk-24\bin\jarsigner.exe",
+                r"C:\Program Files\Android\Android Studio\jbr\bin\jarsigner.exe"
+            ]
+            for p in common_paths:
+                if Path(p).exists():
+                    command[0] = p
+                    break
+
     print(f"Running: {' '.join(command)}")
     result = subprocess.run(
-        command, cwd=cwd, shell=True, capture_output=True, text=True
+        command, cwd=cwd, shell=True, capture_output=True, text=True, env=env
     )
     if result.returncode != 0:
         print(f"Error: \n{result.stderr}")
         return False
     return True
+
+
+def sign_jar(jar_path, private_key_b64):
+    if not private_key_b64:
+        print("Warning: PLUGIN_PRIVATE_SIGNING_KEY not set. JAR will not be signed.")
+        return False
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        priv_key_file = tmp_path / "private.pem"
+        cert_file = tmp_path / "cert.pem"
+        p12_file = tmp_path / "keystore.p12"
+        
+        # 1. Prepare Private Key
+        priv_key_pem = f"-----BEGIN PRIVATE KEY-----\n{private_key_b64}\n-----END PRIVATE KEY-----"
+        priv_key_file.write_text(priv_key_pem)
+
+        # 1.1 Create minimal openssl.cnf to avoid errors on some systems
+        config_file = tmp_path / "openssl.cnf"
+        config_content = "[req]\ndistinguished_name = req_distinguished_name\n[req_distinguished_name]\n"
+        config_file.write_text(config_content)
+        
+        # Set environment variable for this process
+        os.environ["OPENSSL_CONF"] = str(config_file)
+
+        # 2. Create self-signed certificate for jarsigner
+        subj = "/CN=Plugin Toolkit"
+        cmd = ["openssl", "req", "-new", "-x509", "-key", str(priv_key_file), "-out", str(cert_file), "-days", "365", "-subj", subj, "-config", str(config_file)]
+        if not run_command(cmd):
+            return False
+
+        # 3. Create PKCS12 keystore
+        cmd = ["openssl", "pkcs12", "-export", "-in", str(cert_file), "-inkey", str(priv_key_file), "-out", str(p12_file), "-name", "plugin-key", "-passout", "pass:password"]
+        if not run_command(cmd):
+            return False
+
+        # 4. Sign the JAR using jarsigner
+        cmd = ["jarsigner", "-keystore", str(p12_file), "-storetype", "PKCS12", "-storepass", "password", str(jar_path), "plugin-key"]
+        if not run_command(cmd):
+            return False
+            
+        print(f"Successfully signed {jar_path.name}")
+        return True
+
+
+def get_detached_signature(jar_path, private_key_b64):
+    if not private_key_b64:
+        return None, None
+
+    # 1. Calculate SHA-256 hash of the JAR
+    sha256_hash = hashlib.sha256()
+    with open(jar_path, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    
+    hash_str = sha256_hash.hexdigest()
+
+    # 2. Sign the hash string using RSA-SHA256
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        priv_key_file = tmp_path / "private.pem"
+        hash_file = tmp_path / "hash.txt"
+        sig_file = tmp_path / "sig.bin"
+
+        priv_key_pem = f"-----BEGIN PRIVATE KEY-----\n{private_key_b64}\n-----END PRIVATE KEY-----"
+        priv_key_file.write_text(priv_key_pem)
+        hash_file.write_text(hash_str)
+
+        # Use openssl to sign the hash file
+        cmd = ["openssl", "dgst", "-sha256", "-sign", str(priv_key_file), "-out", str(sig_file), str(hash_file)]
+        if not run_command(cmd):
+            return hash_str, None
+        
+        with open(sig_file, "rb") as f:
+            signature = base64.b64encode(f.read()).decode("utf-8")
+            
+        return hash_str, signature
 
 
 def find_assets(plugin_path):
@@ -48,16 +200,30 @@ def find_assets(plugin_path):
     return assets
 
 
-def generate_repo(name, url, output_dir):
+def generate_repo(name, url, output_dir, clean=False):
     root_path = Path(".").resolve()
     dist_path = root_path / output_dir
     plugins_dist_path = dist_path / "plugins"
+    flows_dist_path = dist_path / "flows"
 
-    # Ensure dist folder exists (clean rebuild)
-    if dist_path.exists():
-        shutil.rmtree(dist_path)
-    dist_path.mkdir(parents=True)
-    plugins_dist_path.mkdir()
+    # Load previous index.json if it exists and clean is not requested
+    previous_plugins = {}
+    previous_index_path = dist_path / "index.json"
+    if not clean and previous_index_path.exists():
+        try:
+            with open(previous_index_path, "r", encoding="utf-8") as f:
+                previous_index = json.load(f)
+                if "plugins" in previous_index:
+                    for p in previous_index["plugins"]:
+                        if "pkg" in p:
+                            previous_plugins[p["pkg"]] = p
+            print(f"Loaded {len(previous_plugins)} plugins from previous index.json.")
+        except Exception as e:
+            print(f"Warning: Failed to parse previous index.json: {e}")
+
+    # Ensure dist folder and plugins folder exist
+    dist_path.mkdir(parents=True, exist_ok=True)
+    plugins_dist_path.mkdir(exist_ok=True)
 
     repo_plugins = []
 
@@ -72,8 +238,47 @@ def generate_repo(name, url, output_dir):
         and d.name not in ("build", "dist", "gradle")
     ]
 
-    # Build plugins (always run Gradle from the root so settings.gradle.kts is found)
     for plugin_dir in plugin_dirs:
+        info = extract_plugin_info_from_source(plugin_dir)
+        should_build = True
+        pkg = None
+        version = None
+        
+        if info:
+            pkg = info["id"]
+            version = info["version"]
+            
+            if pkg in previous_plugins:
+                prev_p = previous_plugins[pkg]
+                if prev_p.get("version") == version:
+                    jar_name = prev_p.get("fileName")
+                    if jar_name:
+                        target_jar_path = plugins_dist_path / pkg / jar_name
+                        manifest_path = plugins_dist_path / pkg / "manifest.json"
+                        # Verify that the target JAR and manifest actually exist
+                        if target_jar_path.exists() and manifest_path.exists():
+                            print(f"No version bump for {plugin_dir.name} ({pkg} v{version}). Reusing existing build.")
+                            should_build = False
+
+        if not should_build:
+            # Reuse the entry from previous plugins
+            prev_p = previous_plugins[pkg]
+            plugin_entry = {
+                "name": prev_p.get("name", plugin_dir.name),
+                "pkg": pkg,
+                "version": version,
+                "fileName": prev_p.get("fileName"),
+                "description": prev_p.get("description", ""),
+                "targetAppVersion": prev_p.get("targetAppVersion", "1.0.0")
+            }
+            if "hash" in prev_p:
+                plugin_entry["hash"] = prev_p["hash"]
+            if "signature" in prev_p:
+                plugin_entry["signature"] = prev_p["signature"]
+            repo_plugins.append(plugin_entry)
+            print(f"  -> Reused {plugin_entry['name']} v{version} ({pkg})")
+            continue
+
         print(f"Building {plugin_dir.name}...")
         if not run_command(
             ["gradlew.bat", f":{plugin_dir.name}:jar"], cwd=str(root_path)
@@ -103,6 +308,7 @@ def generate_repo(name, url, output_dir):
         p_name = plugin_meta.get("name")
         version = plugin_meta.get("version")
         description = plugin_meta.get("description", "")
+        target_app_version = plugin_meta.get("targetAppVersion", "1.0.0")
 
         if not pkg or not version:
             print(
@@ -122,10 +328,19 @@ def generate_repo(name, url, output_dir):
 
         # Create plugin folder in dist
         pkg_dist_path = plugins_dist_path / pkg
-        pkg_dist_path.mkdir(exist_ok=True)
+        if pkg_dist_path.exists():
+            shutil.rmtree(pkg_dist_path)
+        pkg_dist_path.mkdir(parents=True)
 
         # Copy JAR
-        shutil.copy2(source_jar, pkg_dist_path / jar_name)
+        target_jar_path = pkg_dist_path / jar_name
+        shutil.copy2(source_jar, target_jar_path)
+
+        # Sign the JAR in the dist folder
+        sign_jar(target_jar_path, PRIVATE_KEY_B64)
+
+        # Get detached signature and hash
+        jar_hash, jar_sig = get_detached_signature(target_jar_path, PRIVATE_KEY_B64)
 
         # Copy assets
         if "changelog" in assets:
@@ -136,18 +351,99 @@ def generate_repo(name, url, output_dir):
         # Copy manifest
         shutil.copy2(manifest_path, pkg_dist_path / "manifest.json")
 
-        repo_plugins.append(
-            {
-                "name": p_name or plugin_dir.name,
-                "pkg": pkg,
-                "version": version,
-                "fileName": jar_name,
-                "description": description,
-                "minAppVersion": "1.0.0",
-            }
-        )
+        plugin_entry = {
+            "name": p_name or plugin_dir.name,
+            "pkg": pkg,
+            "version": version,
+            "fileName": jar_name,
+            "description": description,
+            "targetAppVersion": target_app_version,
+        }
+
+        if jar_hash:
+            plugin_entry["hash"] = jar_hash
+        if jar_sig:
+            plugin_entry["signature"] = jar_sig
+
+        repo_plugins.append(plugin_entry)
 
         print(f"  -> Added {p_name} v{version} ({pkg})")
+
+    # Clean up stale plugins in dist
+    active_pkgs = {p["pkg"] for p in repo_plugins}
+    if plugins_dist_path.exists():
+        for d in plugins_dist_path.iterdir():
+            if d.is_dir() and d.name not in active_pkgs:
+                print(f"Removing stale plugin directory: {d.name}")
+                shutil.rmtree(d)
+
+    # Process Flows
+    repo_flows = []
+    source_flows_path = root_path / "flows"
+    if source_flows_path.exists() and source_flows_path.is_dir():
+        flows_dist_path.mkdir(exist_ok=True)
+        for flow_file in source_flows_path.iterdir():
+            if flow_file.is_file() and flow_file.suffix.lower() in ('.json', '.zip'):
+                filename = flow_file.name
+                target_flow_path = flows_dist_path / filename
+
+                # Copy flow file to dist
+                shutil.copy2(flow_file, target_flow_path)
+
+                # Calculate hash and signature of flow file
+                flow_hash, flow_sig = get_detached_signature(target_flow_path, PRIVATE_KEY_B64)
+
+                # Extract metadata
+                flow_name = flow_file.stem
+                flow_version = "1.0.0"
+                flow_desc = ""
+
+                if flow_file.suffix.lower() == '.json':
+                    try:
+                        with open(flow_file, 'r', encoding='utf-8') as f:
+                            flow_data = json.load(f)
+                            flow_name = flow_data.get('name', flow_name)
+                            flow_version = flow_data.get('version', flow_version)
+                            flow_desc = flow_data.get('description', flow_desc)
+                    except Exception as e:
+                        print(f"Warning: Failed to parse flow JSON metadata from {filename}: {e}")
+                elif flow_file.suffix.lower() == '.zip':
+                    try:
+                        with zipfile.ZipFile(flow_file) as z:
+                            json_files = [f for f in z.namelist() if f.endswith('.json')]
+                            if json_files:
+                                with z.open(json_files[0]) as jf:
+                                    flow_data = json.loads(jf.read().decode('utf-8'))
+                                    flow_name = flow_data.get('name', flow_name)
+                                    flow_version = flow_data.get('version', flow_version)
+                                    flow_desc = flow_data.get('description', flow_desc)
+                    except Exception as e:
+                        print(f"Warning: Failed to parse flow ZIP metadata from {filename}: {e}")
+
+                flow_entry = {
+                    "name": flow_name,
+                    "fileName": filename,
+                    "version": flow_version,
+                    "description": flow_desc
+                }
+                if flow_hash:
+                    flow_entry["hash"] = flow_hash
+                if flow_sig:
+                    flow_entry["signature"] = flow_sig
+
+                repo_flows.append(flow_entry)
+                print(f"  -> Added flow {flow_name} v{flow_version} ({filename})")
+
+    # Clean up stale flow files in dist
+    active_flows = {f["fileName"] for f in repo_flows}
+    if flows_dist_path.exists():
+        for f in flows_dist_path.iterdir():
+            if f.is_file() and f.name not in active_flows:
+                print(f"Removing stale flow file: {f.name}")
+                try:
+                    os.remove(f)
+                except Exception as e:
+                    print(f"Warning: Could not remove stale flow file {f.name}: {e}")
 
     # Generate index.json
     index = {
@@ -155,14 +451,21 @@ def generate_repo(name, url, output_dir):
         "url": f"{url.rstrip('/')}/index.json",
         "schemaVersion": 1,
         "pluginsFolder": "plugins",
+        "flowsFolder": "flows",
         "plugins": repo_plugins,
+        "flows": repo_flows,
     }
+
+    if PUBLIC_KEY_B64:
+        index["signPublicKey"] = PUBLIC_KEY_B64
+        index["signAlgorithm"] = "SHA256"
 
     with open(dist_path / "index.json", "w") as f:
         json.dump(index, f, indent=2)
 
     print(f"\nRepository generated successfully in '{output_dir}/'")
     print(f"Total plugins: {len(repo_plugins)}")
+    print(f"Total flows: {len(repo_flows)}")
 
 
 if __name__ == "__main__":
@@ -170,6 +473,8 @@ if __name__ == "__main__":
     parser.add_argument("--name", help="Repository name")
     parser.add_argument("--url", help="Base URL of the repository")
     parser.add_argument("--out", help="Output directory")
+    parser.add_argument("--clean", action="store_true", help="Force clean build (recompile all plugins)")
+    parser.add_argument("--force", action="store_true", help="Force regenerate everything (recompile all plugins)")
 
     args = parser.parse_args()
 
@@ -194,4 +499,6 @@ if __name__ == "__main__":
     if args.out:
         config["out"] = args.out
 
-    generate_repo(config["name"], config["url"], config["out"])
+    clean_build = args.clean or args.force or False
+
+    generate_repo(config["name"], config["url"], config["out"], clean=clean_build)

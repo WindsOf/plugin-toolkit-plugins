@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.ocr_ia",
         "name": "OCR IA",
-        "version": "2.0.3",
+        "version": "2.0.6",
         "description": "Extract text from images using Google Gemma-4-31b-it via Koog (Kotlin)"
     },
     "requirements": {
@@ -41,7 +41,17 @@
             "returnType": {
                 "type": "primitive",
                 "primitiveType": "STRING"
-            }
+            },
+            "outputs": [
+                {
+                    "name": "result",
+                    "description": "",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                }
+            ]
         }
     ],
     "settings": {
@@ -57,6 +67,22 @@
     },
     "changelog": {
         "releases": [
+            {
+                "version": "2.0.6",
+                "date": "2026-05-20",
+                "categories": {
+                    "Added": []
+                }
+            },
+            {
+                "version": "2.0.5",
+                "date": "2026-05-12",
+                "categories": {
+                    "Added": [
+                        "Support for toolkit 1.5.0"
+                    ]
+                }
+            },
             {
                 "version": "2.0.3",
                 "date": "2026-05-12",

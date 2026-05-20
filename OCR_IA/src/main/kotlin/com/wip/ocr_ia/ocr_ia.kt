@@ -21,7 +21,7 @@ data class OcrIASettings(
 @PluginInfo(
         id = "com.wip.ocr_ia",
         name = "OCR IA",
-        version = "2.0.3",
+        version = "2.0.6",
         description = "Extract text from images using Google Gemma-4-31b-it via Koog (Kotlin)"
 )
 class OCR_IA(val settings: OcrIASettings) {

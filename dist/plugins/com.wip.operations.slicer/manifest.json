@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.operations.slicer",
         "name": "Slicer",
-        "version": "1.0.2",
+        "version": "1.0.5",
         "description": "A plugin that provides vertical images sliding capabilities for manhwa."
     },
     "requirements": {
@@ -66,7 +66,17 @@
             "returnType": {
                 "type": "primitive",
                 "primitiveType": "STRING"
-            }
+            },
+            "outputs": [
+                {
+                    "name": "result",
+                    "description": "",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                }
+            ]
         },
         {
             "name": "Max distance for cuts",
@@ -91,7 +101,17 @@
             "returnType": {
                 "type": "primitive",
                 "primitiveType": "INT"
-            }
+            },
+            "outputs": [
+                {
+                    "name": "result",
+                    "description": "",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "INT"
+                    }
+                }
+            ]
         }
     ]
 }
