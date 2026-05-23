@@ -7,6 +7,7 @@ class PsdWriter(initialCapacity: Int = 4096) {
     var bytes = ByteArray(initialCapacity)
     var offset = 0
     var large = false
+    private var layerIdCounter = 0
 
     private fun ensureSize(size: Int) {
         if (size > bytes.size) {
@@ -193,6 +194,8 @@ class PsdWriter(initialCapacity: Int = 4096) {
         require(bitsPerChannel == 8) { "bitsPerChannel other than 8 are not supported for writing" }
 
         val globalAlpha = psd.imageData != null && PsdHelpers.hasAlpha(psd.imageData!!)
+        
+        layerIdCounter = maxLayerId(psd.children)
 
         val layers = mutableListOf<Layer>()
         addChildren(layers, psd.children)
@@ -224,8 +227,9 @@ class PsdWriter(initialCapacity: Int = 4096) {
         val resources = psd.imageResources ?: ImageResources()
         resources.layersGroup = layers.map { it.linkGroup ?: 0 }.toIntArray()
         resources.layerGroupsEnabledId = layers.map { if (it.linkGroupEnabled == false) 0 else 1 }.toIntArray()
+        if (resources.resolutionInfo == null) resources.resolutionInfo = ResolutionInfo()
 
-        writeSection(1) {
+        writeSection(1, writeTotalLength = true) {
             // Write layer groups resource
             resources.layersGroup?.let { groups ->
                 writeSignature("8BIM")
@@ -238,16 +242,30 @@ class PsdWriter(initialCapacity: Int = 4096) {
             // Write layer groups enabled status
             resources.layerGroupsEnabledId?.let { enabled ->
                 writeSignature("8BIM")
-                writeUint16(1037)
+                writeUint16(1072)
                 writePascalString("", 2)
                 writeSection(2) {
                     for (e in enabled) writeUint8(e)
                 }
             }
+            // Write resolution info
+            resources.resolutionInfo?.let { info ->
+                writeSignature("8BIM")
+                writeUint16(1005)
+                writePascalString("", 2)
+                writeSection(2) {
+                    writeFixedPoint32(info.horizontalResolution)
+                    writeUint16(if (info.horizontalResolutionUnit == "PPI") 1 else 2)
+                    writeUint16(if (info.widthUnit == "Inches") 1 else 2) // simplification
+                    writeFixedPoint32(info.verticalResolution)
+                    writeUint16(if (info.verticalResolutionUnit == "PPI") 1 else 2)
+                    writeUint16(if (info.heightUnit == "Inches") 1 else 2) // simplification
+                }
+            }
         }
 
         // Layer and Mask Info
-        writeSection(2, largeSection = large) {
+        writeSection(2, writeTotalLength = false, largeSection = large) {
             writeLayerInfo(layers, globalAlpha, compress)
             writeZeros(4) // Empty global layer mask info
         }
@@ -257,9 +275,22 @@ class PsdWriter(initialCapacity: Int = 4096) {
             if (it % 4 == 3) 255.toByte() else 255.toByte()
         })
 
+        // Photoshop doesn't support ZIP compression for composite image data
         writeUint16(Compression.RleCompressed.value)
+
         val channelsToSave = if (globalAlpha) intArrayOf(0, 1, 2, 3) else intArrayOf(0, 1, 2)
         writeBytes(PsdHelpers.writeDataRLE(compositeData, channelsToSave, large))
+    }
+
+    private fun maxLayerId(children: List<Layer>?): Int {
+        if (children == null) return 0
+        var max = 0
+        for (c in children) {
+            c.id?.let { if (it > max) max = it }
+            val childMax = maxLayerId(c.children)
+            if (childMax > max) max = childMax
+        }
+        return max
     }
 
     private fun addChildren(layers: MutableList<Layer>, children: List<Layer>?) {
@@ -277,6 +308,8 @@ class PsdWriter(initialCapacity: Int = 4096) {
                 // Folder start divider
                 layers.add(
                     c.copy(
+                        id = c.id ?: ++layerIdCounter,
+                        imageData = null, // Folders shouldn't have pixel data
                         sectionDivider = SectionDivider(
                             if (c.opened) SectionDividerType.OpenFolder else SectionDividerType.ClosedFolder,
                             "pass"
@@ -284,7 +317,7 @@ class PsdWriter(initialCapacity: Int = 4096) {
                     )
                 )
             } else {
-                layers.add(c)
+                layers.add(c.copy(id = c.id ?: ++layerIdCounter))
             }
         }
     }
@@ -293,7 +326,7 @@ class PsdWriter(initialCapacity: Int = 4096) {
         writeSection(4, writeTotalLength = true, largeSection = large) {
             writeInt16(if (globalAlpha) -layers.size else layers.size)
 
-            val layersChannelsData = layers.map { l -> getLayerChannelsData(l, compress) }
+            val layersChannelsData = layers.mapIndexed { i, l -> getLayerChannelsData(l, compress, i == 0) }
 
             // Layer Records
             for (ld in layersChannelsData) {
@@ -384,64 +417,74 @@ class PsdWriter(initialCapacity: Int = 4096) {
                     writeBytes(r.sourceRange)
                     writeBytes(r.destRange)
                 }
-            } else {
-                writeZeros(8) // composite black source and dest
             }
         }
     }
 
-    private fun writeAdditionalLayerInfo(layer: Layer) {
-        val text = layer.text
-        if (text != null) {
-            writeSignature(if (large) "8B64" else "8BIM")
-            writeSignature("TySh")
-            writeSection(4, writeTotalLength = true, largeSection = large) {
-                writeInt16(1) // version
-                val transform = text.transform ?: doubleArrayOf(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
-                for (t in transform) writeFloat64(t)
+    private fun writeAdditionalLayerInfo(target: Any) {
+        val largeKeys = listOf("LMsk", "Lr16", "Lr32", "Layr", "Mt16", "Mt32", "Mtrn", "Alph", "FMsk", "lnk2", "FEid", "FXid", "PxSD", "cinf")
+        
+        if (target is Layer) {
+            val text = target.text
+            if (text != null) {
+                val key = "TySh"
+                val isLarge = large && key in largeKeys
+                writeSignature(if (isLarge) "8B64" else "8BIM")
+                writeSignature(key)
+                writeSection(2, writeTotalLength = true, largeSection = isLarge) {
+                    writeInt16(1) // version
+                    val transform = text.transform ?: doubleArrayOf(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+                    for (t in transform) writeFloat64(t)
 
-                writeInt16(50) // text version
-                val textDesc = buildTextDescriptor(text)
-                PsdDescriptor.writeVersionAndDescriptor(this, "", "TxLr", textDesc)
+                    writeInt16(50) // text version
+                    val textDesc = buildTextDescriptor(text)
+                    PsdDescriptor.writeVersionAndDescriptor(this, "", "TxLr", textDesc)
 
-                writeInt16(1) // warp version
-                val warpDesc = buildWarpDescriptor(text.warp)
-                PsdDescriptor.writeVersionAndDescriptor(this, "", "warp", warpDesc)
+                    writeInt16(1) // warp version
+                    val warpDesc = buildWarpDescriptor(text.warp)
+                    PsdDescriptor.writeVersionAndDescriptor(this, "", "warp", warpDesc)
 
-                writeFloat32(text.left ?: 0f)
-                writeFloat32(text.top ?: 0f)
-                writeFloat32(text.right ?: 0f)
-                writeFloat32(text.bottom ?: 0f)
+                    writeFloat32(text.left ?: 0f)
+                    writeFloat32(text.top ?: 0f)
+                    writeFloat32(text.right ?: 0f)
+                    writeFloat32(text.bottom ?: 0f)
+                }
             }
-        }
 
-        layer.id?.let { id ->
-            writeSignature("8BIM")
-            writeSignature("lyid")
-            writeSection(4, writeTotalLength = true, largeSection = false) {
-                writeUint32(id.toLong())
+            target.id?.let { id ->
+                val key = "lyid"
+                val isLarge = large && key in largeKeys
+                writeSignature(if (isLarge) "8B64" else "8BIM")
+                writeSignature(key)
+                writeSection(2, writeTotalLength = true, largeSection = isLarge) {
+                    writeUint32(id.toLong())
+                }
             }
-        }
 
-        layer.name?.let { name ->
-            writeSignature("8BIM")
-            writeSignature("luni")
-            writeSection(4, writeTotalLength = true, largeSection = false) {
-                writeInt32(name.length)
-                writeUnicodeStringWithoutLength(name)
+            target.name?.let { name ->
+                val key = "luni"
+                val isLarge = large && key in largeKeys
+                writeSignature(if (isLarge) "8B64" else "8BIM")
+                writeSignature(key)
+                writeSection(4, writeTotalLength = true, largeSection = isLarge) {
+                    writeInt32(name.length)
+                    writeUnicodeStringWithoutLength(name)
+                }
             }
-        }
 
-        layer.sectionDivider?.let { sd ->
-            writeSignature("8BIM")
-            writeSignature("lsct")
-            writeSection(4, writeTotalLength = true, largeSection = false) {
-                writeInt32(sd.type.value)
-                sd.key?.let { k ->
-                    writeSignature("8BIM")
-                    writeSignature(k)
-                    sd.subType?.let { st ->
-                        writeInt32(st)
+            target.sectionDivider?.let { sd ->
+                val key = "lsct"
+                val isLarge = large && key in largeKeys
+                writeSignature(if (isLarge) "8B64" else "8BIM")
+                writeSignature(key)
+                writeSection(2, writeTotalLength = true, largeSection = isLarge) {
+                    writeInt32(sd.type.value)
+                    sd.key?.let { k ->
+                        writeSignature("8BIM")
+                        writeSignature(k)
+                        sd.subType?.let { st ->
+                            writeInt32(st)
+                        }
                     }
                 }
             }
@@ -526,29 +569,41 @@ class PsdWriter(initialCapacity: Int = 4096) {
     data class ChannelData(val id: ChannelID, val compression: Compression, val buffer: ByteArray, val length: Int)
     data class LayerChannelData(val layer: Layer, val top: Int, val left: Int, val bottom: Int, val right: Int, val channels: List<ChannelData>)
 
-    private fun getLayerChannelsData(layer: Layer, compress: Boolean): LayerChannelData {
-        val top = layer.top
-        val left = layer.left
-        val bottom = layer.bottom
-        val right = layer.right
+    private fun getLayerChannelsData(layer: Layer, compress: Boolean, isBackground: Boolean): LayerChannelData {
+        var top = layer.top
+        var left = layer.left
+        var bottom = layer.bottom
+        var right = layer.right
+
+        val channels = mutableListOf<ChannelData>()
+        val imageData = layer.imageData
+
+        if (imageData == null || (right - left) <= 0 || (bottom - top) <= 0) {
+            // For text layers or empty layers, we must set bounds to 0x0
+            // so Photoshop doesn't expect pixel data.
+            right = left
+            bottom = top
+            
+            // Photoshop still expects the basic channels (0, 1, 2) and Alpha (-1)
+            val emptyChannels = mutableListOf(
+                ChannelData(ChannelID.Color0, Compression.RawData, ByteArray(0), 2),
+                ChannelData(ChannelID.Color1, Compression.RawData, ByteArray(0), 2),
+                ChannelData(ChannelID.Color2, Compression.RawData, ByteArray(0), 2)
+            )
+            if (!isBackground) {
+                emptyChannels.add(0, ChannelData(ChannelID.Transparency, Compression.RawData, ByteArray(0), 2))
+            }
+            return LayerChannelData(layer, top, left, bottom, right, emptyChannels)
+        }
+
         val width = right - left
         val height = bottom - top
 
-        val channels = mutableListOf<ChannelData>()
-        val emptyChannels = listOf(
-            ChannelData(ChannelID.Transparency, Compression.RawData, ByteArray(0), 2),
-            ChannelData(ChannelID.Color0, Compression.RawData, ByteArray(0), 2),
-            ChannelData(ChannelID.Color1, Compression.RawData, ByteArray(0), 2),
-            ChannelData(ChannelID.Color2, Compression.RawData, ByteArray(0), 2)
-        )
-
-        val imageData = layer.imageData
-        if (imageData == null || width <= 0 || height <= 0) {
-            return LayerChannelData(layer, top, left, top, left, emptyChannels)
-        }
-
         // Channels to save: Transparency, Red, Green, Blue
-        val channelIDs = listOf(ChannelID.Transparency, ChannelID.Color0, ChannelID.Color1, ChannelID.Color2)
+        val channelIDs = mutableListOf(ChannelID.Color0, ChannelID.Color1, ChannelID.Color2)
+        if (!isBackground || PsdHelpers.hasAlpha(imageData)) {
+            channelIDs.add(0, ChannelID.Transparency)
+        }
 
         for (cid in channelIDs) {
             val offsetInPixelData = PsdHelpers.offsetForChannel(cid, false)

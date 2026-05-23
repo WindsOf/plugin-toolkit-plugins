@@ -297,13 +297,9 @@ class PSDBuilderPlugin {
             val boxWidth = t.right - t.left
             val boxHeight = t.bottom - t.top
             val fontSize = t.fontSize ?: 24
-            val fontName = if (t.fontName == "ArialMT" || t.fontName == "Anime ACE 2.0") "Anime Ace 2.0 BB" else (t.fontName ?: "Anime Ace 2.0 BB")
+            val fontName = if (t.fontName == "ArialMT" || t.fontName == "Anime ACE 2.0" || t.fontName == "Anime Ace 2.0 BB") "AnimeAce2.0BB" else (t.fontName ?: "AnimeAce2.0BB")
 
             val wrappedText = wrapText(t.text, boxWidth, fontSize)
-            val lines = wrappedText.split('\r')
-            val textHeight = lines.size * fontSize * 1.2
-            var verticalOffset = (boxHeight - textHeight) / 2
-            if (verticalOffset < 0) verticalOffset = 0.0
 
             val hasStroke = t.strokeSize != null && t.strokeSize > 0
             val textLayer = com.wip.kpsd.Layer(
@@ -314,7 +310,9 @@ class PSDBuilderPlugin {
                 right = t.right,
                 text = com.wip.kpsd.LayerTextData(
                     text = wrappedText,
-                    transform = doubleArrayOf(1.0, 0.0, 0.0, 1.0, t.left.toDouble(), t.top.toDouble() + verticalOffset),
+                    shapeType = "box",
+                    boxBounds = floatArrayOf(0f, 0f, boxHeight.toFloat(), boxWidth.toFloat()),
+                    transform = doubleArrayOf(1.0, 0.0, 0.0, 1.0, t.left.toDouble(), t.top.toDouble()),
                     left = 0f,
                     top = 0f,
                     right = boxWidth.toFloat(),
@@ -328,6 +326,9 @@ class PSDBuilderPlugin {
                         outlineWidth = if (hasStroke) t.strokeSize!!.toFloat() else null,
                         fillFlag = if (hasStroke) true else null,
                         fillFirst = if (hasStroke) true else null
+                    ),
+                    paragraphStyle = com.wip.kpsd.ParagraphStyle(
+                        justification = "center"
                     )
                 )
             )
@@ -337,11 +338,12 @@ class PSDBuilderPlugin {
         val psd = com.wip.kpsd.Psd(
             width = width,
             height = height,
-            children = layers
+            children = layers,
+            imageData = bgPixelData
         )
 
         val psdBytes = withContext(Dispatchers.Default) {
-            com.wip.kpsd.KPsd.write(psd, compress = true)
+            com.wip.kpsd.KPsd.write(psd, compress = false)
         }
 
         withContext(Dispatchers.IO) {

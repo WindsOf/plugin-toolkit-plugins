@@ -213,7 +213,7 @@ class PsdReader(val bytes: ByteArray) {
                         val count = innerLeft() / 2
                         val groups = IntArray(count) { readUint16() }
                         resources.layersGroup = groups
-                    } else if (id == 1037) { // Group enabled status
+                    } else if (id == 1072) { // Group enabled status
                         val count = innerLeft()
                         val enabled = IntArray(count) { readUint8() }
                         resources.layerGroupsEnabledId = enabled
@@ -505,7 +505,7 @@ class PsdReader(val bytes: ByteArray) {
                 val rleReader = PsdReader(data)
                 val lengthsCount = height
                 val lengths = IntArray(lengthsCount) {
-                    if (rleReader.large) rleReader.readInt32() else rleReader.readUint16()
+                    if (large) rleReader.readInt32() else rleReader.readUint16()
                 }
                 PsdHelpers.readDataRLE(lengths, data, rleReader.offset, pixelData, width, height, step, intArrayOf(offsetInPixelData))
             } else if (compression == Compression.ZipWithoutPrediction) {

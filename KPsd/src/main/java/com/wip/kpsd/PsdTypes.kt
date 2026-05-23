@@ -273,8 +273,17 @@ data class GlobalLayerMaskInfo(
 
 data class ImageResources(
     var layersGroup: IntArray? = null,
-    var layerGroupsEnabledId: IntArray? = null
-    // Add other fields as needed
+    var layerGroupsEnabledId: IntArray? = null,
+    var resolutionInfo: ResolutionInfo? = null
+)
+
+data class ResolutionInfo(
+    var horizontalResolution: Float = 72f,
+    var horizontalResolutionUnit: String = "PPI",
+    var widthUnit: String = "Inches",
+    var verticalResolution: Float = 72f,
+    var verticalResolutionUnit: String = "PPI",
+    var heightUnit: String = "Inches"
 )
 
 data class BlendingRanges(

@@ -516,5 +516,57 @@ class KPsdTest {
         assertEquals(1, parsed.children.size)
         assertEquals("こんにちは layer", parsed.children[0].name)
     }
+
+    @Test
+    fun testSectionPadding() {
+        val width = 50
+        val height = 50
+
+        // Create a simple PSD with one layer
+        val layer = Layer(
+            name = "Test",
+            top = 0, left = 0, bottom = height, right = width,
+            imageData = PixelData(width, height, ByteArray(width * height * 4) { 128.toByte() })
+        )
+        val originalPsd = Psd(width = width, height = height, children = mutableListOf(layer))
+
+        val bytes = KPsd.write(originalPsd, compress = false)
+
+        // Find the start of image resources section
+        // 8BPS (4) + Version (2) + Zeros (6) + Channels (2) + Height (4) + Width (4) + BPC (2) + Mode (2) = 26
+        // Color mode data section: Length (4) = 30
+        val colorModeDataLength = ((bytes[26].toInt() and 0xff) shl 24) or
+                ((bytes[27].toInt() and 0xff) shl 16) or
+                ((bytes[28].toInt() and 0xff) shl 8) or
+                (bytes[29].toInt() and 0xff)
+        val imageResourcesStart = 30 + colorModeDataLength
+
+        // Image resources section: Length (4)
+        val imageResourcesLength = ((bytes[imageResourcesStart].toInt() and 0xff) shl 24) or
+                ((bytes[imageResourcesStart + 1].toInt() and 0xff) shl 16) or
+                ((bytes[imageResourcesStart + 2].toInt() and 0xff) shl 8) or
+                (bytes[imageResourcesStart + 3].toInt() and 0xff)
+
+        // Section length itself should be a multiple of 4 (due to writeSection(4, writeTotalLength = true))
+        assertEquals(0, imageResourcesLength % 4, "Image Resources section length should be multiple of 4")
+
+        // Next section: Layer and Mask Info
+        val layerInfoStart = imageResourcesStart + 4 + imageResourcesLength
+        val layerInfoLength = ((bytes[layerInfoStart].toInt() and 0xff) shl 24) or
+                ((bytes[layerInfoStart + 1].toInt() and 0xff) shl 16) or
+                ((bytes[layerInfoStart + 2].toInt() and 0xff) shl 8) or
+                (bytes[layerInfoStart + 3].toInt() and 0xff)
+
+        assertEquals(0, layerInfoLength % 4, "Layer and Mask Info section length should be multiple of 4")
+
+        // Image Data should follow
+        val imageDataStart = layerInfoStart + 4 + layerInfoLength
+        assertEquals('8'.code.toByte(), bytes[0]) // check we haven't corrupted the whole thing
+        // PSD file should end after image data.
+        // For 50x50, channels 0,1,2 (RGB), Compression (2) + RLE lengths (3*50*2=300) + data
+        // Just checking that we can read it back is usually enough, but here we verified the padding.
+        val parsed = KPsd.read(bytes)
+        assertNotNull(parsed)
+    }
 }
 
