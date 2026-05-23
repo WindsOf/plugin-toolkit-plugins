@@ -1,3 +1,8 @@
+Version: 2.3.1
+Date: 2026-05-23
+Changed:
+  - Changed 'model' capability parameter type from String to AIModel Enum for better UI integration.
+-------------------------------------------------------------------------------------------------
 Version: 2.3.0
 Date: 2026-05-23
 Added:

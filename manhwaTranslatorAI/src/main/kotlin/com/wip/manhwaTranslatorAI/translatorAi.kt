@@ -24,10 +24,15 @@ data class TranslatorAISettings(
     val useStructuredOutput: Boolean = true
 )
 
+enum class AIModel(val id: String) {
+    GEMMA_26B("gemma-4-26b-a4b-it"),
+    GEMMA_31B("gemma-4-31b-it")
+}
+
 @PluginInfo(
         id = "com.wip.manhwa_translator_ai",
         name = "Manhwa Translator AI",
-        version = "1.1.0",
+        version = "1.1.1",
         description = "Translate text from Manhwa/Manga into Italian using Google AI via Koog"
 )
 class TranslatorAI(val settings: TranslatorAISettings) {
@@ -46,19 +51,19 @@ class TranslatorAI(val settings: TranslatorAISettings) {
             dictionary: String? = "",
             @CapabilityParam(
                 description = "The Gemini Model ID to use",
-                defaultValue = "gemma-4-31b-it"
+                defaultValue = "GEMMA_31B"
             )
-            modelId: String,
+            model: AIModel,
             context: PluginContext
     ): List<String> {
         val logger = context.logger
         val effectiveDict = dictionary ?: ""
-        logger.info("Manhwa Translator AI started. Model: $modelId")
+        logger.info("Manhwa Translator AI started. Model: ${model.id}")
         logger.info("Input size: ${input.size} | Dictionary size: ${effectiveDict.length}")
 
         return try {
             val service = KoogAITranslatorService(context)
-            service.performTranslation(input, effectiveDict, settings.googleApiKey, settings.useStructuredOutput, modelId)
+            service.performTranslation(input, effectiveDict, settings.googleApiKey, settings.useStructuredOutput, model.id)
         } catch (e: Throwable) {
             val msg = "Translation failed: ${e::class.simpleName}: ${e.message}"
             logger.error(msg)

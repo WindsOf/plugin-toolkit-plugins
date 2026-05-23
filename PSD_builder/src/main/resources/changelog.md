@@ -1,3 +1,8 @@
+Version: 2.1.1
+Date: 2026-05-23
+Fixed:
+  - Fixed 'Invalid host defined options' runtime error for ESM modules by pre-bundling with ncc before pkg compilation.
+-------------------------------------------------------------------------------------------------
 Version: 2.1.0
 Date: 2026-05-23
 Changed:

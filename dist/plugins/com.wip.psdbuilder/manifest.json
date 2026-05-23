@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder",
         "name": "PSD Builder",
-        "version": "2.1.0",
+        "version": "2.1.1",
         "description": "A plugin that builds layered PSD files using PSD_builder.exe."
     },
     "requirements": {
@@ -241,6 +241,15 @@
     ],
     "changelog": {
         "releases": [
+            {
+                "version": "2.1.1",
+                "date": "2026-05-23",
+                "categories": {
+                    "Fixed": [
+                        "Fixed 'Invalid host defined options' runtime error for ESM modules by pre-bundling with ncc before pkg compilation."
+                    ]
+                }
+            },
             {
                 "version": "2.1.0",
                 "date": "2026-05-23",
