@@ -78,10 +78,10 @@ class KoogAITranslatorService(private val context: PluginContext) {
         // ── Executor + Model ───────────────────────────────────────────
         val executor = simpleGoogleAIExecutor(effectiveApiKey)
         
-        // Note: Using the model ID specified in the original code, though "gemma-4-31b-it" might be a placeholder.
+        // Note: Using the model ID specified in the original code, switched to gemma-4-26b-a4b-it for stability.
         val model = LLModel(
             provider = LLMProvider.Google,
-            id = "gemma-4-31b-it",
+            id = "gemma-4-26b-a4b-it",
             capabilities = listOf(
                 LLMCapability.Completion,
                 LLMCapability.Temperature,

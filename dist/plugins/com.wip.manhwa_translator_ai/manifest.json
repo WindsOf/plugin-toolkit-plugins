@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.manhwa_translator_ai",
         "name": "Manhwa Translator AI",
-        "version": "1.0.1",
+        "version": "1.0.2",
         "description": "Translate text from Manhwa/Manga into Italian using Google AI via Koog"
     },
     "requirements": {
@@ -76,6 +76,15 @@
     },
     "changelog": {
         "releases": [
+            {
+                "version": "1.0.2",
+                "date": "2026-05-23",
+                "categories": {
+                    "Changed": [
+                        "Switched model from gemma-4-31b-it to gemma-4-26b-a4b-it to resolve continuous Google API 500 Internal Server Errors."
+                    ]
+                }
+            },
             {
                 "version": "1.0.1",
                 "date": "2026-05-23",

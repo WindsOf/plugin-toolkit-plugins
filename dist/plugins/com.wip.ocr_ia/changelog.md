@@ -1,3 +1,8 @@
+Version: 2.2.2
+Date: 2026-05-23
+Changed:
+  - Switched model from gemma-4-31b-it to gemma-4-26b-a4b-it to resolve continuous Google API 500 Internal Server Errors.
+-------------------------------------------------------------------------------------------------
 Version: 2.2.1
 Date: 2026-05-23
 Added:

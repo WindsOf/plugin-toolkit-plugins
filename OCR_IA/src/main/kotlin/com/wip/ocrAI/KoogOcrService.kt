@@ -156,10 +156,10 @@ class KoogOcrService(private val context: PluginContext) {
         }
         logger.info("Executor initialized.")
 
-        logger.info("Defining LLModel: gemma-4-31b-it")
+        logger.info("Defining LLModel: gemma-4-26b-a4b-it")
         val model = LLModel(
             provider = LLMProvider.Google,
-            id = "gemma-4-31b-it",
+            id = "gemma-4-26b-a4b-it",
             capabilities = listOf(
                 LLMCapability.Completion,
                 LLMCapability.Temperature,

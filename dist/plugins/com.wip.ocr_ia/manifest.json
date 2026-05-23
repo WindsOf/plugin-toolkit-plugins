@@ -3,8 +3,8 @@
     "plugin": {
         "id": "com.wip.ocr_ia",
         "name": "OCR IA",
-        "version": "2.2.1",
-        "description": "Extract text from images using Google Gemma-4-31b-it via Koog (Kotlin)"
+        "version": "2.2.2",
+        "description": "Extract text from images using Google Gemma-4-26b-a4b-it via Koog (Kotlin)"
     },
     "requirements": {
         "minMemoryMb": 128,
@@ -13,7 +13,7 @@
     "capabilities": [
         {
             "name": "ocr",
-            "description": "Performs OCR on an image or a folder of images using Google Gemma-4-31b-it",
+            "description": "Performs OCR on an image or a folder of images using Google Gemma-4-26b-a4b-it",
             "parameters": {
                 "input": {
                     "description": "Path to image or folder",
@@ -139,6 +139,15 @@
     },
     "changelog": {
         "releases": [
+            {
+                "version": "2.2.2",
+                "date": "2026-05-23",
+                "categories": {
+                    "Changed": [
+                        "Switched model from gemma-4-31b-it to gemma-4-26b-a4b-it to resolve continuous Google API 500 Internal Server Errors."
+                    ]
+                }
+            },
             {
                 "version": "2.2.1",
                 "date": "2026-05-23",

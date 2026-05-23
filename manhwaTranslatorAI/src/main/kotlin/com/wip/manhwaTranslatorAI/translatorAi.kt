@@ -27,7 +27,7 @@ data class TranslatorAISettings(
 @PluginInfo(
         id = "com.wip.manhwa_translator_ai",
         name = "Manhwa Translator AI",
-        version = "1.0.1",
+        version = "1.0.2",
         description = "Translate text from Manhwa/Manga into Italian using Google AI via Koog"
 )
 class TranslatorAI(val settings: TranslatorAISettings) {

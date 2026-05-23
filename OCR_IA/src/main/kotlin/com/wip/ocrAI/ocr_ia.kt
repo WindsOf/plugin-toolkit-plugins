@@ -52,13 +52,13 @@ data class OCRResult(
 @PluginInfo(
         id = "com.wip.ocr_ia",
         name = "OCR IA",
-        version = "2.2.1",
-        description = "Extract text from images using Google Gemma-4-31b-it via Koog (Kotlin)"
+        version = "2.2.2",
+        description = "Extract text from images using Google Gemma-4-26b-a4b-it via Koog (Kotlin)"
 )
 class OCR_IA(val settings: OcrIASettings) {
     @Capability(
         name = "ocr",
-        description = "Performs OCR on an image or a folder of images using Google Gemma-4-31b-it")
+        description = "Performs OCR on an image or a folder of images using Google Gemma-4-26b-a4b-it")
     suspend fun ocr(
             @CapabilityParam(
                 description = "Path to image or folder",
@@ -75,7 +75,7 @@ class OCR_IA(val settings: OcrIASettings) {
     ): OCRResult {
         val logger = context.logger
         val effectiveOutputDir = outputDir ?: ""
-        logger.info("OCR IA v2.2.1 started.")
+        logger.info("OCR IA v2.2.2 started.")
         logger.info("Input: $input | Save: $save | OutputDir: '${effectiveOutputDir.ifBlank { "<same as image>" }}' | StructuredOutput: $useStructuredOutput")
 
         return try {
