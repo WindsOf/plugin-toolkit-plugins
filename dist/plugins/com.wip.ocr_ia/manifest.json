@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.ocr_ia",
         "name": "OCR IA",
-        "version": "2.2.0",
+        "version": "2.2.1",
         "description": "Extract text from images using Google Gemma-4-31b-it via Koog (Kotlin)"
     },
     "requirements": {
@@ -140,7 +140,7 @@
     "changelog": {
         "releases": [
             {
-                "version": "2.2.0",
+                "version": "2.2.1",
                 "date": "2026-05-23",
                 "categories": {
                     "Added": [
@@ -149,7 +149,8 @@
                         "Enhanced Thread-safety using Mutex for shared resources."
                     ],
                     "Changed": [
-                        "Updated `retryWithBackoff` to use a robust, pre-defined interval scale (5s, 30s, 2m, 5m)."
+                        "Updated `retryWithBackoff` to use an optimized, pre-defined interval scale (5s, 10s, 10s, 10s, 2m).",
+                        "Relocated system instruction prompt block to standard user text prompt to prevent Google API role strictness 500 errors."
                     ]
                 }
             },

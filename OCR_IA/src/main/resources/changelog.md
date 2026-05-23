@@ -1,11 +1,12 @@
-Version: 2.2.0
+Version: 2.2.1
 Date: 2026-05-23
 Added:
   - Parallel execution support for batch OCR processing (max 5 concurrent requests).
   - Rate Limiting logic to respect API quotas (max 13 requests per minute).
   - Enhanced Thread-safety using Mutex for shared resources.
 Changed:
-  - Updated `retryWithBackoff` to use a robust, pre-defined interval scale (5s, 30s, 2m, 5m).
+  - Updated `retryWithBackoff` to use an optimized, pre-defined interval scale (5s, 10s, 10s, 10s, 2m).
+  - Relocated system instruction prompt block to standard user text prompt to prevent Google API role strictness 500 errors.
 -------------------------------------------------------------------------------------------------
 Version: 2.1.0
 Date: 2026-05-20

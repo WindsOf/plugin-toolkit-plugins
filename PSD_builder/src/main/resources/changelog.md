@@ -1,4 +1,4 @@
-Version: 2.0.0
+Version: 2.0.1
 Date: 2026-05-23
 Added:
   - Batch capability to process entire chapters concurrently (max 4 processes via Semaphore).

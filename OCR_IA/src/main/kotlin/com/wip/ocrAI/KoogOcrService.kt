@@ -56,7 +56,7 @@ class KoogOcrService(private val context: PluginContext) {
     private suspend fun <T> retryWithBackoff(
         block: suspend () -> T
     ): T {
-        val delaysMs = listOf(5000L, 30000L, 120000L, 300000L) // 5s, 30s, 2m, 5m
+        val delaysMs = listOf(5000L, 10000L, 10000L, 10000L, 120000L) // 5s, 10s, 10s, 10s, 2m
         val maxAttempts = delaysMs.size + 1
         var lastException: Throwable? = null
 
@@ -273,10 +273,8 @@ class KoogOcrService(private val context: PluginContext) {
                                     } else null
                                 )
                             ) {
-                                system {
-                                    text(effectivePromptInstructions)
-                                }
                                 user {
+                                    text(effectivePromptInstructions)
                                     image(Path(file.absolutePath))
                                 }
                             }

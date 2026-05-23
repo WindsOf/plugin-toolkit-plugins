@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.manhwa_translator_ai",
         "name": "Manhwa Translator AI",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "description": "Translate text from Manhwa/Manga into Italian using Google AI via Koog"
     },
     "requirements": {
@@ -76,6 +76,16 @@
     },
     "changelog": {
         "releases": [
+            {
+                "version": "1.0.1",
+                "date": "2026-05-23",
+                "categories": {
+                    "Changed": [
+                        "Relocated system instruction prompt block to standard user text prompt to prevent Google API role strictness 500 errors.",
+                        "Updated retryWithBackoff with optimized delay intervals (5s, 10s, 10s, 10s, 2m)."
+                    ]
+                }
+            },
             {
                 "version": "1.0.0",
                 "date": "2026-05-23",

@@ -27,22 +27,22 @@ class KoogAITranslatorService(private val context: PluginContext) {
     private var isCancelled = false
 
     private suspend fun <T> retryWithBackoff(
-        maxAttempts: Int = 5,
-        initialDelayMs: Long = 1000,
-        backoffFactor: Double = 2.0,
         block: suspend () -> T
     ): T {
-        var currentDelay = initialDelayMs
+        val delaysMs = listOf(5000L, 10000L, 10000L, 10000L, 120000L) // 5s, 10s, 10s, 10s, 2m
+        val maxAttempts = delaysMs.size + 1
         var lastException: Throwable? = null
         for (attempt in 1..maxAttempts) {
             try {
                 return block()
             } catch (e: Throwable) {
                 lastException = e
-                logger.warn("Attempt $attempt failed: ${e::class.simpleName}: ${e.message}. Retrying in ${currentDelay}ms...")
                 if (attempt < maxAttempts) {
+                    val currentDelay = delaysMs[attempt - 1]
+                    logger.warn("Attempt $attempt failed: ${e::class.simpleName}: ${e.message}. Retrying in ${currentDelay}ms...")
                     delay(currentDelay)
-                    currentDelay = (currentDelay * backoffFactor).toLong()
+                } else {
+                    logger.error("Attempt $attempt failed: ${e::class.simpleName}: ${e.message}. Max retries reached.")
                 }
             }
         }
@@ -151,11 +151,8 @@ class KoogAITranslatorService(private val context: PluginContext) {
                 id = "translation-task",
                 params = llmParams
             ) {
-                system {
-                    text(promptInstructions)
-                }
                 user {
-                    text("Strings to translate:\n" + input.joinToString("\n") { "[TEXT]: $it" })
+                    text(promptInstructions + "\n\nStrings to translate:\n" + input.joinToString("\n") { "[TEXT]: $it" })
                 }
             }
 

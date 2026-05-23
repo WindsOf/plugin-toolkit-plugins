@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder",
         "name": "PSD Builder",
-        "version": "2.0.0",
+        "version": "2.0.1",
         "description": "A plugin that builds layered PSD files using PSD_builder.exe."
     },
     "requirements": {
