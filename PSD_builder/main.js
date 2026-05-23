@@ -51,18 +51,27 @@ async function generatePSD(jsonPath, outputPath) {
     ];
 
     payload.texts.forEach((txtConfig, index) => {
-        let fontName = txtConfig.fontName || 'Anime ACE 2.0';
+        let fontName = txtConfig.fontName || 'Anime Ace 2.0 BB';
         
         // Se il plugin Kotlin gli ha passato ArialMT di default, sovrascriviamo
-        if (fontName === 'ArialMT') {
-            fontName = 'Anime ACE 2.0';
+        if (fontName === 'ArialMT' || fontName === 'Anime ACE 2.0') {
+            fontName = 'Anime Ace 2.0 BB';
         }
 
         const fontSize = txtConfig.fontSize || 24;
         const boxWidth = txtConfig.right - txtConfig.left;
+        const boxHeight = txtConfig.bottom - txtConfig.top;
         
         // Aggiungiamo l'andata a capo manuale in base alla grandezza stimata
         const wrappedText = wrapText(txtConfig.text, boxWidth, fontSize);
+
+        // Calcolo dell'offset verticale per centrare il testo nel box
+        const lines = wrappedText.split('\r');
+        const textHeight = lines.length * fontSize * 1.2;
+        let verticalOffset = (boxHeight - textHeight) / 2;
+        if (verticalOffset < 0) verticalOffset = 0;
+
+        const strokeSize = txtConfig.strokeSize !== undefined ? txtConfig.strokeSize : 3;
 
         childrenNodes.push({
             name: `Testo ${index}`,
@@ -70,13 +79,35 @@ async function generatePSD(jsonPath, outputPath) {
             top: txtConfig.top,
             right: txtConfig.right,
             bottom: txtConfig.bottom,
+            ...(strokeSize > 0 ? {
+                effects: {
+                    stroke: [{
+                        enabled: true,
+                        present: true,
+                        showInDialog: true,
+                        size: { value: strokeSize, units: 'Pixels' },
+                        position: 'outside',
+                        fillType: 'color',
+                        blendMode: 'normal',
+                        opacity: 1,
+                        color: { r: 255, g: 255, b: 255, a: 1 }
+                    }]
+                }
+            } : {}),
             text: {
                 text: wrappedText,
-                transform: [1, 0, 0, 1, txtConfig.left, txtConfig.top],
+                transform: [1, 0, 0, 1, txtConfig.left, txtConfig.top + verticalOffset],
+                left: 0,
+                top: 0,
+                right: boxWidth,
+                bottom: Math.max(textHeight, boxHeight - verticalOffset),
                 style: {
                     font: { name: fontName },
                     fontSize: fontSize,
                     fillColor: txtConfig.color || { r: 0, g: 0, b: 0, a: 255 }
+                },
+                paragraphStyle: {
+                    justification: 'center'
                 }
             }
         });

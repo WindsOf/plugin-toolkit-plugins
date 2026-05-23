@@ -1,3 +1,23 @@
+Version: 3.0.0
+Date: 2026-05-23
+Added:
+  - Added new `borderSize` parameter to capabilities, exposing stroke thickness to the UI. Passing 0 removes the border completely.
+-------------------------------------------------------------------------------------------------
+Version: 2.1.4
+Date: 2026-05-23
+Added:
+  - Added a 3-pixel white outline (stroke) layer effect to all generated text to improve readability over images.
+-------------------------------------------------------------------------------------------------
+Version: 2.1.3
+Date: 2026-05-23
+Added:
+  - Added spatial text centering functionality to calculate horizontal and vertical offsets automatically inside the bounding boxes.
+-------------------------------------------------------------------------------------------------
+Version: 2.1.2
+Date: 2026-05-23
+Fixed:
+  - Corrected default font name in PSDBuilderPlugin and main.js from 'Anime ACE 2.0'/'ArialMT' to exactly 'Anime Ace 2.0 BB'.
+-------------------------------------------------------------------------------------------------
 Version: 2.1.1
 Date: 2026-05-23
 Fixed:

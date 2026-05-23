@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder",
         "name": "PSD Builder",
-        "version": "2.1.1",
+        "version": "3.0.0",
         "description": "A plugin that builds layered PSD files using PSD_builder.exe."
     },
     "requirements": {
@@ -61,11 +61,18 @@
                     }
                 },
                 "fontName": {
-                    "defaultValue": "ArialMT",
                     "description": "Font name (optional)",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
+                    }
+                },
+                "borderSize": {
+                    "defaultValue": 3,
+                    "description": "Border thickness (0 for none)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "INT"
                     }
                 },
                 "outputDir": {
@@ -173,11 +180,18 @@
                     }
                 },
                 "fontName": {
-                    "defaultValue": "ArialMT",
                     "description": "Font name (optional)",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
+                    }
+                },
+                "borderSize": {
+                    "defaultValue": 3,
+                    "description": "Border thickness (0 for none)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "INT"
                     }
                 },
                 "leaveIntermediateFiles": {
@@ -241,6 +255,42 @@
     ],
     "changelog": {
         "releases": [
+            {
+                "version": "3.0.0",
+                "date": "2026-05-23",
+                "categories": {
+                    "Added": [
+                        "Added new `borderSize` parameter to capabilities, exposing stroke thickness to the UI. Passing 0 removes the border completely."
+                    ]
+                }
+            },
+            {
+                "version": "2.1.4",
+                "date": "2026-05-23",
+                "categories": {
+                    "Added": [
+                        "Added a 3-pixel white outline (stroke) layer effect to all generated text to improve readability over images."
+                    ]
+                }
+            },
+            {
+                "version": "2.1.3",
+                "date": "2026-05-23",
+                "categories": {
+                    "Added": [
+                        "Added spatial text centering functionality to calculate horizontal and vertical offsets automatically inside the bounding boxes."
+                    ]
+                }
+            },
+            {
+                "version": "2.1.2",
+                "date": "2026-05-23",
+                "categories": {
+                    "Fixed": [
+                        "Corrected default font name in PSDBuilderPlugin and main.js from 'Anime ACE 2.0'/'ArialMT' to exactly 'Anime Ace 2.0 BB'."
+                    ]
+                }
+            },
             {
                 "version": "2.1.1",
                 "date": "2026-05-23",
