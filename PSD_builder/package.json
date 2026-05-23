@@ -1,0 +1,25 @@
+{
+  "name": "psd_builder",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "bin": "dist/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "ag-psd": "^30.1.1",
+    "jimp": "^1.6.1"
+  },
+  "pkg": {
+    "scripts": [
+      "dist/**/*.js"
+    ]
+  },
+  "devDependencies": {
+    "@vercel/ncc": "^0.38.4"
+  }
+}
