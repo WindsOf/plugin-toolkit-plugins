@@ -12,28 +12,48 @@
       "fileName": "betterimg.jar",
       "description": "A plugin that processes images using the BetterIMG CLI tool.",
       "targetAppVersion": "1.0.0",
-      "hash": "1d2c42a9e09b652ac1b2928f6ceee20bbb01f2cd6aee12a3a93565bba3aa8f0e",
-      "signature": "BGQdJ1o51EUZZksZzLi/djuM6Ma+y1qXujgm4Cf5A1pbmPLDdeF94e5LEYh3Y6RAAgIkOSJLif1Qscf0x94UBj3LcfRivH1w9bkRPxXDp6qcRPJ/00vSu8rXp6WslZczDR/XDrPcz7rrck2Z2Z8n6SE1IjxfQP4ljGxu6j7FAiv/S+MFJhjO0S8C3J71kUNF9aFd9CAD0QGBHSDfqDn7KCEUhEs2LwpOIYx4+zclMG0s3+LNMCE4kcW3RE8OdXO6j2KOKmmQsNjnO6QfqxyljtpyZ1/9fdSq0RrY77UKtkw8epWHbbtHyzew2HQdjy4/JXUp42jKcfKWuwzZgYwaCw=="
+      "hash": "5b989dd146f26e531f397c086082502b54abc4b0b5403403ea01dab39eab991c",
+      "signature": "Teh4FEge22yDZVNhFJkHNTAGmkmCVCy+DUNtvHwOFfnmhguw4bMXvtClKyuo6KhA2/jnjyW8z8K6xwsLogN64ryTptqSW/LsSX3gwhHXzGSSmptSj+q6WAte9cvl9OpUt5cn0AOQpEMKckOhXkRsJSYaCvOiJRq0VJXNr9bAV3GwyTctMLPgTD1iMtS9NdsWoL5Ya7QYKCGm6wxLlAcV6NOHdxw0Pj42yVYYW6GC2DA1hBI1J65J/n39m1jrvenICvcBFZ2NzfFJwYQB1Y/AYlpTW5ubKRN+OxWKyMv1nFnpmgmxI36ZXEd2+nDkgsCNLh1/RDBKRIegpRvCoyuh2Q=="
+    },
+    {
+      "name": "Image Toolkit",
+      "pkg": "com.wip.imageToolkit",
+      "version": "1.1.0",
+      "fileName": "imageToolkit.jar",
+      "description": "A plugin that provides toolkit to work with images.",
+      "targetAppVersion": "1.0.0",
+      "hash": "8252ecf49d60aa2d1f66c02a21fea44ba8b0b36c635158b6148a4d3c40079492",
+      "signature": "Vk8zdnFtX2azzfuvPU0Qm9hNLI59o3VMhbvFgxJzr0NoE8xRap5UEQ44TAVOoe7psLBPUc6S+Zc8LiptelinOAavp9KoDKx2dJFBhwbjeQyhsIaMV5VbZZ1BT0mJjGsA0YmRbgfdQvBTTijzjlOlnOLmoUmaZMB1/h9/Rti1p5811920KphJOFxXSUbqTsnUGLnUIc9Q4i5VCzlOnmC6oPaeAOlwdD8E0efY6YVbM4hcTM6blRHIs4GcuublR6IzXiK8HnqhIWORvs043nWWCOftyNOJk50VLcjOkdR+KLVpI4Tqhm4dRtUBwc1u4hHjRRBG+9HeT/rHwoCmEvwMZg=="
+    },
+    {
+      "name": "Manhwa Translator AI",
+      "pkg": "com.wip.manhwa_translator_ai",
+      "version": "1.0.0",
+      "fileName": "manhwaTranslatorAI.jar",
+      "description": "Translate text from Manhwa/Manga into Italian using Google AI via Koog",
+      "targetAppVersion": "1.0.0",
+      "hash": "400fb71759621f0a57d4e5f6011db85ed0ceb154292608be20bcce7237a294b7",
+      "signature": "f97Sdh6GgtBO+f34fot5+IXX1eTQqaIcCA6m7huaO4Gkt1ZruMkCsQIPY2nqu7EDQ1rnbCkUyb+KUvQFYflkBHxTrXvaj6DYqMfP/QEDGV/vKCZTEHK2gMHesYV6Uw9VUrqn5r33QtaBLDySEWiNDKjsM4YJEvapIiPt1uJv/zKrmkKgeJGRbxiD2p5G6buyz8YNleZs59KH29d1wsnKlEky3SI5jkNZfDAA7GIZG1o60CpgVLs9mJuLqHIcLNZAYN0bsRBjRSyoMYREbPNWGZVQOFImTXkdbO6mIHgcucRaEEgHMDiNWWHetdLd2s2iY75A5a36t+ERCmVxHyz2AA=="
     },
     {
       "name": "OCR IA",
       "pkg": "com.wip.ocr_ia",
-      "version": "2.0.6",
+      "version": "2.1.0",
       "fileName": "OCR_IA.jar",
       "description": "Extract text from images using Google Gemma-4-31b-it via Koog (Kotlin)",
       "targetAppVersion": "1.0.0",
-      "hash": "cf2bc42e1f6f64ad602c37afb88c561c66b4da20ada5e6afe9ad0e7b22cd45b6",
-      "signature": "lXfAJpEq249iyNIMw/ReY8HV4ng/3KWdzTdzdNVrl3EitpOzitFEgsaV3xzbqdvnq1n6jthp0+jIULEfeP7IRQSFyZwYXRHzgjRuvxmT2w2yxuyE88Rf5o6/BU7m64OIyxcOGoYBATtvlYG/Sg68fsAea/BnvIbdlGAe+xVbSrJySt1um/lyroJQtMX4tjm561yX1vmPdOL012PDba8B5ZVe1OqW+moTEX5bK0PzJm1Dkp3bal+vfeq0boqNEQNZ5c5BlodLoQB3WIvql8WGxyaJk9sfdAWcP2WJ13eUVNlJe+BhMTp+LWhbr264lqsN+GDwtfX4NpwWX+Bak8OAuA=="
+      "hash": "3d89a3ba48474fc7df74d5c5f4b142ebaed30c113ce79a263215201fd20a2500",
+      "signature": "Y7rR7QU8bykjpTwNRcYb8E5uYQcCdgd4rt8OSerokRqY5wOKu7+u1c1fCDip1Ibc4f8mbaCpFGNECbEf3Xb6AWjmKnhzZpLZOtTvDJp8J67v4hqkKNGNM2Yd9MINKO73hiQLWDLk5KSKXKDRM5ZV4BBtTF53Fa8UeL/+bIHOmB4gr0454H2hiM1GrVmEWj2YP0P54HogRgfEozrht+KJ0WhtnPRL57RjXmI8wFsLtLG7TphxYGMsURBeUEfaqeEcnJkr9OeWz4GgBhKNnYm5tDh2pW3dnN7z5qyaJmxe3XRRXft8OcBZh7esAJ2bmF34jRKipcNaYMf2sc6Vhwoo7g=="
     },
     {
       "name": "Slicer",
-      "pkg": "com.wip.operations.slicer",
-      "version": "1.0.5",
+      "pkg": "com.wip.slicer",
+      "version": "1.1.0",
       "fileName": "slicer.jar",
       "description": "A plugin that provides vertical images sliding capabilities for manhwa.",
       "targetAppVersion": "1.0.0",
-      "hash": "7f227fe3a882e4d17c884a4feccfb08df77957c3c5ed2c2553e02af0cc8e7815",
-      "signature": "IHzmAFh7KOJgd61ZiohE6zX/hWfAwvRJuiGDkI78wFH5ORkQldxQNYgfr8W0jZ4DzrufiGFD440TCXkkKvW4BIXg/97CE2PN2doRbJeKkrs9vhr/BdUTT9yn5vswtZ7VFJoKCklWzVLxoKTyPV7KO8RX3b98+ASOWdKAz8+umLVq93nNdoB+LxXapozaaWQSyAo5eryt5piiFcxuV2GRfdrfOONrgPzDPm8+50CKVnGWARXyp/CIaJhwEbNcCN9gA/S5PjUflTJmRMwUC7KqkrWSVx+VwXJYSq6CK69xOVbUJnlRJ6JBhIrK/eQLliROreU+dGG4IRO/l8sAgLk0pQ=="
+      "hash": "161195d2394fe604f2735220d1dbcf456c513b0461d12ac8ae16e5637ada82ce",
+      "signature": "C+nIjYoV3Ak9K4pykF/Vz8iTY7M7Dh4DZX66ofhnheDLVHsbEWuTVUNhELUrfDa2KeQ3OO4c4TFfLNAqx5o+1RgxNC5J6RcfswboCXnEayW/ThitB0BVdwhnJM3GRbYBWOAgCyS0c4SceQUyQdkiMKObkNXTKOs0dNoJXZ4mM1ZJUzBMRnB37JpOLG+wU8uu0/1MTHRbmVGEoOmFs7Qs4YwG6TUiJdWzz50Yus3wGgEv/3WgU8gw1XNIJAr5GYtQWb8Gf4Rxn3No7FgR4zGS8La52hItK/YuAu2uoWscKOlPRHoMiCEI7dds1N1aU6jLynyxx/5zIaNI4tjHi0G9AQ=="
     }
   ],
   "flows": [

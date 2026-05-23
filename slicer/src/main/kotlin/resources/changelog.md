@@ -1,12 +1,9 @@
-Version: 1.0.5
-Date: 2026-05-20
+Version: 1.1.0
+Date: 2026-05-23
 Added:
-  - 
--------------------------------------------------------------------------------------------------
-Version: 1.0.4
-Date: 2026-05-20
-Added:
-  - 
+  - Support for toolkit 1.5.1
+Changes:
+  - Changed plugin id from com.wip.operations.slicer to com.wip.slicer
 -------------------------------------------------------------------------------------------------
 Version: 1.0.3
 Date: 2026-05-20

@@ -1,0 +1,92 @@
+{
+    "manifestVersion": "1.0",
+    "plugin": {
+        "id": "com.wip.manhwa_translator_ai",
+        "name": "Manhwa Translator AI",
+        "version": "1.0.0",
+        "description": "Translate text from Manhwa/Manga into Italian using Google AI via Koog"
+    },
+    "requirements": {
+        "minMemoryMb": 128,
+        "minExecutionTimeMs": 10
+    },
+    "capabilities": [
+        {
+            "name": "translate",
+            "description": "Translates a list of strings into Italian using Google AI",
+            "parameters": {
+                "input": {
+                    "description": "List of text strings to translate",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
+                    }
+                },
+                "dictionary": {
+                    "description": "Dictionary of words/actions to keep the translation coherent",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                }
+            },
+            "returnType": {
+                "type": "array",
+                "items": {
+                    "type": "primitive",
+                    "primitiveType": "STRING"
+                }
+            },
+            "outputs": [
+                {
+                    "name": "result",
+                    "description": "",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
+                    }
+                }
+            ]
+        }
+    ],
+    "settings": {
+        "googleApiKey": {
+            "description": "API Key for Google services",
+            "type": {
+                "type": "primitive",
+                "primitiveType": "STRING"
+            },
+            "required": true,
+            "secret": true
+        },
+        "useStructuredOutput": {
+            "defaultValue": true,
+            "description": "Use structured output (JSON schema). Disable if the model does not support it.",
+            "type": {
+                "type": "primitive",
+                "primitiveType": "BOOLEAN"
+            }
+        }
+    },
+    "changelog": {
+        "releases": [
+            {
+                "version": "1.0.0",
+                "date": "2026-05-23",
+                "categories": {
+                    "Initial": [
+                        "Initial release of manhwa Translator AI plugin"
+                    ]
+                }
+            }
+        ]
+    },
+    "hasUpdateHandler": true,
+    "hasSetupHandler": true
+}

@@ -1,7 +1,9 @@
-Version: 2.0.6
+Version: 2.1.0
 Date: 2026-05-20
 Added:
-  - 
+  - Support for toolkit 1.5.1
+Changes:
+  - Now oce uses a new prompt and returns the list of text and the list of bounding boxes
 -------------------------------------------------------------------------------------------------
 Version: 2.0.5
 Date: 2026-05-12

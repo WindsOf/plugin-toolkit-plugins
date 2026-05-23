@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.ocr_ia",
         "name": "OCR IA",
-        "version": "2.0.6",
+        "version": "2.1.0",
         "description": "Extract text from images using Google Gemma-4-31b-it via Koog (Kotlin)"
     },
     "requirements": {
@@ -20,7 +20,14 @@
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
-                    }
+                    },
+                    "semanticTypes": [
+                        {
+                            "namespace": "sys",
+                            "name": "directory",
+                            "variant": null
+                        }
+                    ]
                 },
                 "save": {
                     "defaultValue": true,
@@ -36,19 +43,84 @@
                         "type": "primitive",
                         "primitiveType": "STRING"
                     }
+                },
+                "useStructuredOutput": {
+                    "defaultValue": false,
+                    "description": "Whether to use native structured output (might not be supported by all models)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "BOOLEAN"
+                    }
                 }
             },
             "returnType": {
-                "type": "primitive",
-                "primitiveType": "STRING"
+                "type": "object",
+                "className": "com.wip.ocrAI.OCRResult"
             },
             "outputs": [
                 {
-                    "name": "result",
-                    "description": "",
+                    "name": "extracted text",
+                    "description": "a list of strings representing the extracted text",
                     "type": {
-                        "type": "primitive",
-                        "primitiveType": "STRING"
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
+                    }
+                },
+                {
+                    "name": "bounding box",
+                    "description": "(xmin, ymin, xmax, ymax), a list of lists of doubles representing the bounding box coordinates for each extracted text",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "primitive",
+                                "primitiveType": "DOUBLE"
+                            }
+                        }
+                    },
+                    "semanticTypes": [
+                        {
+                            "namespace": "wom",
+                            "name": "bounding-box",
+                            "variant": null
+                        }
+                    ]
+                },
+                {
+                    "name": "page number",
+                    "description": "a list of integers representing the page number (1-indexed) for each extracted text",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "INT"
+                        }
+                    }
+                },
+                {
+                    "name": "page name",
+                    "description": "a list of strings representing the filename/page name for each extracted text",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
+                    }
+                },
+                {
+                    "name": "failed files",
+                    "description": "a list of strings representing the filenames that failed to process",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
                     }
                 }
             ]
@@ -68,10 +140,15 @@
     "changelog": {
         "releases": [
             {
-                "version": "2.0.6",
+                "version": "2.1.0",
                 "date": "2026-05-20",
                 "categories": {
-                    "Added": []
+                    "Added": [
+                        "Support for toolkit 1.5.1"
+                    ],
+                    "Changes": [
+                        "Now oce uses a new prompt and returns the list of text and the list of bounding boxes"
+                    ]
                 }
             },
             {
