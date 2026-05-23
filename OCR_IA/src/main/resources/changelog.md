@@ -1,3 +1,12 @@
+Version: 2.2.0
+Date: 2026-05-23
+Added:
+  - Parallel execution support for batch OCR processing (max 5 concurrent requests).
+  - Rate Limiting logic to respect API quotas (max 13 requests per minute).
+  - Enhanced Thread-safety using Mutex for shared resources.
+Changed:
+  - Updated `retryWithBackoff` to use a robust, pre-defined interval scale (5s, 30s, 2m, 5m).
+-------------------------------------------------------------------------------------------------
 Version: 2.1.0
 Date: 2026-05-20
 Added:

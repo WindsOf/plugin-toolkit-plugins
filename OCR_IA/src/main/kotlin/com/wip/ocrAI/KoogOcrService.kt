@@ -14,6 +14,13 @@ import org.wip.plugintoolkit.api.PluginSignal
 import java.io.File
 import java.nio.file.Files
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 
 @Serializable
 data class Balloon(
@@ -47,22 +54,23 @@ class KoogOcrService(private val context: PluginContext) {
     private var isCancelled = false
 
     private suspend fun <T> retryWithBackoff(
-        maxAttempts: Int = 5,
-        initialDelayMs: Long = 1000,
-        backoffFactor: Double = 2.0,
         block: suspend () -> T
     ): T {
-        var currentDelay = initialDelayMs
+        val delaysMs = listOf(5000L, 30000L, 120000L, 300000L) // 5s, 30s, 2m, 5m
+        val maxAttempts = delaysMs.size + 1
         var lastException: Throwable? = null
+
         for (attempt in 1..maxAttempts) {
             try {
                 return block()
             } catch (e: Throwable) {
                 lastException = e
-                logger.warn("Attempt $attempt failed: ${e::class.simpleName}: ${e.message}. Retrying in ${currentDelay}ms...")
                 if (attempt < maxAttempts) {
+                    val currentDelay = delaysMs[attempt - 1]
+                    logger.warn("Attempt $attempt failed: ${e::class.simpleName}: ${e.message}. Retrying in ${currentDelay}ms...")
                     delay(currentDelay)
-                    currentDelay = (currentDelay * backoffFactor).toLong()
+                } else {
+                    logger.error("Attempt $attempt failed: ${e::class.simpleName}: ${e.message}. Max retries reached.")
                 }
             }
         }
@@ -214,102 +222,145 @@ class KoogOcrService(private val context: PluginContext) {
         val total = files.size
 
         logger.info("Starting processing loop for $total image(s)...")
-        files.forEachIndexed { index, file ->
-            if (isCancelled) {
-                logger.info("Processing stopped at image ${index + 1}/$total.")
-                return@forEachIndexed
+
+        val resultsMutex = Mutex()
+        var processedFilesCount = 0
+
+        val semaphore = Semaphore(5) // Max 5 parallel requests
+        val requestTimestamps = ArrayDeque<Long>()
+        val rateLimitMutex = Mutex()
+
+        suspend fun acquireRateLimit() {
+            rateLimitMutex.withLock {
+                val now = System.currentTimeMillis()
+                if (requestTimestamps.size >= 13) {
+                    val oldest = requestTimestamps.first()
+                    val timeSinceOldest = now - oldest
+                    if (timeSinceOldest < 60000) {
+                        val waitTime = 60000 - timeSinceOldest
+                        logger.info("Rate limit approached (13 requests in 1 min). Waiting for ${waitTime}ms...")
+                        delay(waitTime)
+                    }
+                    requestTimestamps.removeFirst()
+                }
+                // Record the actual time after any delay
+                requestTimestamps.addLast(System.currentTimeMillis())
             }
+        }
 
-            logger.info("Processing image ${index + 1}/$total: '${file.name}'")
-
-            try {
-                val ocrPrompt = prompt(
-                    id = "ocr-task",
-                    params = LLMParams(
-                        schema = if (useStructuredOutput) {
-                            LLMParams.Schema.JSON.Basic(
-                                name = "BalloonsResponse",
-                                schema = balloonSchema
-                            )
-                        } else null
-                    )
-                ) {
-                    system {
-                        text(effectivePromptInstructions)
+        coroutineScope {
+            files.mapIndexed { index, file ->
+                async {
+                    if (isCancelled) {
+                        logger.info("Processing stopped at image ${index + 1}/$total.")
+                        return@async
                     }
-                    user {
-                        image(Path(file.absolutePath))
+
+                    semaphore.withPermit {
+                        if (isCancelled) return@async
+
+                        logger.info("Processing image ${index + 1}/$total: '${file.name}'")
+
+                        try {
+                            val ocrPrompt = prompt(
+                                id = "ocr-task",
+                                params = LLMParams(
+                                    schema = if (useStructuredOutput) {
+                                        LLMParams.Schema.JSON.Basic(
+                                            name = "BalloonsResponse",
+                                            schema = balloonSchema
+                                        )
+                                    } else null
+                                )
+                            ) {
+                                system {
+                                    text(effectivePromptInstructions)
+                                }
+                                user {
+                                    image(Path(file.absolutePath))
+                                }
+                            }
+
+                            acquireRateLimit()
+
+                            logger.debug("Sending request to Google AI...")
+                            val responses = retryWithBackoff {
+                                executor.execute(ocrPrompt, model)
+                            }
+                            logger.debug("Response received. Parts: ${responses.size}")
+
+                            var rawResponse = responses.joinToString("\n") { it.content }.trim()
+
+                            // Strip thinking blocks
+                            rawResponse = rawResponse.replace(
+                                Regex("<(thought|thinking)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), ""
+                            ).trim()
+
+                            // Robust JSON extraction if not using structured output
+                            val jsonToParse = if (!useStructuredOutput) {
+                                extractJsonFromText(rawResponse)
+                            } else {
+                                rawResponse
+                            }
+
+                            // Attempt to parse JSON
+                            val json = Json { ignoreUnknownKeys = true }
+                            val balloonsResponse = json.decodeFromString<BalloonsResponse>(jsonToParse)
+
+                            resultsMutex.withLock {
+                                balloonsResponse.balloons.forEach { balloon ->
+                                    allTexts.add(balloon.text)
+                                    allBoxes.add(listOf(balloon.xmin, balloon.ymin, balloon.xmax, balloon.ymax))
+                                    allPageNumbers.add(index + 1)
+                                    allPageNames.add(file.name)
+                                }
+                                logger.info("Extracted ${balloonsResponse.balloons.size} balloons from '${file.name}'.")
+
+                                processedFilesCount++
+                                progressReporter.report(processedFilesCount.toFloat() / total.toFloat())
+                            }
+
+                            if (save) {
+                                val outDir = if (outputDir.isNotBlank()) {
+                                    File(outputDir)
+                                } else {
+                                    file.parentFile ?: File(".")
+                                }
+                                if (!outDir.exists()) {
+                                    outDir.mkdirs()
+                                    logger.info("Created output directory: ${outDir.absolutePath}")
+                                }
+                                val outFile = File(outDir, "${file.nameWithoutExtension}_OCR.json")
+                                outFile.writeText(rawResponse, Charsets.UTF_8)
+                                logger.info("Saved OCR JSON result to: ${outFile.absolutePath}")
+                            }
+
+                        } catch (e: Throwable) {
+                            logger.error("Error processing '${file.name}': ${e::class.simpleName}: ${e.message}")
+                            
+                            resultsMutex.withLock {
+                                failedFiles.add(file.name)
+                                processedFilesCount++
+                                progressReporter.report(processedFilesCount.toFloat() / total.toFloat())
+                            }
+
+                            if (save) {
+                                val outDir = if (outputDir.isNotBlank()) {
+                                    File(outputDir)
+                                } else {
+                                    file.parentFile ?: File(".")
+                                }
+                                if (!outDir.exists()) {
+                                    outDir.mkdirs()
+                                }
+                                val errorFile = File(outDir, "${file.name}_ERROR.txt")
+                                errorFile.writeText("Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}", Charsets.UTF_8)
+                                logger.info("Saved error details to: ${errorFile.absolutePath}")
+                            }
+                        }
                     }
                 }
-
-                logger.debug("Sending request to Google AI...")
-                val responses = retryWithBackoff {
-                    executor.execute(ocrPrompt, model)
-                }
-                logger.debug("Response received. Parts: ${responses.size}")
-
-                var rawResponse = responses.joinToString("\n") { it.content }.trim()
-
-                // Strip thinking blocks
-                rawResponse = rawResponse.replace(
-                    Regex("<(thought|thinking)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), ""
-                ).trim()
-
-                // Robust JSON extraction if not using structured output
-                val jsonToParse = if (!useStructuredOutput) {
-                    extractJsonFromText(rawResponse)
-                } else {
-                    rawResponse
-                }
-
-                // Attempt to parse JSON
-                val json = Json { ignoreUnknownKeys = true }
-                val balloonsResponse = json.decodeFromString<BalloonsResponse>(jsonToParse)
-
-                balloonsResponse.balloons.forEach { balloon ->
-                    allTexts.add(balloon.text)
-                    allBoxes.add(listOf(balloon.xmin, balloon.ymin, balloon.xmax, balloon.ymax))
-                    allPageNumbers.add(index + 1)
-                    allPageNames.add(file.name)
-                }
-
-                logger.info("Extracted ${balloonsResponse.balloons.size} balloons from '${file.name}'.")
-
-                if (save) {
-                    val outDir = if (outputDir.isNotBlank()) {
-                        File(outputDir)
-                    } else {
-                        file.parentFile ?: File(".")
-                    }
-                    if (!outDir.exists()) {
-                        outDir.mkdirs()
-                        logger.info("Created output directory: ${outDir.absolutePath}")
-                    }
-                    val outFile = File(outDir, "${file.nameWithoutExtension}_OCR.json")
-                    outFile.writeText(rawResponse, Charsets.UTF_8)
-                    logger.info("Saved OCR JSON result to: ${outFile.absolutePath}")
-                }
-
-            } catch (e: Throwable) {
-                logger.error("Error processing '${file.name}': ${e::class.simpleName}: ${e.message}")
-                failedFiles.add(file.name)
-
-                if (save) {
-                    val outDir = if (outputDir.isNotBlank()) {
-                        File(outputDir)
-                    } else {
-                        file.parentFile ?: File(".")
-                    }
-                    if (!outDir.exists()) {
-                        outDir.mkdirs()
-                    }
-                    val errorFile = File(outDir, "${file.name}_ERROR.txt")
-                    errorFile.writeText("Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}", Charsets.UTF_8)
-                    logger.info("Saved error details to: ${errorFile.absolutePath}")
-                }
-            }
-
-            progressReporter.report((index + 1).toFloat() / total.toFloat())
+            }.awaitAll()
         }
 
         val status = if (isCancelled) "cancelled" else "completed"

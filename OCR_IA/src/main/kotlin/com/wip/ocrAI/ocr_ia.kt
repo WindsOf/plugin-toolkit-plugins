@@ -52,7 +52,7 @@ data class OCRResult(
 @PluginInfo(
         id = "com.wip.ocr_ia",
         name = "OCR IA",
-        version = "2.1.0",
+        version = "2.2.0",
         description = "Extract text from images using Google Gemma-4-31b-it via Koog (Kotlin)"
 )
 class OCR_IA(val settings: OcrIASettings) {
@@ -75,7 +75,7 @@ class OCR_IA(val settings: OcrIASettings) {
     ): OCRResult {
         val logger = context.logger
         val effectiveOutputDir = outputDir ?: ""
-        logger.info("OCR IA v2.1.0 started.")
+        logger.info("OCR IA v2.2.0 started.")
         logger.info("Input: $input | Save: $save | OutputDir: '${effectiveOutputDir.ifBlank { "<same as image>" }}' | StructuredOutput: $useStructuredOutput")
 
         return try {

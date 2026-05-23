@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder",
         "name": "PSD Builder",
-        "version": "1.1.0",
+        "version": "2.0.0",
         "description": "A plugin that builds layered PSD files using PSD_builder.exe."
     },
     "requirements": {
@@ -245,6 +245,16 @@
                 "version": "1.0.0",
                 "date": "2026-05-23",
                 "categories": {
+                    "Added": [
+                        "Batch capability to process entire chapters concurrently (max 4 processes via Semaphore).",
+                        "Smart word-wrapping text generation to fit bounding boxes.",
+                        "Set \"Anime ACE 2.0\" as default fallback font."
+                    ],
+                    "Changed": [
+                        "Refactored `executeBuilder` to be a coroutine suspend function.",
+                        "Improved cleanup with safe `try-finally` blocks for temporary JSON files.",
+                        "Added option `leaveIntermediateFiles` for advanced debugging."
+                    ],
                     "Initial": [
                         "Initial release with PSD Builder capabilities"
                     ]

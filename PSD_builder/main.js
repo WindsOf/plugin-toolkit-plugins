@@ -2,6 +2,35 @@ const fs = require('fs');
 const { writePsdBuffer } = require('ag-psd');
 const { Jimp } = require('jimp');
 
+function wrapText(text, maxWidth, fontSize) {
+    // Stima della larghezza di un carattere medio (0.6 * fontSize è uno standard)
+    const approxCharWidth = fontSize * 0.6; 
+    const maxChars = Math.max(1, Math.floor(maxWidth / approxCharWidth));
+    
+    const words = text.split(/\s+/);
+    let lines = [];
+    let currentLine = "";
+    
+    words.forEach(word => {
+        if ((currentLine + word).length > maxChars) {
+            if (currentLine.length > 0) {
+                lines.push(currentLine.trim());
+                currentLine = word + " ";
+            } else {
+                lines.push(word);
+                currentLine = "";
+            }
+        } else {
+            currentLine += word + " ";
+        }
+    });
+    if (currentLine.length > 0) {
+        lines.push(currentLine.trim());
+    }
+    
+    return lines.join('\r'); // Photoshop usa \r per i ritorni a capo nei PSD
+}
+
 async function generatePSD(jsonPath, outputPath) {
     const payload = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
 
@@ -22,18 +51,31 @@ async function generatePSD(jsonPath, outputPath) {
     ];
 
     payload.texts.forEach((txtConfig, index) => {
+        let fontName = txtConfig.fontName || 'Anime ACE 2.0';
+        
+        // Se il plugin Kotlin gli ha passato ArialMT di default, sovrascriviamo
+        if (fontName === 'ArialMT') {
+            fontName = 'Anime ACE 2.0';
+        }
+
+        const fontSize = txtConfig.fontSize || 24;
+        const boxWidth = txtConfig.right - txtConfig.left;
+        
+        // Aggiungiamo l'andata a capo manuale in base alla grandezza stimata
+        const wrappedText = wrapText(txtConfig.text, boxWidth, fontSize);
+
         childrenNodes.push({
-            name: txtConfig.text + index,
+            name: `Testo ${index}`,
             left: txtConfig.left,
             top: txtConfig.top,
             right: txtConfig.right,
             bottom: txtConfig.bottom,
             text: {
-                text: txtConfig.text,
+                text: wrappedText,
                 transform: [1, 0, 0, 1, txtConfig.left, txtConfig.top],
                 style: {
-                    font: { name: txtConfig.fontName || 'ArialMT' },
-                    fontSize: txtConfig.fontSize || 24,
+                    font: { name: fontName },
+                    fontSize: fontSize,
                     fillColor: txtConfig.color || { r: 0, g: 0, b: 0, a: 255 }
                 }
             }

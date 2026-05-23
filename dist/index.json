@@ -38,22 +38,22 @@
     {
       "name": "OCR IA",
       "pkg": "com.wip.ocr_ia",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "fileName": "OCR_IA.jar",
       "description": "Extract text from images using Google Gemma-4-31b-it via Koog (Kotlin)",
       "targetAppVersion": "1.0.0",
-      "hash": "3d89a3ba48474fc7df74d5c5f4b142ebaed30c113ce79a263215201fd20a2500",
-      "signature": "Y7rR7QU8bykjpTwNRcYb8E5uYQcCdgd4rt8OSerokRqY5wOKu7+u1c1fCDip1Ibc4f8mbaCpFGNECbEf3Xb6AWjmKnhzZpLZOtTvDJp8J67v4hqkKNGNM2Yd9MINKO73hiQLWDLk5KSKXKDRM5ZV4BBtTF53Fa8UeL/+bIHOmB4gr0454H2hiM1GrVmEWj2YP0P54HogRgfEozrht+KJ0WhtnPRL57RjXmI8wFsLtLG7TphxYGMsURBeUEfaqeEcnJkr9OeWz4GgBhKNnYm5tDh2pW3dnN7z5qyaJmxe3XRRXft8OcBZh7esAJ2bmF34jRKipcNaYMf2sc6Vhwoo7g=="
+      "hash": "c6d6d3b4d230ff5d9665c67f108942760e2a579af1c0e6df811109961306d94d",
+      "signature": "bBWsc3hEWSr0hi/+JHrZjNzZrVgCUaTLA2c9ph42Pm5aOWRib9OtI4mAjh/1aJY1oGaq0Poudl9oD1bG/cn/IPoGOm5I19S1VjOY0cjrT0NR/nCczeXJHjwvImEmFV2AbAoeZotRllJLTAPita4bRxfdMmLePvNiBDB4X+oZW8clPFnUbS75bHPqIEleHCkqI6sCsIlaMkb6k2MBZSob7bwtRf/qeVg7uYPiyRqz4QscFfG74FKVAx+k+KSCkHSUEs4vohp3A9fFnexCTPU6agoWxZ6DlnVu7gdeiWnKFvyCVnpPNOS60iJ+ZX9ApC/+oYe1pCEbNm53TrrsFNoxmA=="
     },
     {
       "name": "PSD Builder",
       "pkg": "com.wip.psdbuilder",
-      "version": "1.1.0",
+      "version": "2.0.0",
       "fileName": "PSD_builder.jar",
       "description": "A plugin that builds layered PSD files using PSD_builder.exe.",
       "targetAppVersion": "1.0.0",
-      "hash": "27dfe856febebe8f486b8b25603eb4b28c0299807b0211d671899253db0fedb3",
-      "signature": "isW5raQ+2oR5l4BAOE7I9y3TWAjII9CXwSogbsKkRavUYssych9VYSD1klfrcSI5Oyga69W8VQ9K1dQqhRIwhAjfUEE02LJUh94TvKkWsCSfdKAAZpulYoTIZjCPV+3Zt5/K4ke0I9rbKL0NZiJwQ/M2/nk5UW/oFK4JDvojtAHPXGQVi4l10SlBOBaFQB6HlGCssAj245W931Sk1kU+OnrRWTNTCPxk7roQXpAvs07YK1XyQqK87MINUQDuAvWWwtdUuazcyk9HuY3V9aZ72FuNZ3EynXHM0jo7gXuRjtCQ2osr1m14D/2gMxlaHLMjh7nDn/P7nKmYAu0otACMfg=="
+      "hash": "3e781ef1f1952ffc564baa086bfeac15982bb190e695bb12f0b239cde762e90b",
+      "signature": "VsO5CAF1ESgIxLSYOZd4imoG6pTpJ0iycaeACChnqn39fSG1vNkJaveFCbRG88p/iaAQkx+tzW6jkZnfbbWisdeIf34Jbes+Xm6Lv1jQWQv6DCrlA4LvccKfsCJ0YiV9HHnjxR5e3dmDvXDhPi0eRUx5abR3e+UJB2NQBjlcVRaXAmo95R0Syvto3Ocuzxk0e8X7Swf4W/tdpBG+t5KSu5e1v1Hnh7cq+2mP9ZdDuCwoy4IQRzk0svOH52MQFL4nsYnrQsUs2A/s9W9XAgkGIRTeqs9R32sORMiA17ifMhsZAI3K6Sb+BFjFy1/mRdMTexNXWoqZ0TX/FRLHdolLxA=="
     },
     {
       "name": "Slicer",
