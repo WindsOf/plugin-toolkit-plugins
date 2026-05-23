@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder",
         "name": "PSD Builder",
-        "version": "2.0.1",
+        "version": "2.0.2",
         "description": "A plugin that builds layered PSD files using PSD_builder.exe."
     },
     "requirements": {
@@ -241,6 +241,15 @@
     ],
     "changelog": {
         "releases": [
+            {
+                "version": "2.0.2",
+                "date": "2026-05-23",
+                "categories": {
+                    "Changed": [
+                        "Fixed executable packaging by explicitly bundling Jimp assets to resolve MODULE_NOT_FOUND errors at runtime."
+                    ]
+                }
+            },
             {
                 "version": "1.0.0",
                 "date": "2026-05-23",

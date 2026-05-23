@@ -1,6 +1,6 @@
 {
   "name": "psd_builder",
-  "version": "1.0.0",
+  "version": "2.0.2",
   "main": "dist/index.js",
   "bin": "dist/index.js",
   "scripts": {
@@ -16,7 +16,13 @@
   },
   "pkg": {
     "scripts": [
-      "dist/**/*.js"
+      "dist/**/*.js",
+      "node_modules/@jimp/**/*.js",
+      "node_modules/jimp/**/*.js"
+    ],
+    "assets": [
+      "node_modules/@jimp/**/*",
+      "node_modules/jimp/**/*"
     ]
   },
   "devDependencies": {

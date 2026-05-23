@@ -1,3 +1,8 @@
+Version: 2.0.2
+Date: 2026-05-23
+Changed:
+  - Fixed executable packaging by explicitly bundling Jimp assets to resolve MODULE_NOT_FOUND errors at runtime.
+-------------------------------------------------------------------------------------------------
 Version: 2.0.1
 Date: 2026-05-23
 Added:
