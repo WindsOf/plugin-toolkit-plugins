@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder",
         "name": "PSD Builder",
-        "version": "3.0.1",
+        "version": "3.0.6",
         "description": "A plugin that builds layered PSD files using PSD_builder.exe."
     },
     "requirements": {
@@ -61,11 +61,15 @@
                     }
                 },
                 "fontName": {
-                    "defaultValue": "Anime Ace 2.0 BB",
+                    "defaultValue": "ANIME_ACE_2_0_BB",
                     "description": "Font name (optional)",
                     "type": {
-                        "type": "primitive",
-                        "primitiveType": "STRING"
+                        "type": "enum",
+                        "className": "com.wip.psdbuilder.PsdFont",
+                        "options": [
+                            "ANIME_ACE_2_0_BB",
+                            "ARIAL"
+                        ]
                     }
                 },
                 "borderSize": {
@@ -183,11 +187,15 @@
                     }
                 },
                 "fontName": {
-                    "defaultValue": "Anime Ace 2.0 BB",
+                    "defaultValue": "ANIME_ACE_2_0_BB",
                     "description": "Font name (optional)",
                     "type": {
-                        "type": "primitive",
-                        "primitiveType": "STRING"
+                        "type": "enum",
+                        "className": "com.wip.psdbuilder.PsdFont",
+                        "options": [
+                            "ANIME_ACE_2_0_BB",
+                            "ARIAL"
+                        ]
                     }
                 },
                 "borderSize": {
@@ -221,44 +229,55 @@
                     }
                 }
             ]
-        },
-        {
-            "name": "Build PSD from JSON",
-            "description": "Generates a layered PSD from a given JSON file",
-            "parameters": {
-                "jsonPath": {
-                    "description": "Path to JSON file",
-                    "type": {
-                        "type": "primitive",
-                        "primitiveType": "STRING"
-                    }
-                },
-                "outputPsdPath": {
-                    "description": "Output PSD path",
-                    "type": {
-                        "type": "primitive",
-                        "primitiveType": "STRING"
-                    }
-                }
-            },
-            "returnType": {
-                "type": "primitive",
-                "primitiveType": "STRING"
-            },
-            "outputs": [
-                {
-                    "name": "result",
-                    "description": "",
-                    "type": {
-                        "type": "primitive",
-                        "primitiveType": "STRING"
-                    }
-                }
-            ]
         }
     ],
     "changelog": {
         "releases": [
+            {
+                "version": "3.0.6",
+                "date": "2026-05-23",
+                "categories": {
+                    "Changed": [
+                        "Replaced the `fontName` free-text field with a strict dropdown Enum (`PsdFont`) allowing selection between `ANIME_ACE_2_0_BB` and `ARIAL`. This ensures no typos can be made in the UI and inherently guarantees valid PostScript fonts are passed to Photoshop."
+                    ]
+                }
+            },
+            {
+                "version": "3.0.5",
+                "date": "2026-05-23",
+                "categories": {
+                    "Fixed": [
+                        "Fixed font mapping issue where Photoshop did not recognize \"Anime Ace 2.0 BB\" because it strictly requires the internal PostScript name. `main.js` now maps the human-readable string to the formal PostScript string (`AnimeAce2.0BB`) automatically."
+                    ]
+                }
+            },
+            {
+                "version": "3.0.4",
+                "date": "2026-05-23",
+                "categories": {
+                    "Removed": [
+                        "Removed the `Build PSD from JSON` capability from the frontend to declutter the UI. The core Javascript logic remains accessible to the other capabilities (`Build PSD from Image and Texts`, `Build PSD for Chapter`), which both inherently benefit from the same robust safety checks and data parsing validations."
+                    ]
+                }
+            },
+            {
+                "version": "3.0.3",
+                "date": "2026-05-23",
+                "categories": {
+                    "Changed": [
+                        "Made bounding box variables strictly mandatory. The script will now throw a descriptive Error and exit cleanly instead of falling back to default 0 coordinates if `left`, `top`, `right`, or `bottom` are missing."
+                    ]
+                }
+            },
+            {
+                "version": "3.0.2",
+                "date": "2026-05-23",
+                "categories": {
+                    "Fixed": [
+                        "Made Javascript JSON parsing more robust, adding fallbacks for missing text properties, empty boundary coordinates (preventing NaN crashes), and graceful error throwing for missing background images."
+                    ]
+                }
+            },
             {
                 "version": "3.0.1",
                 "date": "2026-05-23",

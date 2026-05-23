@@ -22,6 +22,11 @@ import javax.imageio.ImageIO
 @Serializable
 data class PsdColor(val r: Int, val g: Int, val b: Int, val a: Int)
 
+enum class PsdFont {
+    ANIME_ACE_2_0_BB,
+    ARIAL
+}
+
 @Serializable
 data class PsdText(
     val text: String,
@@ -44,7 +49,7 @@ data class PsdPayload(
 @PluginInfo(
     id = "com.wip.psdbuilder",
     name = "PSD Builder",
-    version = "3.0.1",
+    version = "3.0.6",
     description = "A plugin that builds layered PSD files using PSD_builder.exe."
 )
 class PSDBuilderPlugin {
@@ -109,7 +114,7 @@ class PSDBuilderPlugin {
             semanticTypes = ["wom/bounding-box"]
         ) bb: List<List<Double>>,
         @CapabilityParam(description = "Font size (optional)", defaultValue = "24") fontSize: Int? = 24,
-        @CapabilityParam(description = "Font name (optional)", defaultValue = "\"Anime Ace 2.0 BB\"") fontName: String? = "Anime Ace 2.0 BB",
+        @CapabilityParam(description = "Font name (optional)", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
         @CapabilityParam(description = "Border thickness (0 for none)", defaultValue = "3") borderSize: Int? = 3,
         @CapabilityParam(description = "Output directory (optional)", defaultValue = "\"\"") outputDir: String? = "",
         @CapabilityParam(description = "Leave intermediate JSON files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
@@ -128,6 +133,11 @@ class PSDBuilderPlugin {
         val width = baseImage.width.toDouble()
         val height = baseImage.height.toDouble()
 
+        val psdFontString = when (fontName) {
+            PsdFont.ARIAL -> "ArialMT"
+            else -> "AnimeAce2.0BB"
+        }
+
         val psdTexts = texts.zip(bb).map { (text, box) ->
             val left = (box[0] * width).toInt()
             val top = (box[1] * height).toInt()
@@ -140,7 +150,7 @@ class PSDBuilderPlugin {
                 top = top,
                 right = right,
                 bottom = bottom,
-                fontName = fontName,
+                fontName = psdFontString,
                 fontSize = fontSize,
                 color = PsdColor(0, 0, 0, 255),
                 strokeSize = borderSize
@@ -188,7 +198,7 @@ class PSDBuilderPlugin {
         @CapabilityParam(description = "Page names corresponding to each text") pageNames: List<String>,
         @CapabilityParam(description = "Output directory", defaultValue = "\"\"") outputDir: String? = "",
         @CapabilityParam(description = "Font size (optional)", defaultValue = "24") fontSize: Int? = 24,
-        @CapabilityParam(description = "Font name (optional)", defaultValue = "\"Anime Ace 2.0 BB\"") fontName: String? = "Anime Ace 2.0 BB",
+        @CapabilityParam(description = "Font name (optional)", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
         @CapabilityParam(description = "Border thickness (0 for none)", defaultValue = "3") borderSize: Int? = 3,
         @CapabilityParam(description = "Leave intermediate JSON files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
         context: PluginContext
@@ -235,6 +245,11 @@ class PSDBuilderPlugin {
                                 val width = baseImage.width.toDouble()
                                 val height = baseImage.height.toDouble()
 
+                                val psdFontString = when (fontName) {
+                                    PsdFont.ARIAL -> "ArialMT"
+                                    else -> "AnimeAce2.0BB"
+                                }
+
                                 val psdTexts = pageTexts.zip(pageBb).map { (text, box) ->
                                     val left = (box[0] * width).toInt()
                                     val top = (box[1] * height).toInt()
@@ -247,7 +262,7 @@ class PSDBuilderPlugin {
                                         top = top,
                                         right = right,
                                         bottom = bottom,
-                                        fontName = fontName,
+                                        fontName = psdFontString,
                                         fontSize = fontSize,
                                         color = PsdColor(0, 0, 0, 255),
                                         strokeSize = borderSize
@@ -290,21 +305,7 @@ class PSDBuilderPlugin {
         return outDir.absolutePath
     }
 
-    @Capability(
-        name = "Build PSD from JSON",
-        description = "Generates a layered PSD from a given JSON file"
-    )
-    suspend fun buildPsdFromJson(
-        @CapabilityParam(description = "Path to JSON file") jsonPath: String,
-        @CapabilityParam(description = "Output PSD path") outputPsdPath: String,
-        context: PluginContext
-    ): String {
-        val jsonFile = File(jsonPath)
-        if (!jsonFile.exists()) {
-            throw IllegalArgumentException("JSON file not found: $jsonPath")
-        }
-        return executeBuilder(jsonFile.absolutePath, outputPsdPath, context)
-    }
+
 
     private suspend fun executeBuilder(jsonPath: String, outputPath: String, context: PluginContext): String {
         val logger = context.logger

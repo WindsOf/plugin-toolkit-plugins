@@ -34,6 +34,10 @@ function wrapText(text, maxWidth, fontSize) {
 async function generatePSD(jsonPath, outputPath) {
     const payload = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
 
+    if (!payload.backgroundImage) {
+        throw new Error("Missing 'backgroundImage' in JSON payload.");
+    }
+
     const bgImage = await Jimp.read(payload.backgroundImage);
 
     const canvasData = {
@@ -50,20 +54,27 @@ async function generatePSD(jsonPath, outputPath) {
         }
     ];
 
-    payload.texts.forEach((txtConfig, index) => {
-        let fontName = txtConfig.fontName || 'Anime Ace 2.0 BB';
-        
-        // Se il plugin Kotlin gli ha passato ArialMT di default, sovrascriviamo
-        if (fontName === 'ArialMT' || fontName === 'Anime ACE 2.0') {
-            fontName = 'Anime Ace 2.0 BB';
-        }
+    const textsList = payload.texts || [];
+
+    textsList.forEach((txtConfig, index) => {
+        const textContent = txtConfig.text || "";
+        let fontName = txtConfig.fontName || 'AnimeAce2.0BB';
 
         const fontSize = txtConfig.fontSize || 24;
-        const boxWidth = txtConfig.right - txtConfig.left;
-        const boxHeight = txtConfig.bottom - txtConfig.top;
+        const left = txtConfig.left;
+        const top = txtConfig.top;
+        const right = txtConfig.right;
+        const bottom = txtConfig.bottom;
+
+        if (left === undefined || top === undefined || right === undefined || bottom === undefined) {
+            throw new Error(`Missing mandatory bounding box coordinates (left, top, right, bottom) for text layer ${index}`);
+        }
+
+        const boxWidth = right - left;
+        const boxHeight = bottom - top;
         
         // Aggiungiamo l'andata a capo manuale in base alla grandezza stimata
-        const wrappedText = wrapText(txtConfig.text, boxWidth, fontSize);
+        const wrappedText = wrapText(textContent, boxWidth > 0 ? boxWidth : 100, fontSize);
 
         // Calcolo dell'offset verticale per centrare il testo nel box
         const lines = wrappedText.split('\r');
@@ -75,10 +86,10 @@ async function generatePSD(jsonPath, outputPath) {
 
         childrenNodes.push({
             name: `Testo ${index}`,
-            left: txtConfig.left,
-            top: txtConfig.top,
-            right: txtConfig.right,
-            bottom: txtConfig.bottom,
+            left: left,
+            top: top,
+            right: right,
+            bottom: bottom,
             ...(strokeSize > 0 ? {
                 effects: {
                     stroke: [{
@@ -96,7 +107,7 @@ async function generatePSD(jsonPath, outputPath) {
             } : {}),
             text: {
                 text: wrappedText,
-                transform: [1, 0, 0, 1, txtConfig.left, txtConfig.top + verticalOffset],
+                transform: [1, 0, 0, 1, left, top + verticalOffset],
                 left: 0,
                 top: 0,
                 right: boxWidth,

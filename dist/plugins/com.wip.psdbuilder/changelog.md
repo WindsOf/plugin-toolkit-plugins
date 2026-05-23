@@ -1,3 +1,28 @@
+Version: 3.0.6
+Date: 2026-05-23
+Changed:
+  - Replaced the `fontName` free-text field with a strict dropdown Enum (`PsdFont`) allowing selection between `ANIME_ACE_2_0_BB` and `ARIAL`. This ensures no typos can be made in the UI and inherently guarantees valid PostScript fonts are passed to Photoshop.
+-------------------------------------------------------------------------------------------------
+Version: 3.0.5
+Date: 2026-05-23
+Fixed:
+  - Fixed font mapping issue where Photoshop did not recognize "Anime Ace 2.0 BB" because it strictly requires the internal PostScript name. `main.js` now maps the human-readable string to the formal PostScript string (`AnimeAce2.0BB`) automatically.
+-------------------------------------------------------------------------------------------------
+Version: 3.0.4
+Date: 2026-05-23
+Removed:
+  - Removed the `Build PSD from JSON` capability from the frontend to declutter the UI. The core Javascript logic remains accessible to the other capabilities (`Build PSD from Image and Texts`, `Build PSD for Chapter`), which both inherently benefit from the same robust safety checks and data parsing validations.
+-------------------------------------------------------------------------------------------------
+Version: 3.0.3
+Date: 2026-05-23
+Changed:
+  - Made bounding box variables strictly mandatory. The script will now throw a descriptive Error and exit cleanly instead of falling back to default 0 coordinates if `left`, `top`, `right`, or `bottom` are missing.
+-------------------------------------------------------------------------------------------------
+Version: 3.0.2
+Date: 2026-05-23
+Fixed:
+  - Made Javascript JSON parsing more robust, adding fallbacks for missing text properties, empty boundary coordinates (preventing NaN crashes), and graceful error throwing for missing background images.
+-------------------------------------------------------------------------------------------------
 Version: 3.0.1
 Date: 2026-05-23
 Fixed:
