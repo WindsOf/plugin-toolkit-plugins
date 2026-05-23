@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder",
         "name": "PSD Builder",
-        "version": "3.0.0",
+        "version": "3.0.1",
         "description": "A plugin that builds layered PSD files using PSD_builder.exe."
     },
     "requirements": {
@@ -61,6 +61,7 @@
                     }
                 },
                 "fontName": {
+                    "defaultValue": "Anime Ace 2.0 BB",
                     "description": "Font name (optional)",
                     "type": {
                         "type": "primitive",
@@ -76,6 +77,7 @@
                     }
                 },
                 "outputDir": {
+                    "defaultValue": "",
                     "description": "Output directory (optional)",
                     "type": {
                         "type": "primitive",
@@ -165,6 +167,7 @@
                     }
                 },
                 "outputDir": {
+                    "defaultValue": "",
                     "description": "Output directory",
                     "type": {
                         "type": "primitive",
@@ -180,6 +183,7 @@
                     }
                 },
                 "fontName": {
+                    "defaultValue": "Anime Ace 2.0 BB",
                     "description": "Font name (optional)",
                     "type": {
                         "type": "primitive",
@@ -255,6 +259,15 @@
     ],
     "changelog": {
         "releases": [
+            {
+                "version": "3.0.1",
+                "date": "2026-05-23",
+                "categories": {
+                    "Fixed": [
+                        "Fixed a JSON decoding exception on plugin initialization by explicitly adding escaped double quotes to string default values (like \"Anime Ace 2.0 BB\") in capability parameters, ensuring compliance with kotlinx.serialization."
+                    ]
+                }
+            },
             {
                 "version": "3.0.0",
                 "date": "2026-05-23",

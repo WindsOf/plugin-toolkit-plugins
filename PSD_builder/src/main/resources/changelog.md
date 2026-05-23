@@ -1,3 +1,8 @@
+Version: 3.0.1
+Date: 2026-05-23
+Fixed:
+  - Fixed a JSON decoding exception on plugin initialization by explicitly adding escaped double quotes to string default values (like "Anime Ace 2.0 BB") in capability parameters, ensuring compliance with kotlinx.serialization.
+-------------------------------------------------------------------------------------------------
 Version: 3.0.0
 Date: 2026-05-23
 Added:

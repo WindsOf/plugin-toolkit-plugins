@@ -44,7 +44,7 @@ data class PsdPayload(
 @PluginInfo(
     id = "com.wip.psdbuilder",
     name = "PSD Builder",
-    version = "3.0.0",
+    version = "3.0.1",
     description = "A plugin that builds layered PSD files using PSD_builder.exe."
 )
 class PSDBuilderPlugin {
@@ -109,9 +109,9 @@ class PSDBuilderPlugin {
             semanticTypes = ["wom/bounding-box"]
         ) bb: List<List<Double>>,
         @CapabilityParam(description = "Font size (optional)", defaultValue = "24") fontSize: Int? = 24,
-        @CapabilityParam(description = "Font name (optional)", defaultValue = "Anime Ace 2.0 BB") fontName: String? = "Anime Ace 2.0 BB",
+        @CapabilityParam(description = "Font name (optional)", defaultValue = "\"Anime Ace 2.0 BB\"") fontName: String? = "Anime Ace 2.0 BB",
         @CapabilityParam(description = "Border thickness (0 for none)", defaultValue = "3") borderSize: Int? = 3,
-        @CapabilityParam(description = "Output directory (optional)", defaultValue = "") outputDir: String? = "",
+        @CapabilityParam(description = "Output directory (optional)", defaultValue = "\"\"") outputDir: String? = "",
         @CapabilityParam(description = "Leave intermediate JSON files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
         context: PluginContext
     ): String {
@@ -186,9 +186,9 @@ class PSDBuilderPlugin {
             semanticTypes = ["wom/bounding-box"]
         ) bb: List<List<Double>>,
         @CapabilityParam(description = "Page names corresponding to each text") pageNames: List<String>,
-        @CapabilityParam(description = "Output directory", defaultValue = "") outputDir: String? = "",
+        @CapabilityParam(description = "Output directory", defaultValue = "\"\"") outputDir: String? = "",
         @CapabilityParam(description = "Font size (optional)", defaultValue = "24") fontSize: Int? = 24,
-        @CapabilityParam(description = "Font name (optional)", defaultValue = "Anime Ace 2.0 BB") fontName: String? = "Anime Ace 2.0 BB",
+        @CapabilityParam(description = "Font name (optional)", defaultValue = "\"Anime Ace 2.0 BB\"") fontName: String? = "Anime Ace 2.0 BB",
         @CapabilityParam(description = "Border thickness (0 for none)", defaultValue = "3") borderSize: Int? = 3,
         @CapabilityParam(description = "Leave intermediate JSON files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
         context: PluginContext
