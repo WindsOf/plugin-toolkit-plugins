@@ -8,12 +8,12 @@
     {
       "name": "BetterIMG",
       "pkg": "com.wip.betterimg",
-      "version": "2.0.3",
+      "version": "2.0.4",
       "fileName": "betterimg.jar",
       "description": "A plugin that processes images using the BetterIMG CLI tool.",
       "targetAppVersion": "1.0.0",
-      "hash": "5b989dd146f26e531f397c086082502b54abc4b0b5403403ea01dab39eab991c",
-      "signature": "Teh4FEge22yDZVNhFJkHNTAGmkmCVCy+DUNtvHwOFfnmhguw4bMXvtClKyuo6KhA2/jnjyW8z8K6xwsLogN64ryTptqSW/LsSX3gwhHXzGSSmptSj+q6WAte9cvl9OpUt5cn0AOQpEMKckOhXkRsJSYaCvOiJRq0VJXNr9bAV3GwyTctMLPgTD1iMtS9NdsWoL5Ya7QYKCGm6wxLlAcV6NOHdxw0Pj42yVYYW6GC2DA1hBI1J65J/n39m1jrvenICvcBFZ2NzfFJwYQB1Y/AYlpTW5ubKRN+OxWKyMv1nFnpmgmxI36ZXEd2+nDkgsCNLh1/RDBKRIegpRvCoyuh2Q=="
+      "hash": "5af8b2e22c8f05340f1abaa4ff09066bb9b315cb93e450c08de87422182f4772",
+      "signature": "kbClFe4fnWb+aBm5P1wJJdQ9PYaqNacyChJF92nkzo/zmEMDj4b6eVIDYIj62Xb24ajHJm9/XlyAGOYb4FUog4lz9i2B2RqpN9jN+dnykpt5k4uSgendh6cb0kP66XbSwW3lgfEMQ+DjAk59wIJktAaz8yauJGAWnYW76swLiAKyoviWUs4cahy3p9sZup1szAJGz/1upOvy92NWIDmJkVyKuVpMzRqyDokAh1uGX9Gtbof1NnDKGGo3dwujoo1HjO/rMIpSRm8N+vCttWaasvWDNfv3qkhxbi1Fn+zoe+dZZJVkKjkZq6qCNwJXOy6OPOJwTL+vhFhJAlYPivfdXg=="
     },
     {
       "name": "Image Toolkit",
@@ -46,6 +46,16 @@
       "signature": "Y7rR7QU8bykjpTwNRcYb8E5uYQcCdgd4rt8OSerokRqY5wOKu7+u1c1fCDip1Ibc4f8mbaCpFGNECbEf3Xb6AWjmKnhzZpLZOtTvDJp8J67v4hqkKNGNM2Yd9MINKO73hiQLWDLk5KSKXKDRM5ZV4BBtTF53Fa8UeL/+bIHOmB4gr0454H2hiM1GrVmEWj2YP0P54HogRgfEozrht+KJ0WhtnPRL57RjXmI8wFsLtLG7TphxYGMsURBeUEfaqeEcnJkr9OeWz4GgBhKNnYm5tDh2pW3dnN7z5qyaJmxe3XRRXft8OcBZh7esAJ2bmF34jRKipcNaYMf2sc6Vhwoo7g=="
     },
     {
+      "name": "PSD Builder",
+      "pkg": "com.wip.psdbuilder",
+      "version": "1.1.0",
+      "fileName": "PSD_builder.jar",
+      "description": "A plugin that builds layered PSD files using PSD_builder.exe.",
+      "targetAppVersion": "1.0.0",
+      "hash": "27dfe856febebe8f486b8b25603eb4b28c0299807b0211d671899253db0fedb3",
+      "signature": "isW5raQ+2oR5l4BAOE7I9y3TWAjII9CXwSogbsKkRavUYssych9VYSD1klfrcSI5Oyga69W8VQ9K1dQqhRIwhAjfUEE02LJUh94TvKkWsCSfdKAAZpulYoTIZjCPV+3Zt5/K4ke0I9rbKL0NZiJwQ/M2/nk5UW/oFK4JDvojtAHPXGQVi4l10SlBOBaFQB6HlGCssAj245W931Sk1kU+OnrRWTNTCPxk7roQXpAvs07YK1XyQqK87MINUQDuAvWWwtdUuazcyk9HuY3V9aZ72FuNZ3EynXHM0jo7gXuRjtCQ2osr1m14D/2gMxlaHLMjh7nDn/P7nKmYAu0otACMfg=="
+    },
+    {
       "name": "Slicer",
       "pkg": "com.wip.slicer",
       "version": "1.1.0",
@@ -62,8 +72,8 @@
       "fileName": "test_flow.json",
       "version": "1.0.5",
       "description": "A simple test flow for repository generation",
-      "hash": "d8eab8bfb25a9ea4004591ac30bd103761a551ff34d682a63d9e97728a4a247e",
-      "signature": "IzqrOduYIiKCVTYVeWKd4renoidWtBfOY451apkMqHy7Wk8GRY7fV/IHibUpj5ggSpNF6g9NCd+ZAbbIbBQtUEHJ7CN/Vj8F2PCh5OnC5OqqdyVZgIn2InbmZrZsql+5BqX654P0cVBLE07P2oaGJ2mxWVpNx5XxUybi9wrpBAldcFHg+oxy5TeyTPU+Kx04p7xGZKeJidukbNqN4WSFsEsAm4a+/nM+607fHspJFWYj9/wzBYQqC5DzrCx8x9ZMA9LnuKBc8PFPOj3R3O+lNEyGgGw+4tMhL6OwsphKB7lFJbhcJCgjPinVugj8GT0LCR2Gpwpg/so4mMj2kaRGEg=="
+      "hash": "977205eb41d035e4b4ea7bc7eb49932b49a5ff522d855b6e0d0f04fd66bf6805",
+      "signature": "EDSxYKxShhcAbbFC2vLVv6ItnFDlV0gaIkDo7Ns4JQI+lW5KPwsbmt+tWXcdlGWSq9m+G1edxmN1sMKgNQSOpcFIaULNF/1oU74BxgNRiqV5wR9JJjDY2dX7sp/W4g1zXeq8f/f5PtHd15bPuFuTGLVXkT94QV+YIJsgSKoNMwE/pUczqM6bmP2+QMQFLOuXxSPR/Im36bLB2fVphUE7rI20vlLm9yb5HoNdoCogh6c2ZE2+bmPS92wBB9knmQWf7AX4+bBLn5fpa5uuiScnwOR2ybiEqCAcln9n5s6kjUtryJP7V65ha0+gkTgIPmuTlwc5fU9ypGnhFopJHlBRkQ=="
     }
   ],
   "signPublicKey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtBeECp5qqAsmv+6EqOOrniZet5dSiuaTQqhnNwp2Ij/LxPn6NaHTRegIvKDmbVKZhnVz2nWkAvRNPjieJG+anZPks1RtMIGSnQndA+XbrU6JzDGo8PiQhkPdr+2604NHrTnY0SRgBtSHwOKFcDUOFOyE1ZbDTgXvii5NnfFlvALwrpRj2NsqZwdnX5oAcd4boAHLGU9Z4yWocYHP29/6ACshtgI0ysJNTsDIFnccScr/O+0vXZyHcr3vrC6esogarc/1qRxRQbH0QKwTliqUWb/ax4z0bZxc3X76iF4A88wpKWxCSLlM9jX7uq14PgWTPBi9XpUvasAVh6qzDpoThQIDAQAB",
