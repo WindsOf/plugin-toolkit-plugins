@@ -87,7 +87,8 @@ class KoogAITranslatorService(private val context: PluginContext) {
                 LLMCapability.Completion,
                 LLMCapability.Temperature,
                 LLMCapability.Thinking
-            )
+            ),
+            contextLength = 100000,
         )
 
         // ── Prompt ─────────────────────────────────────────────────────

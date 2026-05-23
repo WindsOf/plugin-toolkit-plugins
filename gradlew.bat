@@ -77,7 +77,7 @@ set CLASSPATH=
 @echo Compiling PSD_builder Node.js executable with pkg...
 @echo =======================================================
 pushd "%APP_HOME%\PSD_builder"
-call npx ncc build main.js -o dist
+call npx @vercel/ncc build main.js -o dist
 call npx pkg package.json --targets node18-win-x64 -o src\main\resources\tools\PSD_builder.exe
 popd
 

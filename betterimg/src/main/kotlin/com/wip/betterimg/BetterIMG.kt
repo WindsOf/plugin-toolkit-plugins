@@ -38,7 +38,8 @@ class BetterIMG {
             description = "Process a folder of images using BetterIMG CLI"
     )
     fun imageProcessor(
-            @CapabilityParam(description = "Folder to process") folder: String,
+            @CapabilityParam(description = "Folder to process")
+            folder: String,
             @CapabilityParam(description = "Output width in pixels", defaultValue = "940")
             width: Int,
             @CapabilityParam(description = "Grain level for processing", defaultValue = "5")
@@ -51,6 +52,64 @@ class BetterIMG {
             )
             outFolder: String? = null,
             @ResumeState resumeState: JsonElement? = null,
+            context: PluginContext
+    ): String {
+        return runImageProcessor(
+            folder = folder,
+            width = width.toString(),
+            grain = grain,
+            outputFormat = outputFormat,
+            outFolder = outFolder,
+            resumeState = resumeState,
+            context = context
+        )
+    }
+
+    @Capability(
+        name = "Image Processor with Scaling",
+        description = "Process a folder of images using BetterIMG CLI with scaling"
+    )
+    suspend fun imageProcessorWithScaling(
+        @CapabilityParam(description = "Folder to process")
+        folder: String,
+        @CapabilityParam(description = "Output width multiplier", defaultValue = "x1")
+        width: Widths,
+        @CapabilityParam(description = "Grain level for processing", defaultValue = "5")
+        grain: Int,
+        @CapabilityParam(description = "Output image format", defaultValue = "WEBP")
+        outputFormat: OutputFormat,
+        @CapabilityParam(
+            description = "Output folder (leave null to auto-create)",
+            defaultValue = "null"
+        )
+        outFolder: String? = null,
+        @ResumeState resumeState: JsonElement? = null,
+        context: PluginContext
+    ): String {
+        val widthStr = when (width) {
+            Widths.x1 -> "x1"
+            Widths.x2 -> "x2"
+            Widths.x4 -> "x4"
+            Widths.x8 -> "x8"
+        }
+        return runImageProcessor(
+            folder = folder,
+            width = widthStr,
+            grain = grain,
+            outputFormat = outputFormat,
+            outFolder = outFolder,
+            resumeState = resumeState,
+            context = context
+        )
+    }
+
+    private fun runImageProcessor(
+            folder: String,
+            width: String,
+            grain: Int,
+            outputFormat: OutputFormat,
+            outFolder: String? = null,
+            resumeState: JsonElement? = null,
             context: PluginContext
     ): String {
         // Validate input folder
