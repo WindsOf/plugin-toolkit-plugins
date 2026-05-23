@@ -1,6 +1,6 @@
 {
   "name": "psd_builder",
-  "version": "3.0.7",
+  "version": "3.0.10",
   "main": "dist/index.js",
   "bin": "dist/index.js",
   "scripts": {

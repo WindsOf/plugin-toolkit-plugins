@@ -1,3 +1,18 @@
+Version: 3.0.10
+Date: 2026-05-23
+Changed:
+  - Removed the simulated vertical centering logic to leave the Paragraph text box strictly top-aligned inside the bounds, as requested.
+-------------------------------------------------------------------------------------------------
+Version: 3.0.9
+Date: 2026-05-23
+Fixed:
+  - Fixed an orientation bug where `boxBounds` coordinates were passed in the wrong order. The engine strictly requires `[Left, Top, Right, Bottom]`, but the width and height values were swapped, causing paragraph bounds to render vertically instead of horizontally. The axes are now correctly assigned.
+-------------------------------------------------------------------------------------------------
+Version: 3.0.8
+Date: 2026-05-23
+Changed:
+  - Reintroduced approximate vertical centering for Paragraph text boxes. `ag-psd` natively top-aligns paragraph text, so `main.js` now estimates the number of lines required (without destructively modifying the native wrapping) and shifts both the text `transform` and the internal `boxBounds` downwards. This visually centers the text while maintaining the structural boundaries of the Bounding Box.
+-------------------------------------------------------------------------------------------------
 Version: 3.0.7
 Date: 2026-05-23
 Changed:

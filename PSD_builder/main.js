@@ -72,7 +72,7 @@ async function generatePSD(jsonPath, outputPath) {
             text: {
                 text: textContent, // Nessun wrapping manuale!
                 shapeType: 'box', // Trasforma in Paragrafo nativo di Photoshop
-                boxBounds: [0, 0, boxHeight, boxWidth], // I limiti fisici del paragrafo [top, left, bottom, right] relativi al layer
+                boxBounds: [0, 0, boxWidth, boxHeight], // Formato: [Left, Top, Right, Bottom]
                 transform: [1, 0, 0, 1, left, top], // Offset globale del livello
                 left: 0,
                 top: 0,

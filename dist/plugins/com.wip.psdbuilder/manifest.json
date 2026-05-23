@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder",
         "name": "PSD Builder",
-        "version": "3.0.7",
+        "version": "3.0.10",
         "description": "A plugin that builds layered PSD files using PSD_builder.exe."
     },
     "requirements": {
@@ -233,6 +233,33 @@
     ],
     "changelog": {
         "releases": [
+            {
+                "version": "3.0.10",
+                "date": "2026-05-23",
+                "categories": {
+                    "Changed": [
+                        "Removed the simulated vertical centering logic to leave the Paragraph text box strictly top-aligned inside the bounds, as requested."
+                    ]
+                }
+            },
+            {
+                "version": "3.0.9",
+                "date": "2026-05-23",
+                "categories": {
+                    "Fixed": [
+                        "Fixed an orientation bug where `boxBounds` coordinates were passed in the wrong order. The engine strictly requires `[Left, Top, Right, Bottom]`, but the width and height values were swapped, causing paragraph bounds to render vertically instead of horizontally. The axes are now correctly assigned."
+                    ]
+                }
+            },
+            {
+                "version": "3.0.8",
+                "date": "2026-05-23",
+                "categories": {
+                    "Changed": [
+                        "Reintroduced approximate vertical centering for Paragraph text boxes. `ag-psd` natively top-aligns paragraph text, so `main.js` now estimates the number of lines required (without destructively modifying the native wrapping) and shifts both the text `transform` and the internal `boxBounds` downwards. This visually centers the text while maintaining the structural boundaries of the Bounding Box."
+                    ]
+                }
+            },
             {
                 "version": "3.0.7",
                 "date": "2026-05-23",
