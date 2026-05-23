@@ -165,7 +165,8 @@ class KoogOcrService(private val context: PluginContext) {
                 LLMCapability.Completion,
                 LLMCapability.Temperature,
                 LLMCapability.Vision.Image,
-            )
+            ),
+            contextLength = 100000,
         )
         logger.info("Model definition complete: ${model.id}")
 
