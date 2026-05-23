@@ -1,3 +1,8 @@
+Version: 2.1.0
+Date: 2026-05-23
+Changed:
+  - Automate pkg compilation directly via Gradle build scripts.
+-------------------------------------------------------------------------------------------------
 Version: 2.0.2
 Date: 2026-05-23
 Changed:

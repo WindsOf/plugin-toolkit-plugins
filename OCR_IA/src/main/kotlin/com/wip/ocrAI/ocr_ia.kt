@@ -52,7 +52,7 @@ data class OCRResult(
 @PluginInfo(
         id = "com.wip.ocr_ia",
         name = "OCR IA",
-        version = "2.2.2",
+        version = "2.3.0",
         description = "Extract text from images using Google Gemma-4-26b-a4b-it via Koog (Kotlin)"
 )
 class OCR_IA(val settings: OcrIASettings) {
@@ -71,16 +71,18 @@ class OCR_IA(val settings: OcrIASettings) {
             outputDir: String? = "",
             @CapabilityParam(description = "Whether to use native structured output (might not be supported by all models)", defaultValue = "false")
             useStructuredOutput: Boolean,
+            @CapabilityParam(description = "The Gemini Model ID to use", defaultValue = "gemma-4-26b-a4b-it")
+            modelId: String,
             context: PluginContext
     ): OCRResult {
         val logger = context.logger
         val effectiveOutputDir = outputDir ?: ""
-        logger.info("OCR IA v2.2.2 started.")
+        logger.info("OCR IA v2.3.0 started. Model: $modelId")
         logger.info("Input: $input | Save: $save | OutputDir: '${effectiveOutputDir.ifBlank { "<same as image>" }}' | StructuredOutput: $useStructuredOutput")
 
         return try {
             val service = KoogOcrService(context)
-            val ocrResult = service.performOcr(input, save, effectiveOutputDir, settings.googleApiKey, useStructuredOutput)
+            val ocrResult = service.performOcr(input, save, effectiveOutputDir, settings.googleApiKey, useStructuredOutput, modelId)
             OCRResult(ocrResult.texts, ocrResult.bb, ocrResult.pageNumbers, ocrResult.pageNames, ocrResult.failedFiles)
         } catch (e: Throwable) {
             val msg = "OCR failed: ${e::class.simpleName}: ${e.message}"

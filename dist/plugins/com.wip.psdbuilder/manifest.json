@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder",
         "name": "PSD Builder",
-        "version": "2.0.2",
+        "version": "2.1.0",
         "description": "A plugin that builds layered PSD files using PSD_builder.exe."
     },
     "requirements": {
@@ -241,6 +241,15 @@
     ],
     "changelog": {
         "releases": [
+            {
+                "version": "2.1.0",
+                "date": "2026-05-23",
+                "categories": {
+                    "Changed": [
+                        "Automate pkg compilation directly via Gradle build scripts."
+                    ]
+                }
+            },
             {
                 "version": "2.0.2",
                 "date": "2026-05-23",

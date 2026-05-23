@@ -91,7 +91,8 @@ class KoogOcrService(private val context: PluginContext) {
         save: Boolean,
         outputDir: String,
         apiKey: String,
-        useStructuredOutput: Boolean
+        useStructuredOutput: Boolean,
+        modelId: String
     ): OcrServiceResult {
         // ── Resolve files ──────────────────────────────────────────────
         val inputPath = java.nio.file.Paths.get(input)
@@ -156,10 +157,10 @@ class KoogOcrService(private val context: PluginContext) {
         }
         logger.info("Executor initialized.")
 
-        logger.info("Defining LLModel: gemma-4-26b-a4b-it")
+        logger.info("Defining LLModel: $modelId")
         val model = LLModel(
             provider = LLMProvider.Google,
-            id = "gemma-4-26b-a4b-it",
+            id = modelId,
             capabilities = listOf(
                 LLMCapability.Completion,
                 LLMCapability.Temperature,

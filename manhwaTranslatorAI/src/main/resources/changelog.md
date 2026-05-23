@@ -1,3 +1,8 @@
+Version: 1.1.0
+Date: 2026-05-23
+Added:
+  - Added 'modelId' capability parameter to allow dynamic model selection via UI. Default is gemma-4-31b-it.
+-------------------------------------------------------------------------------------------------
 Version: 1.0.2
 Date: 2026-05-23
 Changed:

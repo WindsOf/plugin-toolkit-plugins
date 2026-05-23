@@ -73,6 +73,13 @@ goto fail
 set CLASSPATH=
 
 
+@echo =======================================================
+@echo Compiling PSD_builder Node.js executable with pkg...
+@echo =======================================================
+pushd "%APP_HOME%\PSD_builder"
+call npx pkg package.json --targets node18-win-x64 -o src\main\resources\tools\PSD_builder.exe
+popd
+
 @rem Execute Gradle
 "%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" -jar "%APP_HOME%\gradle\wrapper\gradle-wrapper.jar" %*
 

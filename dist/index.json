@@ -28,32 +28,32 @@
     {
       "name": "Manhwa Translator AI",
       "pkg": "com.wip.manhwa_translator_ai",
-      "version": "1.0.2",
+      "version": "1.1.0",
       "fileName": "manhwaTranslatorAI.jar",
       "description": "Translate text from Manhwa/Manga into Italian using Google AI via Koog",
       "targetAppVersion": "1.0.0",
-      "hash": "1c5fe9613b5af41348ce38dc86cc37dc91b83934c809df3df7c00f011c1f524b",
-      "signature": "CexlsTU0RsdnFGXHNngZfgGB3qud8G5+QX75xmWGXYdxF88l/iLgBqeVSarQB25rSoekdgVD6QxalOHatVTnzw9EXp16i13NILFNUGPSUnar54oOiWKxVBc+MX5k/OkRw4lJ/i7fPxYvtH6t3qFMXlRALREMG9mAP/sFd4nC+WU5SS49/P/gxXCHTBhPairrdrgaaDu3Z/otZuBPQOrlkyCO0FNa0Vrsh8QApL8P7/Y65/f0/uOQCbFTE/v/5EGSylq6bEx73d0/kLp2Ga7vBXHqDPs7p6HwsY0mG/wL+wjRtBncKuU3SrcVIVio9znIQN9Vbwvsxz7we6sYrClPog=="
+      "hash": "c7e71e91c3275dbad9f24d8a587aee6ed60cb9c4698c9bbf7655f3786b2ec16d",
+      "signature": "hh+DCy+T1MmM2kuZKizh/7Y6QsL2W5R0dLe1TGtEREtuBM5EXJEZ58wzsyf5KM52BJp52hWoLuIuV3PQkJvlxwnQXiJWfxBmYtAUzjaTGeoBVdkE5jNUXxCqziYF5iBaaXnPttFM5HA/8cNmBx/tgOe3H23V9ytCgY9cdLdH38B6vdid01a0IT5t/NQlaUu9ohcdTjGXd2aCVeKixaP0Vk5k1l13vJ+82flMLenPxzIEF5X+rii4KKn2y0+onVTbyYWmJQXtEgIEUpoyTjJiIUahOxu6bMPEfLvKq9MFfqeymrNgZMpZuQdGlHwXGDfQ84pYRa589R7PHt7dXycAeg=="
     },
     {
       "name": "OCR IA",
       "pkg": "com.wip.ocr_ia",
-      "version": "2.2.2",
+      "version": "2.3.0",
       "fileName": "OCR_IA.jar",
       "description": "Extract text from images using Google Gemma-4-26b-a4b-it via Koog (Kotlin)",
       "targetAppVersion": "1.0.0",
-      "hash": "fdcac14480ad3d708fc04f6930e9acc99f50dfac9d76e278460dc3d25d3cc64c",
-      "signature": "GqEn+3dTP1iPYRwkrBnfYSkhkHQwS6mipyt1piuqYoX69SmXFO/6ii7MtWTUgpR0CuFTp5N7kqPB01Wupjv858rEDbr1ryHAVTpzZYVOHE8vlZjWnZGLLZQ5M6YCFGd/sjr0M3LR7PKp03kiHhQD1avYPXkOpsmreKQvfhFEPmvV0Fy3FOIvIRDzpux4m6iODyc8k1SM8yUpWLJsmc5jMu5im2arjkVSfZH3HRpcBNHHJ7dVKa60FuWeHqK0kKQXuMC/KH17ou/nWq3ea1wOTpotS2rFXQH+lrUqYHO4nGK2Gizon0fNSy1VlOvs5KfPVbOzarlkAJ2hfV32jq16yQ=="
+      "hash": "7360cb62f1b80f64060773e3689cfb455a7fceee162b28251234da7072d1259c",
+      "signature": "k6+9hdiS5mNd+MqPmTnsIuzu8ICD41k6NNEnBi5Rj7g/ZKclG07k4+5URoV2CR9NLOFKbFiKZxY382hNZF4aQYCmRckh5eMwP7UbZK7A1OJUzFup14CXHHr8s4kiXuJCFVFwlnLqq0Ketni5PZycqjvNpYHIzKEC4SAz3YMLAggFfb+gUuYgSqg9kSRidV6ELJDqoJeAT6+x53AdFhYIx2TZPeIZMoZ5V+Rn6Vyxi26tPXGEG3QPlcDqKarh0OuRDcoYI84XHLCc8DPwi0HauD3uSXQcMqmctHYz5UDk7qaEcDXZ1zsOT7UVT0iGiHP1vqd8vV63xiJSUs9Q9eaW4w=="
     },
     {
       "name": "PSD Builder",
       "pkg": "com.wip.psdbuilder",
-      "version": "2.0.2",
+      "version": "2.1.0",
       "fileName": "PSD_builder.jar",
       "description": "A plugin that builds layered PSD files using PSD_builder.exe.",
       "targetAppVersion": "1.0.0",
-      "hash": "c2ee37923f91fcce002a0426ea318e44915f8f7043e0a20e673e2974474b1c42",
-      "signature": "Hil5wFGer6gb1yDVyDSBMtMDM9fEjGesfSLqiR9cqKZCXjvWHsnlzPw3nLjtjzUgZnPnZsLYEkIBjgWOZ8wjMloAS7hgz7dEQl+ByTh8IuhmhL1u3CCwOKoi6KqhmkZ7nUmgNq3PMY4wl/tS0VegomTXi1x7bqWT5mQ6X/J0sEBRTweDhwkwg97wXmLWzDWbGz02/GGtHF4LEaBCYjB1hOFD7YfbQxjRsVNbb0LAipO8YAXMcQMgCdin1w9K4IcdiscMnCO3/clJjPV1qfuwDBWO6Uy5ihllyvlfZ/t2cLpC9dUd9zgls6lwdsCSGcM2/LKX1LLGForBVF/ljOq2ww=="
+      "hash": "546e7872d62b2c5a089536726545ac11e92bdf19378e9d836fa2b9a33b1ed205",
+      "signature": "VHKWYA1ivTy7stFZZdyZf4QcM6BT1h1MZXRZmpPMzB000NNLqRQ6JDrOr6i73swyRRkwJNZIWNkCvY7xqsDxEUSe64bMAPeNEsKQb0rC37JywI37cl3FiqlIjlAYsq+hFhXe//ef7Flxq5K3PpXCK3hHGuVtldESOgTlkZRmzFFFtWQXbyHdFrP/C2db7xzTp+xAoAvtZCXGVpvWboy/tcdAcQKcp112jPccCQZhZ4znxQX34Q6ojFaRE6YASU7pP2sftqSp9fkdrRf0R/eKbeCDFqkM45rAZETlLKV5YW1yMhsge913qdPCGQSYl5aHnx8oQqINH37R4+nTWnwXwQ=="
     },
     {
       "name": "Slicer",

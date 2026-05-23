@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.manhwa_translator_ai",
         "name": "Manhwa Translator AI",
-        "version": "1.0.2",
+        "version": "1.1.0",
         "description": "Translate text from Manhwa/Manga into Italian using Google AI via Koog"
     },
     "requirements": {
@@ -27,6 +27,14 @@
                 },
                 "dictionary": {
                     "description": "Dictionary of words/actions to keep the translation coherent",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "modelId": {
+                    "defaultValue": "gemma-4-31b-it",
+                    "description": "The Gemini Model ID to use",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
@@ -76,6 +84,15 @@
     },
     "changelog": {
         "releases": [
+            {
+                "version": "1.1.0",
+                "date": "2026-05-23",
+                "categories": {
+                    "Added": [
+                        "Added 'modelId' capability parameter to allow dynamic model selection via UI. Default is gemma-4-31b-it."
+                    ]
+                }
+            },
             {
                 "version": "1.0.2",
                 "date": "2026-05-23",

@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.ocr_ia",
         "name": "OCR IA",
-        "version": "2.2.2",
+        "version": "2.3.0",
         "description": "Extract text from images using Google Gemma-4-26b-a4b-it via Koog (Kotlin)"
     },
     "requirements": {
@@ -50,6 +50,14 @@
                     "type": {
                         "type": "primitive",
                         "primitiveType": "BOOLEAN"
+                    }
+                },
+                "modelId": {
+                    "defaultValue": "gemma-4-26b-a4b-it",
+                    "description": "The Gemini Model ID to use",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
                     }
                 }
             },
@@ -139,6 +147,15 @@
     },
     "changelog": {
         "releases": [
+            {
+                "version": "2.3.0",
+                "date": "2026-05-23",
+                "categories": {
+                    "Added": [
+                        "Added 'modelId' capability parameter to allow dynamic model selection via UI. Default is gemma-4-26b-a4b-it."
+                    ]
+                }
+            },
             {
                 "version": "2.2.2",
                 "date": "2026-05-23",

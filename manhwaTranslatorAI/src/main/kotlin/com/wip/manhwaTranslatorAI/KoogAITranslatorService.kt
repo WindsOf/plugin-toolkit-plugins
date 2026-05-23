@@ -62,7 +62,8 @@ class KoogAITranslatorService(private val context: PluginContext) {
         input: List<String>,
         dictionary: String,
         apiKey: String,
-        useStructuredOutput: Boolean = true
+        useStructuredOutput: Boolean = true,
+        modelId: String
     ): List<String> {
         if (input.isEmpty()) return emptyList()
 
@@ -78,10 +79,10 @@ class KoogAITranslatorService(private val context: PluginContext) {
         // ── Executor + Model ───────────────────────────────────────────
         val executor = simpleGoogleAIExecutor(effectiveApiKey)
         
-        // Note: Using the model ID specified in the original code, switched to gemma-4-26b-a4b-it for stability.
+        // Note: Using dynamic model ID from UI settings.
         val model = LLModel(
             provider = LLMProvider.Google,
-            id = "gemma-4-26b-a4b-it",
+            id = modelId,
             capabilities = listOf(
                 LLMCapability.Completion,
                 LLMCapability.Temperature,
