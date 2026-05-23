@@ -1,3 +1,8 @@
+Version: 3.0.7
+Date: 2026-05-23
+Changed:
+  - Completely removed the custom Javascript manual word-wrapping logic. Text layers are now created natively as Photoshop Paragraph Text Boxes (`shapeType: 'box'`) with their sizes rigorously bound to the defined bounding box dimensions. Photoshop will now natively handle the text wrapping, justification, and layout boundaries, drastically improving accuracy and reducing bugs.
+-------------------------------------------------------------------------------------------------
 Version: 3.0.6
 Date: 2026-05-23
 Changed:

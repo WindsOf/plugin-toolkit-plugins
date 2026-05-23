@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder",
         "name": "PSD Builder",
-        "version": "3.0.6",
+        "version": "3.0.7",
         "description": "A plugin that builds layered PSD files using PSD_builder.exe."
     },
     "requirements": {
@@ -233,6 +233,15 @@
     ],
     "changelog": {
         "releases": [
+            {
+                "version": "3.0.7",
+                "date": "2026-05-23",
+                "categories": {
+                    "Changed": [
+                        "Completely removed the custom Javascript manual word-wrapping logic. Text layers are now created natively as Photoshop Paragraph Text Boxes (`shapeType: 'box'`) with their sizes rigorously bound to the defined bounding box dimensions. Photoshop will now natively handle the text wrapping, justification, and layout boundaries, drastically improving accuracy and reducing bugs."
+                    ]
+                }
+            },
             {
                 "version": "3.0.6",
                 "date": "2026-05-23",

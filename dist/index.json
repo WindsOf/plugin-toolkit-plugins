@@ -48,12 +48,12 @@
     {
       "name": "PSD Builder",
       "pkg": "com.wip.psdbuilder",
-      "version": "3.0.6",
+      "version": "3.0.7",
       "fileName": "PSD_builder.jar",
       "description": "A plugin that builds layered PSD files using PSD_builder.exe.",
       "targetAppVersion": "1.0.0",
-      "hash": "4fc893ee34649895834949011489b2873150568decd6137a7eaad59a41e8050b",
-      "signature": "CZ+whMx99t8Q5ZHry7CWS6bIo+Oi0AgMC+2J3r1btprRIinz9D/38bulYeoL1fOPYfOKVsY8YjgmB7XyHwP2bDPbtRcAjH/SLT6fYnItgVXuqYSo/tH/q72p1zDMPfdd3g6K7O0Q775Os7uVESPtOt/3MGFZptNUWjX8T5Q/CZlLt0ydo0Z0p4Xsjg2BE3afX9iNSNThdeLRF1WouAfhCeHfTtwCmKOftchlOt250pt0bAE0DUIt8CliKCboN2JU78ZVsZG+GSNj4vEAF/oL365T1bTM3uEgKAu+gXbYu4dGqKYswuyY1EfBMbzopcCjqzpT51OxshrlOD1EsosRkg=="
+      "hash": "9e92fa0289287cf7c2c3df50e465988f0e586a11ae393442d698322a8954dca4",
+      "signature": "SRtNU2tYJDkoehVovk53r/inaNrBuoljUHyjt6rFKDX8mq0X9PIxNk1mGqDrJNM1sZUMJ1YYOxzNlDfbTFWirAeucvNxRcF7SiQt0ngDUQ9A4e7qC4AZo+jeGuuq1By8SrPwRUCcUVXOPh6h4Qqh+viFAye2heXiSQ3IZ5Pi77/AVBeDMMy7yXyhgb56wvEpIOhTTDLN3QYzzPlHUCiMjgn4PLjq8ngByGsCN2LUtJMGpo8S+TckDsnpmFqi9eTkc03vUMb9/DOygkka1nLZcmkGvo3qOzerzxuloyG8XQdfflsNSsSF/09A1jk8Z3GFUzI5iJB4OsKzLc/zzSsEaw=="
     },
     {
       "name": "Slicer",

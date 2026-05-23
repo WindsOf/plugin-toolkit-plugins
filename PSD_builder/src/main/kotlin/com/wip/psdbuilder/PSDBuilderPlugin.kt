@@ -49,7 +49,7 @@ data class PsdPayload(
 @PluginInfo(
     id = "com.wip.psdbuilder",
     name = "PSD Builder",
-    version = "3.0.6",
+    version = "3.0.7",
     description = "A plugin that builds layered PSD files using PSD_builder.exe."
 )
 class PSDBuilderPlugin {
