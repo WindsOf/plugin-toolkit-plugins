@@ -82,24 +82,24 @@
       "fileName": "test_flow.json",
       "version": "1.0.5",
       "description": "A simple test flow for repository generation",
-      "hash": "977205eb41d035e4b4ea7bc7eb49932b49a5ff522d855b6e0d0f04fd66bf6805",
-      "signature": "EDSxYKxShhcAbbFC2vLVv6ItnFDlV0gaIkDo7Ns4JQI+lW5KPwsbmt+tWXcdlGWSq9m+G1edxmN1sMKgNQSOpcFIaULNF/1oU74BxgNRiqV5wR9JJjDY2dX7sp/W4g1zXeq8f/f5PtHd15bPuFuTGLVXkT94QV+YIJsgSKoNMwE/pUczqM6bmP2+QMQFLOuXxSPR/Im36bLB2fVphUE7rI20vlLm9yb5HoNdoCogh6c2ZE2+bmPS92wBB9knmQWf7AX4+bBLn5fpa5uuiScnwOR2ybiEqCAcln9n5s6kjUtryJP7V65ha0+gkTgIPmuTlwc5fU9ypGnhFopJHlBRkQ=="
-    },
-    {
-      "name": "WOM Flow con BetterIMG",
-      "fileName": "WOM Flow con BetterIMG.json",
-      "version": "1.0.1",
-      "description": "Flow per WOM con il miglioramento di immagini",
-      "hash": "3c3dafa5103e5f3fb58862bd7b730f0145239ddc1eb15a7c8c05736a62865c72",
-      "signature": "lvTuV0MbMREgUpmIFs9n6R1u26H24/oNLXbPbmnvje7EJDmFu9TKjF/w8QEJ+9VYhRRMgTz7cg69SCrq6RI/RSJj02rPm/JmKhiSOJ6uAVmumRYsFCGy1/Ym+vMbk4Atp2A7XHJ9aNe2MBw5h0k9kpiUiMl8uDio1W0yV3Wf888j7+wVNNt6j8OgyY1G+VFA9cdM63RMml3YaB1VYfq+7ez1kcIZu8IBtkaxlrmkEb4aAeP68QhSNGmJU2nZhkZ0Zu86owaylvOjLU0kpyqP5k5Qye0FE+BAPp4WhOgRfqjzs7jWUcoQmHYNqJNDond6GBnSoCpbbsiIDpevTgPI5A=="
+      "hash": "7d5f29af625079bee9c2e35388593475288b95da07824c645f9c087bbe6d6551",
+      "signature": "Pv7cregH6HHl6pAOjD5JitgpFm0PdrOAd0GFecALQQMwV6cHKxDr9rbPB0jtG7u0/6pyIqSi735roD22ZOGvZ7f4V75wWEWvtRGH3Ep8ku84Ap00QNr/oQOTNy0yAieGwNccUwjqPBveV/wsZpLuRmfOb5CxaNCxEbNf5bc0Flt1gY+CYi9iGN6zUudLQ/oMsgpFUaCNYLyhDbhFDIXtYDNw/6S6V81gH8ZEv6eNTZZBwykKLZ8Fns9uT2oSsiH+s/MC6yHZrgRVZsASF2HQNZEkEZe5yUUoL401Tdi+SaGBVhPwumrNgf6MwxUfghnSa/ofeqdsEGEUPOgdIi1FLw=="
     },
     {
       "name": "WOM Flow",
-      "fileName": "WOM Flow.json",
+      "fileName": "WOM_Flow.json",
       "version": "1.0.1",
       "description": "Flow per WOM senza miglioramento delle immagini",
       "hash": "66c1f4edaf3202da895fa39951f8663fd8a59dedb9e2a4dc441f905f4cace5f9",
       "signature": "j0BOW5HqfFREz1mOAEYE9xQ3IB6eLkVG2eMAtN4TtO70Hl4uGK0JQhPweyKMhUfxLZ4AWFM4CeLO0yp2GP5PVbXqg5n7Ge6d1YJ34gKGvmqJg6n7m++lOLc2ZPI+N+RtFlcLWwfP/oDo601Jh4k+OToHI9WaAbkBbLF1v4q+gSnLbu2Q1MoOjdxjmCJl+JQJvh4fYif93Q7cUHSMnSC16gleJc+5LQqhO1OY57Lrxxe1Ck4nsuV8S+0r1TFHc/sSy9XBhKmgAN31taZXwnNZS/2rfOwg/ffwt3f6bLDDMNz6Sgtfkc+0Pqw1vT6IJV3KDcnQNXFy5MKBF1sbe7N4uw=="
+    },
+    {
+      "name": "WOM Flow con BetterIMG",
+      "fileName": "WOM_Flow_con_BetterIMG.json",
+      "version": "1.0.1",
+      "description": "Flow per WOM con il miglioramento di immagini",
+      "hash": "3c3dafa5103e5f3fb58862bd7b730f0145239ddc1eb15a7c8c05736a62865c72",
+      "signature": "lvTuV0MbMREgUpmIFs9n6R1u26H24/oNLXbPbmnvje7EJDmFu9TKjF/w8QEJ+9VYhRRMgTz7cg69SCrq6RI/RSJj02rPm/JmKhiSOJ6uAVmumRYsFCGy1/Ym+vMbk4Atp2A7XHJ9aNe2MBw5h0k9kpiUiMl8uDio1W0yV3Wf888j7+wVNNt6j8OgyY1G+VFA9cdM63RMml3YaB1VYfq+7ez1kcIZu8IBtkaxlrmkEb4aAeP68QhSNGmJU2nZhkZ0Zu86owaylvOjLU0kpyqP5k5Qye0FE+BAPp4WhOgRfqjzs7jWUcoQmHYNqJNDond6GBnSoCpbbsiIDpevTgPI5A=="
     }
   ],
   "signPublicKey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtBeECp5qqAsmv+6EqOOrniZet5dSiuaTQqhnNwp2Ij/LxPn6NaHTRegIvKDmbVKZhnVz2nWkAvRNPjieJG+anZPks1RtMIGSnQndA+XbrU6JzDGo8PiQhkPdr+2604NHrTnY0SRgBtSHwOKFcDUOFOyE1ZbDTgXvii5NnfFlvALwrpRj2NsqZwdnX5oAcd4boAHLGU9Z4yWocYHP29/6ACshtgI0ysJNTsDIFnccScr/O+0vXZyHcr3vrC6esogarc/1qRxRQbH0QKwTliqUWb/ax4z0bZxc3X76iF4A88wpKWxCSLlM9jX7uq14PgWTPBi9XpUvasAVh6qzDpoThQIDAQAB",
