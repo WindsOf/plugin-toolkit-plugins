@@ -53,33 +53,59 @@ class PSDBuilderCrossModuleTest {
         g.dispose()
         ImageIO.write(baseImage, "png", imageFile)
 
-        // 2. Define test scenarios: various positions and amounts of text
-        val scenarios = listOf(
-            // Scenario 1: Single centered bubble
-            listOf("Center Text") to listOf(listOf(0.2, 0.4, 0.8, 0.6)),
-            // Scenario 2: Multiple bubbles in corners
-            listOf("Top Left", "Bottom Right") to listOf(
-                listOf(0.05, 0.05, 0.3, 0.2),
-                listOf(0.7, 0.8, 0.95, 0.95)
-            ),
-            // Scenario 3: Long text that should wrap
-            listOf("This is a very long piece of text that should definitely trigger the wrapping logic in both implementations to see if they behave the same way.") to 
-                listOf(listOf(0.1, 0.1, 0.9, 0.3))
+        // 2. Define test scenarios: various positions, amounts of text, and rotations
+        data class Scenario(
+            val texts: List<String>,
+            val bb: List<List<Double>>,
+            val rotations: List<Double>? = null
         )
 
-        scenarios.forEachIndexed { index, (texts, bb) ->
+        val scenarios = listOf(
+            // Scenario 0: Single centered bubble
+            Scenario(listOf("Center Text"), listOf(listOf(0.2, 0.4, 0.8, 0.6))),
+            // Scenario 1: Multiple bubbles in corners
+            Scenario(
+                listOf("Top Left", "Bottom Right"),
+                listOf(
+                    listOf(0.05, 0.05, 0.3, 0.2),
+                    listOf(0.7, 0.8, 0.95, 0.95)
+                )
+            ),
+            // Scenario 2: Long text that should wrap
+            Scenario(
+                listOf("This is a very long piece of text that should definitely trigger the wrapping logic in both implementations to see if they behave the same way."),
+                listOf(listOf(0.1, 0.1, 0.9, 0.3))
+            ),
+            // Scenario 3: Rotated text layers
+            Scenario(
+                listOf("Rotated Text 30", "Rotated Text -45"),
+                listOf(
+                    listOf(0.15, 0.15, 0.45, 0.35),
+                    listOf(0.55, 0.55, 0.85, 0.75)
+                ),
+                listOf(30.0, -45.0)
+            )
+        )
+
+        scenarios.forEachIndexed { index, scenario ->
             println("Running scenario ${index + 1}...")
+            val texts = scenario.texts
+            val bb = scenario.bb
+            val rotations = scenario.rotations
             
             val outDir = File(tempDir, "scenario_$index").apply { mkdirs() }
             val exePsdPath = File(outDir, "exe_output.psd").absolutePath
             val nativePsdPath = File(outDir, "native_output.psd").absolutePath
 
             // --- "EXE" Implementation (Manual call to PSD_builder.exe) ---
-            val psdTexts = texts.zip(bb).map { (text, box) ->
+            val psdTexts = texts.indices.map { idx ->
+                val text = texts[idx]
+                val box = bb[idx]
                 val left = (box[0] * 500).toInt()
                 val top = (box[1] * 500).toInt()
                 val right = (box[2] * 500).toInt()
                 val bottom = (box[3] * 500).toInt()
+                val rot = rotations?.getOrNull(idx)
                 
                 buildJsonObject {
                     put("text", text)
@@ -90,6 +116,9 @@ class PSDBuilderCrossModuleTest {
                     put("fontName", "ArialMT")
                     put("fontSize", 24)
                     put("strokeSize", 3)
+                    if (rot != null) {
+                        put("rotation", rot)
+                    }
                     putJsonObject("color") {
                         put("r", 255)
                         put("g", 255)
@@ -121,6 +150,7 @@ class PSDBuilderCrossModuleTest {
                 fontName = "ArialMT",
                 borderSize = 3,
                 outputDir = outDir.absolutePath,
+                rotations = rotations,
                 context = context
             )
             // The plugin names it based on image name
@@ -141,6 +171,10 @@ class PSDBuilderCrossModuleTest {
                 
                 println("  Layer $i: EXE name=${eL.name}, Native name=${nL.name}")
                 assertEquals(eL.name, nL.name, "Layer $i name mismatch in scenario $index")
+                if (i > 0) {
+                    assertEquals(texts[i - 1], eL.name, "EXE Layer $i name should be equal to its text content")
+                    assertEquals(texts[i - 1], nL.name, "Native Layer $i name should be equal to its text content")
+                }
                 assertEquals(eL.top, nL.top, "Layer $i top mismatch in scenario $index")
                 assertEquals(eL.left, nL.left, "Layer $i left mismatch in scenario $index")
                 

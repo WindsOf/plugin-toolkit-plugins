@@ -30,7 +30,8 @@ data class PsdText(
     val fontName: String? = null,
     val fontSize: Int? = null,
     val color: PsdColor? = null,
-    val strokeSize: Int? = null
+    val strokeSize: Int? = null,
+    val rotation: Double? = null
 )
 
 @Serializable
@@ -62,6 +63,7 @@ class PSDBuilderPlugin {
         @CapabilityParam(description = "Font name (optional)", defaultValue = "\"Anime Ace 2.0 BB\"") fontName: String? = "Anime Ace 2.0 BB",
         @CapabilityParam(description = "Border thickness (0 for none)", defaultValue = "3") borderSize: Int? = 3,
         @CapabilityParam(description = "Output directory (optional)", defaultValue = "\"\"") outputDir: String? = "",
+        @CapabilityParam(description = "Rotations in degrees (optional)") rotations: List<Double>? = null,
         context: PluginContext
     ): String {
         val logger = context.logger
@@ -72,7 +74,7 @@ class PSDBuilderPlugin {
 
         val outputPsdPath = File(outDir, File(imagePath).nameWithoutExtension + ".psd").absolutePath
 
-        val psd = buildPsdObject(imagePath, texts, bb, fontSize, fontName, borderSize, context)
+        val psd = buildPsdObject(imagePath, texts, bb, fontSize, fontName, borderSize, context, rotations)
         val psdBytes = withContext(Dispatchers.Default) {
             com.wip.kpsd.KPsd.write(psd, compress = false)
         }
@@ -102,6 +104,7 @@ class PSDBuilderPlugin {
         @CapabilityParam(description = "Font size (optional)", defaultValue = "24") fontSize: Int? = 24,
         @CapabilityParam(description = "Font name (optional)", defaultValue = "\"Anime Ace 2.0 BB\"") fontName: String? = "Anime Ace 2.0 BB",
         @CapabilityParam(description = "Border thickness (0 for none)", defaultValue = "3") borderSize: Int? = 3,
+        @CapabilityParam(description = "Rotations in degrees (optional)") rotations: List<Double>? = null,
         context: PluginContext
     ): String {
         val logger = context.logger
@@ -136,8 +139,9 @@ class PSDBuilderPlugin {
                             
                             val pageTexts = indices.map { texts[it] }
                             val pageBb = indices.map { bb[it] }
+                            val pageRotations = rotations?.let { rList -> indices.map { rList[it] } }
 
-                            val psd = buildPsdObject(imageFile.absolutePath, pageTexts, pageBb, fontSize, fontName, borderSize, context)
+                            val psd = buildPsdObject(imageFile.absolutePath, pageTexts, pageBb, fontSize, fontName, borderSize, context, pageRotations)
                             val psdBytes = withContext(Dispatchers.Default) {
                                 com.wip.kpsd.KPsd.write(psd, compress = false)
                             }
@@ -181,8 +185,18 @@ class PSDBuilderPlugin {
         val width = baseImage.width.toDouble()
         val height = baseImage.height.toDouble()
         val bb = payload.texts.map { listOf(it.left / width, it.top / height, it.right / width, it.bottom / height) }
+        val rotations = payload.texts.map { it.rotation }
         
-        val psd = buildPsdObject(payload.backgroundImage, texts, bb, payload.texts.firstOrNull()?.fontSize, payload.texts.firstOrNull()?.fontName, payload.texts.firstOrNull()?.strokeSize, context)
+        val psd = buildPsdObject(
+            payload.backgroundImage,
+            texts,
+            bb,
+            payload.texts.firstOrNull()?.fontSize,
+            payload.texts.firstOrNull()?.fontName,
+            payload.texts.firstOrNull()?.strokeSize,
+            context,
+            rotations
+        )
         val psdBytes = withContext(Dispatchers.Default) {
             com.wip.kpsd.KPsd.write(psd, compress = false)
         }
@@ -199,7 +213,8 @@ class PSDBuilderPlugin {
         fontSize: Int? = 24,
         fontName: String? = "Anime Ace 2.0 BB",
         borderSize: Int? = 3,
-        context: PluginContext
+        context: PluginContext,
+        rotations: List<Double?>? = null
     ): com.wip.kpsd.Psd {
         val inputFile = File(imagePath)
         val baseImage = withContext(Dispatchers.IO) { ImageIO.read(inputFile) }
@@ -251,8 +266,13 @@ class PSDBuilderPlugin {
             val wrappedText = wrapText(text, boxWidth, fSize)
 
             val hasStroke = borderSize != null && borderSize > 0
+            val rot = rotations?.getOrNull(index) ?: 0.0
+            val theta = Math.toRadians(rot)
+            val cos = Math.cos(theta)
+            val sin = Math.sin(theta)
+
             val textLayer = com.wip.kpsd.Layer(
-                name = "Testo $index",
+                name = text,
                 top = tTop,
                 left = tLeft,
                 bottom = tBottom,
@@ -261,7 +281,7 @@ class PSDBuilderPlugin {
                     text = wrappedText,
                     shapeType = "box",
                     boxBounds = floatArrayOf(0f, 0f, boxWidth.toFloat(), boxHeight.toFloat()),
-                    transform = doubleArrayOf(1.0, 0.0, 0.0, 1.0, tLeft.toDouble(), tTop.toDouble()),
+                    transform = doubleArrayOf(cos, sin, -sin, cos, tLeft.toDouble(), tTop.toDouble()),
                     left = 0f,
                     top = 0f,
                     right = boxWidth.toFloat(),
@@ -279,7 +299,7 @@ class PSDBuilderPlugin {
                     com.wip.kpsd.LayerEffectsInfo(
                         stroke = listOf(
                             com.wip.kpsd.LayerEffectStroke(
-                                size = com.wip.kpsd.UnitsValue("Pixels", borderSize!!.toFloat()),
+                                size = com.wip.kpsd.UnitsValue("Pixels", borderSize.toFloat()),
                                 color = com.wip.kpsd.Rgb(0, 0, 0)
                             )
                         )

@@ -36,7 +36,8 @@ data class PsdText(
     val fontName: String? = null,
     val fontSize: Int? = null,
     val color: PsdColor? = null,
-    val strokeSize: Int? = null
+    val strokeSize: Int? = null,
+    val rotation: Double? = null
 )
 
 @Serializable
@@ -116,6 +117,7 @@ class PSDBuilderPlugin {
         @CapabilityParam(description = "Font name (optional)", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
         @CapabilityParam(description = "Border thickness (0 for none)", defaultValue = "3") borderSize: Int? = 3,
         @CapabilityParam(description = "Output directory (optional)", defaultValue = "\"\"") outputDir: String? = "",
+        @CapabilityParam(description = "Rotations in degrees (optional)") rotations: List<Double>? = null,
         @CapabilityParam(description = "Leave intermediate JSON files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
         context: PluginContext
     ): String {
@@ -137,11 +139,14 @@ class PSDBuilderPlugin {
             else -> "AnimeAce2.0BB"
         }
 
-        val psdTexts = texts.zip(bb).map { (text, box) ->
+        val psdTexts = texts.indices.map { index ->
+            val text = texts[index]
+            val box = bb[index]
             val left = (box[0] * width).toInt()
             val top = (box[1] * height).toInt()
             val right = (box[2] * width).toInt()
             val bottom = (box[3] * height).toInt()
+            val rot = rotations?.getOrNull(index)
 
             PsdText(
                 text = text,
@@ -152,7 +157,8 @@ class PSDBuilderPlugin {
                 fontName = psdFontString,
                 fontSize = fontSize,
                 color = PsdColor(0, 0, 0, 255),
-                strokeSize = borderSize
+                strokeSize = borderSize,
+                rotation = rot
             )
         }
 
@@ -199,6 +205,7 @@ class PSDBuilderPlugin {
         @CapabilityParam(description = "Font size (optional)", defaultValue = "24") fontSize: Int? = 24,
         @CapabilityParam(description = "Font name (optional)", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
         @CapabilityParam(description = "Border thickness (0 for none)", defaultValue = "3") borderSize: Int? = 3,
+        @CapabilityParam(description = "Rotations in degrees (optional)") rotations: List<Double>? = null,
         @CapabilityParam(description = "Leave intermediate JSON files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
         context: PluginContext
     ): String {
@@ -238,6 +245,7 @@ class PSDBuilderPlugin {
                             
                             val pageTexts = indices.map { texts[it] }
                             val pageBb = indices.map { bb[it] }
+                            val pageRotations = rotations?.let { rList -> indices.map { rList[it] } }
 
                             val baseImage = withContext(Dispatchers.IO) { ImageIO.read(imageFile) }
                             if (baseImage != null) {
@@ -249,11 +257,14 @@ class PSDBuilderPlugin {
                                     else -> "AnimeAce2.0BB"
                                 }
 
-                                val psdTexts = pageTexts.zip(pageBb).map { (text, box) ->
+                                val psdTexts = pageTexts.indices.map { idx ->
+                                    val text = pageTexts[idx]
+                                    val box = pageBb[idx]
                                     val left = (box[0] * width).toInt()
                                     val top = (box[1] * height).toInt()
                                     val right = (box[2] * width).toInt()
                                     val bottom = (box[3] * height).toInt()
+                                    val rot = pageRotations?.getOrNull(idx)
 
                                     PsdText(
                                         text = text,
@@ -264,7 +275,8 @@ class PSDBuilderPlugin {
                                         fontName = psdFontString,
                                         fontSize = fontSize,
                                         color = PsdColor(0, 0, 0, 255),
-                                        strokeSize = borderSize
+                                        strokeSize = borderSize,
+                                        rotation = rot
                                     )
                                 }
 
