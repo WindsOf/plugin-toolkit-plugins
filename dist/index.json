@@ -48,12 +48,12 @@
     {
       "name": "PSD Builder",
       "pkg": "com.wip.psdbuilder",
-      "version": "3.0.10",
+      "version": "3.1.1",
       "fileName": "PSD_builder.jar",
       "description": "A plugin that builds layered PSD files using PSD_builder.exe.",
       "targetAppVersion": "1.0.0",
-      "hash": "d6c36963d7e9c648c7df4ab1471053253934b5a696d69cb4e0e91cd260da7ee6",
-      "signature": "dA7se3t+kt3/vfYHLeJ/qLx3QPumAwaCwCZ+ZeI5eBwhYx8hjMGC7FBmjxwrJY9TfUmcloIbKdgS4yYXTn+pyq6eInO8KrSghI2HOMCWYiAOAI9ju9yf3hK9K7uBbSZ9Hy27iulXAhbM+uwRGaNmcVEAUDzej36ZuR8slI1u7KG+W30TBYd1uXfBO4DAA2HQl3Cp7kMim9rzxQjUnz9uzprwfYhSXmRw/QydfS+kxyPGZkIhjduICWkO/F09pWwQ5JEMs4d4d0AnYvW07R9JmRpCyS3Y2qMEruXJaUUFxzaSp9wyq2DiF8RN9IfQywayvrYyUHBg2dYydC+Lv7h20g=="
+      "hash": "9c91b174656aace1e2525b4c97b8a9723fbebf6cddde3a6ec893c6e9b3023f68",
+      "signature": "C00G/gPk2E/Kuyw3BDI+gDtucroOVGMRufcXXzliLpTCdI7bMHxdx1fU4NT0sJ6dNQF9IwaI8ZnraaEHAu7B4pp21tzhN9kukC+PMUrHELnwEKxy7kvDBmOFck7WIkkxUoxRcb7mmZy0F3O/SFafvaoeLMjjKB0597X5Oc+DAaBQnpFngCaIMgS1s+25akDcOJu42BsoS52o6NrGe6RnHvmP2Ee0uf8zfuXYxll0Zv7CDhkSKqeNfDH1Ut4zgSW8579O6MlV5b8E1fHtUxUje0SsH5L0Wwpu4icPVQm03Kx2Wm/tKtXufadyCEQV3YGQWq73XrB4ql4kQavlChsy4g=="
     },
     {
       "name": "PSD Builder Native",

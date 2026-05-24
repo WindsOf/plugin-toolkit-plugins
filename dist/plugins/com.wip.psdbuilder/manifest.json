@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder",
         "name": "PSD Builder",
-        "version": "3.0.10",
+        "version": "3.1.1",
         "description": "A plugin that builds layered PSD files using PSD_builder.exe."
     },
     "requirements": {
@@ -16,14 +16,14 @@
             "description": "Generates a layered PSD from an image, texts and bounding boxes",
             "parameters": {
                 "imagePath": {
-                    "description": "Path to image",
+                    "description": "Path to the base image (JPG, PNG, WebP)",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
                     }
                 },
                 "texts": {
-                    "description": "Texts to add",
+                    "description": "List of text strings to render",
                     "type": {
                         "type": "array",
                         "items": {
@@ -33,7 +33,7 @@
                     }
                 },
                 "bb": {
-                    "description": "Bounding boxes to add, (xmin, ymin, xmax, ymax)",
+                    "description": "List of bounding boxes for each text [xmin, ymin, xmax, ymax]",
                     "type": {
                         "type": "array",
                         "items": {
@@ -54,7 +54,7 @@
                 },
                 "fontSize": {
                     "defaultValue": 24,
-                    "description": "Font size (optional)",
+                    "description": "Font size in pixels",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "INT"
@@ -62,7 +62,7 @@
                 },
                 "fontName": {
                     "defaultValue": "ANIME_ACE_2_0_BB",
-                    "description": "Font name (optional)",
+                    "description": "Typeface for the text",
                     "type": {
                         "type": "enum",
                         "className": "com.wip.psdbuilder.PsdFont",
@@ -74,7 +74,7 @@
                 },
                 "borderSize": {
                     "defaultValue": 3,
-                    "description": "Border thickness (0 for none)",
+                    "description": "Thickness of the text stroke/border (0 to disable)",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "INT"
@@ -82,7 +82,7 @@
                 },
                 "outputDir": {
                     "defaultValue": "",
-                    "description": "Output directory (optional)",
+                    "description": "Directory to save generated PSD (leave empty to use image folder)",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
@@ -90,7 +90,7 @@
                 },
                 "leaveIntermediateFiles": {
                     "defaultValue": false,
-                    "description": "Leave intermediate JSON files for debugging",
+                    "description": "Keep intermediate JSON and temp image files for debugging",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "BOOLEAN"
@@ -117,7 +117,7 @@
             "description": "Generates layered PSDs for a folder of images concurrently",
             "parameters": {
                 "inputFolder": {
-                    "description": "Path to folder of images",
+                    "description": "Path to folder containing chapter images",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
@@ -131,7 +131,7 @@
                     ]
                 },
                 "texts": {
-                    "description": "Texts to add",
+                    "description": "List of text strings to render across all pages",
                     "type": {
                         "type": "array",
                         "items": {
@@ -141,7 +141,7 @@
                     }
                 },
                 "bb": {
-                    "description": "Bounding boxes to add, (xmin, ymin, xmax, ymax)",
+                    "description": "List of bounding boxes for each text [xmin, ymin, xmax, ymax]",
                     "type": {
                         "type": "array",
                         "items": {
@@ -161,7 +161,7 @@
                     ]
                 },
                 "pageNames": {
-                    "description": "Page names corresponding to each text",
+                    "description": "List of image filenames corresponding to each text",
                     "type": {
                         "type": "array",
                         "items": {
@@ -172,7 +172,7 @@
                 },
                 "outputDir": {
                     "defaultValue": "",
-                    "description": "Output directory",
+                    "description": "Directory to save generated PSDs (leave empty for 'output_psds' in input folder)",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
@@ -180,7 +180,7 @@
                 },
                 "fontSize": {
                     "defaultValue": 24,
-                    "description": "Font size (optional)",
+                    "description": "Font size in pixels",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "INT"
@@ -188,7 +188,7 @@
                 },
                 "fontName": {
                     "defaultValue": "ANIME_ACE_2_0_BB",
-                    "description": "Font name (optional)",
+                    "description": "Typeface for the text",
                     "type": {
                         "type": "enum",
                         "className": "com.wip.psdbuilder.PsdFont",
@@ -200,7 +200,7 @@
                 },
                 "borderSize": {
                     "defaultValue": 3,
-                    "description": "Border thickness (0 for none)",
+                    "description": "Thickness of the text stroke/border (0 to disable)",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "INT"
@@ -208,7 +208,7 @@
                 },
                 "leaveIntermediateFiles": {
                     "defaultValue": false,
-                    "description": "Leave intermediate JSON files for debugging",
+                    "description": "Keep intermediate JSON and temp image files for debugging",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "BOOLEAN"
@@ -233,6 +233,25 @@
     ],
     "changelog": {
         "releases": [
+            {
+                "version": "3.1.1",
+                "date": "2026-05-24",
+                "categories": {
+                    "Changed": [
+                        "Fixed an issue where intermediate debugging files were saved into the invisible internal plugin workspace folder. They are now saved directly into the user-specified `outputDir` (or alongside the source images), making the \"Keep intermediate files\" option actually usable.",
+                        "Rewrote and expanded all UI parameter descriptions in English to be much clearer and more descriptive for end users."
+                    ]
+                }
+            },
+            {
+                "version": "3.1.0",
+                "date": "2026-05-24",
+                "categories": {
+                    "Added": [
+                        "Added native support for `.webp` images. The plugin now uses the TwelveMonkeys ImageIO extension in Kotlin to read WebP files, calculate bounding boxes correctly, and seamlessly passes a temporary `.png` conversion to the Node.js PSD Builder to maintain compatibility without heavy native C++ dependencies."
+                    ]
+                }
+            },
             {
                 "version": "3.0.10",
                 "date": "2026-05-23",

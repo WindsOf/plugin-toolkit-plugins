@@ -48,7 +48,7 @@ data class PsdPayload(
 @PluginInfo(
     id = "com.wip.psdbuilder",
     name = "PSD Builder",
-    version = "3.0.10",
+    version = "3.1.1",
     description = "A plugin that builds layered PSD files using PSD_builder.exe."
 )
 class PSDBuilderPlugin {
@@ -106,17 +106,17 @@ class PSDBuilderPlugin {
         description = "Generates a layered PSD from an image, texts and bounding boxes"
     )
     suspend fun buildPsdFromInputs(
-        @CapabilityParam(description = "Path to image") imagePath: String,
-        @CapabilityParam(description = "Texts to add") texts: List<String>,
+        @CapabilityParam(description = "Path to the base image (JPG, PNG, WebP)") imagePath: String,
+        @CapabilityParam(description = "List of text strings to render") texts: List<String>,
         @CapabilityParam(
-            description = "Bounding boxes to add, (xmin, ymin, xmax, ymax)",
+            description = "List of bounding boxes for each text [xmin, ymin, xmax, ymax]",
             semanticTypes = ["wom/bounding-box"]
         ) bb: List<List<Double>>,
-        @CapabilityParam(description = "Font size (optional)", defaultValue = "24") fontSize: Int? = 24,
-        @CapabilityParam(description = "Font name (optional)", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
-        @CapabilityParam(description = "Border thickness (0 for none)", defaultValue = "3") borderSize: Int? = 3,
-        @CapabilityParam(description = "Output directory (optional)", defaultValue = "\"\"") outputDir: String? = "",
-        @CapabilityParam(description = "Leave intermediate JSON files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
+        @CapabilityParam(description = "Font size in pixels", defaultValue = "24") fontSize: Int? = 24,
+        @CapabilityParam(description = "Typeface for the text", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
+        @CapabilityParam(description = "Thickness of the text stroke/border (0 to disable)", defaultValue = "3") borderSize: Int? = 3,
+        @CapabilityParam(description = "Directory to save generated PSD (leave empty to use image folder)", defaultValue = "\"\"") outputDir: String? = "",
+        @CapabilityParam(description = "Keep intermediate JSON and temp image files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
         context: PluginContext
     ): String {
         val logger = context.logger
@@ -156,17 +156,27 @@ class PSDBuilderPlugin {
             )
         }
 
+        val outDir = if (outputDir.isNullOrBlank()) inputFile.parentFile else File(outputDir)
+        if (!outDir.exists()) outDir.mkdirs()
+
+        var targetImageFile = inputFile
+        var isTempImage = false
+        if (inputFile.extension.equals("webp", ignoreCase = true)) {
+            targetImageFile = File(outDir, "temp_image_${inputFile.nameWithoutExtension}.png")
+            withContext(Dispatchers.IO) {
+                ImageIO.write(baseImage, "png", targetImageFile)
+            }
+            isTempImage = true
+        }
+
         val payload = PsdPayload(
-            backgroundImage = inputFile.absolutePath,
+            backgroundImage = targetImageFile.absolutePath,
             texts = psdTexts
         )
 
         val jsonPayload = Json.encodeToString(payload)
-        val tempJsonFile = File(context.fileSystem.getBasePath(), "temp_payload_${inputFile.nameWithoutExtension}.json")
+        val tempJsonFile = File(outDir, "temp_payload_${inputFile.nameWithoutExtension}.json")
         withContext(Dispatchers.IO) { tempJsonFile.writeText(jsonPayload) }
-
-        val outDir = if (outputDir.isNullOrBlank()) inputFile.parentFile else File(outputDir)
-        if (!outDir.exists()) outDir.mkdirs()
 
         val outputPsdPath = File(outDir, inputFile.nameWithoutExtension + ".psd").absolutePath
 
@@ -175,6 +185,7 @@ class PSDBuilderPlugin {
         } finally {
             if (leaveIntermediateFiles != true) {
                 tempJsonFile.delete()
+                if (isTempImage) targetImageFile.delete()
             }
         }
         return result
@@ -186,20 +197,20 @@ class PSDBuilderPlugin {
     )
     suspend fun buildPsdForChapter(
         @CapabilityParam(
-            description = "Path to folder of images",
+            description = "Path to folder containing chapter images",
             semanticTypes = ["sys/directory"]
         ) inputFolder: String,
-        @CapabilityParam(description = "Texts to add") texts: List<String>,
+        @CapabilityParam(description = "List of text strings to render across all pages") texts: List<String>,
         @CapabilityParam(
-            description = "Bounding boxes to add, (xmin, ymin, xmax, ymax)",
+            description = "List of bounding boxes for each text [xmin, ymin, xmax, ymax]",
             semanticTypes = ["wom/bounding-box"]
         ) bb: List<List<Double>>,
-        @CapabilityParam(description = "Page names corresponding to each text") pageNames: List<String>,
-        @CapabilityParam(description = "Output directory", defaultValue = "\"\"") outputDir: String? = "",
-        @CapabilityParam(description = "Font size (optional)", defaultValue = "24") fontSize: Int? = 24,
-        @CapabilityParam(description = "Font name (optional)", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
-        @CapabilityParam(description = "Border thickness (0 for none)", defaultValue = "3") borderSize: Int? = 3,
-        @CapabilityParam(description = "Leave intermediate JSON files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
+        @CapabilityParam(description = "List of image filenames corresponding to each text") pageNames: List<String>,
+        @CapabilityParam(description = "Directory to save generated PSDs (leave empty for 'output_psds' in input folder)", defaultValue = "\"\"") outputDir: String? = "",
+        @CapabilityParam(description = "Font size in pixels", defaultValue = "24") fontSize: Int? = 24,
+        @CapabilityParam(description = "Typeface for the text", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
+        @CapabilityParam(description = "Thickness of the text stroke/border (0 to disable)", defaultValue = "3") borderSize: Int? = 3,
+        @CapabilityParam(description = "Keep intermediate JSON and temp image files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
         context: PluginContext
     ): String {
         val logger = context.logger
@@ -268,13 +279,23 @@ class PSDBuilderPlugin {
                                     )
                                 }
 
+                                var targetImageFile = imageFile
+                                var isTempImage = false
+                                if (imageFile.extension.equals("webp", ignoreCase = true)) {
+                                    targetImageFile = File(outDir, "temp_image_${imageFile.nameWithoutExtension}.png")
+                                    withContext(Dispatchers.IO) {
+                                        ImageIO.write(baseImage, "png", targetImageFile)
+                                    }
+                                    isTempImage = true
+                                }
+
                                 val payload = PsdPayload(
-                                    backgroundImage = imageFile.absolutePath,
+                                    backgroundImage = targetImageFile.absolutePath,
                                     texts = psdTexts
                                 )
 
                                 val jsonPayload = Json.encodeToString(payload)
-                                val tempJsonFile = File(context.fileSystem.getBasePath(), "temp_payload_${imageFile.nameWithoutExtension}.json")
+                                val tempJsonFile = File(outDir, "temp_payload_${imageFile.nameWithoutExtension}.json")
                                 withContext(Dispatchers.IO) { tempJsonFile.writeText(jsonPayload) }
 
                                 try {
@@ -282,6 +303,7 @@ class PSDBuilderPlugin {
                                 } finally {
                                     if (leaveIntermediateFiles != true) {
                                         tempJsonFile.delete()
+                                        if (isTempImage) targetImageFile.delete()
                                     }
                                 }
                             } else {

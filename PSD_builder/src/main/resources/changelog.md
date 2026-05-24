@@ -1,3 +1,14 @@
+Version: 3.1.1
+Date: 2026-05-24
+Changed:
+  - Fixed an issue where intermediate debugging files were saved into the invisible internal plugin workspace folder. They are now saved directly into the user-specified `outputDir` (or alongside the source images), making the "Keep intermediate files" option actually usable.
+  - Rewrote and expanded all UI parameter descriptions in English to be much clearer and more descriptive for end users.
+-------------------------------------------------------------------------------------------------
+Version: 3.1.0
+Date: 2026-05-24
+Added:
+  - Added native support for `.webp` images. The plugin now uses the TwelveMonkeys ImageIO extension in Kotlin to read WebP files, calculate bounding boxes correctly, and seamlessly passes a temporary `.png` conversion to the Node.js PSD Builder to maintain compatibility without heavy native C++ dependencies.
+-------------------------------------------------------------------------------------------------
 Version: 3.0.10
 Date: 2026-05-23
 Changed:
