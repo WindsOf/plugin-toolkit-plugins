@@ -40,6 +40,17 @@ data class PsdPayload(
     val texts: List<PsdText>
 )
 
+@Serializable
+data class ExtractedText(
+    val text: String,
+    val left: Int,
+    val top: Int,
+    val right: Int,
+    val bottom: Int,
+    val fontName: String? = null,
+    val fontSize: Float? = null
+)
+
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "PSD Builder Native",
@@ -316,6 +327,75 @@ class PSDBuilderPlugin {
             children = layers,
             imageData = bgPixelData
         )
+    }
+
+    private fun findTextLayers(layers: List<com.wip.kpsd.Layer>?): List<com.wip.kpsd.Layer> {
+        if (layers == null) return emptyList()
+        val result = mutableListOf<com.wip.kpsd.Layer>()
+        for (l in layers) {
+            if (l.text != null) {
+                result.add(l)
+            }
+            if (l.children != null) {
+                result.addAll(findTextLayers(l.children))
+            }
+        }
+        return result
+    }
+
+    @Capability(
+        name = "Extract Text Layers from PSD",
+        description = "Reads a PSD file and returns a list of text layers with their text, position, and font info."
+    )
+    suspend fun extractTextLayers(
+        @CapabilityParam(description = "Path to PSD file") psdPath: String,
+        context: PluginContext
+    ): List<ExtractedText> {
+        val file = File(psdPath)
+        if (!file.exists()) {
+            throw IllegalArgumentException("PSD file not found: $psdPath")
+        }
+        val bytes = withContext(Dispatchers.IO) { file.readBytes() }
+        val psd = withContext(Dispatchers.Default) { com.wip.kpsd.KPsd.read(bytes) }
+        
+        val textLayers = findTextLayers(psd.children)
+        return textLayers.map { l ->
+            val tData = l.text!!
+            val fontName = tData.style?.font?.name ?: tData.styleRuns?.firstOrNull()?.style?.font?.name
+            val fontSize = tData.style?.fontSize ?: tData.styleRuns?.firstOrNull()?.style?.fontSize
+            
+            val isCollapsed = l.left == l.right || l.top == l.bottom
+            val left = if (isCollapsed && tData.transform != null) {
+                tData.transform!![4].toInt()
+            } else {
+                l.left
+            }
+            val top = if (isCollapsed && tData.transform != null) {
+                tData.transform!![5].toInt()
+            } else {
+                l.top
+            }
+            val right = if (isCollapsed && tData.transform != null) {
+                (tData.transform!![4] + (tData.right ?: 0f) - (tData.left ?: 0f)).toInt()
+            } else {
+                l.right
+            }
+            val bottom = if (isCollapsed && tData.transform != null) {
+                (tData.transform!![5] + (tData.bottom ?: 0f) - (tData.top ?: 0f)).toInt()
+            } else {
+                l.bottom
+            }
+
+            ExtractedText(
+                text = tData.text.replace("\r", "").replace("\n", ""),
+                left = left,
+                top = top,
+                right = right,
+                bottom = bottom,
+                fontName = fontName,
+                fontSize = fontSize
+            )
+        }
     }
 
     private fun wrapText(text: String, maxWidth: Int, fontSize: Int): String {
