@@ -1,3 +1,8 @@
+Version: 2.3.2
+Date: 2026-05-24
+Changed:
+  - Esteso il meccanismo di retry (massimo 3 tentativi) anche alla fase di parsing e decodifica JSON per gestire le hallucination dell'intelligenza artificiale in modo automatico senza scartare subito la pagina.
+-------------------------------------------------------------------------------------------------
 Version: 2.3.1
 Date: 2026-05-23
 Changed:

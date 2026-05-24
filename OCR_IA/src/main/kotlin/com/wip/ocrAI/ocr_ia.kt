@@ -57,8 +57,8 @@ data class OCRResult(
 @PluginInfo(
         id = "com.wip.ocr_ia",
         name = "OCR IA",
-        version = "2.3.1",
-        description = "Extract text from images using Google Gemma-4-26b-a4b-it via Koog (Kotlin)"
+        version = "2.3.2",
+        description = "Advanced OCR plugin using Google AI (Gemma 4 31B/26B) via Koog"
 )
 class OCR_IA(val settings: OcrIASettings) {
     @Capability(

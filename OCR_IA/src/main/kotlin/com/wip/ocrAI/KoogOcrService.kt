@@ -56,7 +56,7 @@ class KoogOcrService(private val context: PluginContext) {
     private suspend fun <T> retryWithBackoff(
         block: suspend () -> T
     ): T {
-        val delaysMs = listOf(5000L, 10000L, 10000L, 10000L, 120000L) // 5s, 10s, 10s, 10s, 2m
+        val delaysMs = listOf(5000L, 10000L, 15000L) // Max 3 retries
         val maxAttempts = delaysMs.size + 1
         var lastException: Throwable? = null
 
@@ -284,28 +284,30 @@ class KoogOcrService(private val context: PluginContext) {
                             acquireRateLimit()
 
                             logger.debug("Sending request to Google AI...")
-                            val responses = retryWithBackoff {
-                                executor.execute(ocrPrompt, model)
+                            val (balloonsResponse, rawResponse) = retryWithBackoff {
+                                val responses = executor.execute(ocrPrompt, model)
+                                logger.debug("Response received. Parts: ${responses.size}")
+
+                                var rawText = responses.joinToString("\n") { it.content }.trim()
+
+                                // Strip thinking blocks
+                                rawText = rawText.replace(
+                                    Regex("<(thought|thinking)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), ""
+                                ).trim()
+
+                                // Robust JSON extraction if not using structured output
+                                val jsonToParse = if (!useStructuredOutput) {
+                                    extractJsonFromText(rawText)
+                                } else {
+                                    rawText
+                                }
+
+                                // Attempt to parse JSON
+                                val json = Json { ignoreUnknownKeys = true }
+                                val parsed = json.decodeFromString<BalloonsResponse>(jsonToParse)
+                                
+                                Pair(parsed, rawText)
                             }
-                            logger.debug("Response received. Parts: ${responses.size}")
-
-                            var rawResponse = responses.joinToString("\n") { it.content }.trim()
-
-                            // Strip thinking blocks
-                            rawResponse = rawResponse.replace(
-                                Regex("<(thought|thinking)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), ""
-                            ).trim()
-
-                            // Robust JSON extraction if not using structured output
-                            val jsonToParse = if (!useStructuredOutput) {
-                                extractJsonFromText(rawResponse)
-                            } else {
-                                rawResponse
-                            }
-
-                            // Attempt to parse JSON
-                            val json = Json { ignoreUnknownKeys = true }
-                            val balloonsResponse = json.decodeFromString<BalloonsResponse>(jsonToParse)
 
                             resultsMutex.withLock {
                                 balloonsResponse.balloons.forEach { balloon ->

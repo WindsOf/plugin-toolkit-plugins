@@ -38,12 +38,12 @@
     {
       "name": "OCR IA",
       "pkg": "com.wip.ocr_ia",
-      "version": "2.3.1",
+      "version": "2.3.2",
       "fileName": "OCR_IA.jar",
-      "description": "Extract text from images using Google Gemma-4-26b-a4b-it via Koog (Kotlin)",
+      "description": "Advanced OCR plugin using Google AI (Gemma 4 31B/26B) via Koog",
       "targetAppVersion": "1.0.0",
-      "hash": "6f6e1951d0110e328b998c2a19967f72c5272ddf911b3b3a48b6f5906d0362f3",
-      "signature": "eC3FmCiwoO3ZEocAx/8cIK2XrvrKtqTkvqq0xsyUF5eGrGALBlJn6kd9JeTNZiHyIbQ+gthM5huht0oxUKC1a8R06606/Ui3qbuWQObG7zCh1RRpHoLQU4I4XKcaKuXSj0s6Kspr/hd1d67HEhCagT/EgGPw5df2b/dnBFuw7aihqJ6HqZ7w8KPQB1TjS0RhdhZCzIRfHsqLYTysgMox5H/wAeRT4M5DaNHwqlgXrVT4LA9vX51mWFMGtfqK0dvlWjrwgYtiFJYHM2RUldRe4u8Mubm2fcNqfeEKCpP4FGnDfJDdJtcYn7Nh38F6bhNdOjniKgYij9oZzMP+QMfrtg=="
+      "hash": "91be5db32b5448b01eaedf7c25d3dd05e2c91d869dfe17668168c926dd87e6dc",
+      "signature": "Ziha+B/qN5NN4yQUlEyfKmigxurqcQ6km56QrsUVUJ1YDTpZ0Rt0SC4nftIN7KMHHPp6qzo/pJ7jYbo4x+mXLIhMAIWs3p6f5t8FH9WKQlxAkF2s4N5A+U+v79n4VTyWLKvaQqydBoY/tM9iXq3Q3KfEoA8y0gp5y1yorycTY52BdPW+Ad76qIwJi/zlQ9pJx3atFrmJsUC/qyx8UYmSk2mWjd+F7hqM9zTO5UBr1pFAsO+5nBBEETvHoCK+vGDOtMiNuHXqF0VF4bNnwgsraTucFf+Rkl+y6cj2M7gvM9YHMudDtQOj/OrhD8T3HiTrQLPrjRTKD7OejVBk0V7r7A=="
     },
     {
       "name": "PSD Builder",

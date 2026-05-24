@@ -3,8 +3,8 @@
     "plugin": {
         "id": "com.wip.ocr_ia",
         "name": "OCR IA",
-        "version": "2.3.1",
-        "description": "Extract text from images using Google Gemma-4-26b-a4b-it via Koog (Kotlin)"
+        "version": "2.3.2",
+        "description": "Advanced OCR plugin using Google AI (Gemma 4 31B/26B) via Koog"
     },
     "requirements": {
         "minMemoryMb": 128,
@@ -151,6 +151,15 @@
     },
     "changelog": {
         "releases": [
+            {
+                "version": "2.3.2",
+                "date": "2026-05-24",
+                "categories": {
+                    "Changed": [
+                        "Esteso il meccanismo di retry (massimo 3 tentativi) anche alla fase di parsing e decodifica JSON per gestire le hallucination dell'intelligenza artificiale in modo automatico senza scartare subito la pagina."
+                    ]
+                }
+            },
             {
                 "version": "2.3.1",
                 "date": "2026-05-23",
