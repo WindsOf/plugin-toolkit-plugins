@@ -65,7 +65,7 @@ async function generatePSD(jsonPath, outputPath) {
                         fillType: 'color',
                         blendMode: 'normal',
                         opacity: 1,
-                        color: { r: 255, g: 255, b: 255, a: 1 }
+                        color: { r: 0, g: 0, b: 0, a: 1 }
                     }]
                 }
             } : {}),
@@ -81,7 +81,7 @@ async function generatePSD(jsonPath, outputPath) {
                 style: {
                     font: { name: fontName },
                     fontSize: fontSize,
-                    fillColor: txtConfig.color || { r: 0, g: 0, b: 0, a: 255 }
+                    fillColor: txtConfig.color || { r: 255, g: 255, b: 255, a: 255 }
                 },
                 paragraphStyle: {
                     justification: 'center'

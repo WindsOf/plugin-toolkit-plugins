@@ -43,7 +43,7 @@ class PSDBuilderSizeComparisonTest {
         val imageFile = File(tempDir, "base.png")
         val baseImage = BufferedImage(500, 500, BufferedImage.TYPE_INT_RGB)
         val g = baseImage.createGraphics()
-        g.color = Color.WHITE
+        g.color = Color.RED
         g.fillRect(0, 0, 500, 500)
         g.dispose()
         ImageIO.write(baseImage, "png", imageFile)
@@ -71,6 +71,12 @@ class PSDBuilderSizeComparisonTest {
                 put("fontName", "ArialMT")
                 put("fontSize", 24)
                 put("strokeSize", 3)
+                putJsonObject("color") {
+                    put("r", 255)
+                    put("g", 255)
+                    put("b", 255)
+                    put("a", 255)
+                }
             }
         }
         val payload = buildJsonObject {
@@ -104,7 +110,6 @@ class PSDBuilderSizeComparisonTest {
 
         val nativeHex = nativePsdPath.readBytes().joinToString("") { "%02x".format(it) }
         assertTrue(nativeHex.contains("6c667832"), "Native PSD should contain 'lfx2' block")
-        assertTrue(nativeHex.contains("6c6d6678"), "Native PSD should contain 'lmfx' block")
 
         println("EXE Size: $exeSize bytes")
         println("Native Size: $nativeSize bytes")

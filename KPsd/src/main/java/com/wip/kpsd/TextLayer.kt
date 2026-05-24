@@ -58,7 +58,7 @@ object TextLayer {
         strokeFlag = false,
         fillFirst = true,
         yUnderline = 1,
-        outlineWidth = 0f,
+        outlineWidth = 1f,
         characterDirection = 0,
         hindiNumbers = false,
         kashida = 1f,
@@ -79,41 +79,56 @@ object TextLayer {
     val justification = listOf("left", "right", "center")
 
     fun decodeColor(node: Map<String, Any?>): Color {
-        val type = (node["Type"] as? Number)?.toInt() ?: 0
+        val type = (node["Type"] as? Number)?.toInt() ?: 1
         val values = node["Values"] as? List<*> ?: emptyList<Any>()
+        val c = values.map { (it as? Number)?.toDouble() ?: 0.0 }
         return when (type) {
-            0 -> { // CMYK
-                val c = ((values.getOrNull(0) as? Number)?.toDouble() ?: 0.0) * 255
-                val m = ((values.getOrNull(1) as? Number)?.toDouble() ?: 0.0) * 255
-                val y = ((values.getOrNull(2) as? Number)?.toDouble() ?: 0.0) * 255
-                val k = ((values.getOrNull(3) as? Number)?.toDouble() ?: 0.0) * 255
-                Cmyk(c.toInt(), m.toInt(), y.toInt(), k.toInt())
+            0 -> { // Grayscale
+                val k = (c.getOrNull(1) ?: 0.0) * 255
+                GrayscaleColor(k.toInt())
             }
-            1 -> { // RGB
-                val r = ((values.getOrNull(0) as? Number)?.toDouble() ?: 0.0) * 255
-                val g = ((values.getOrNull(1) as? Number)?.toDouble() ?: 0.0) * 255
-                val b = ((values.getOrNull(2) as? Number)?.toDouble() ?: 0.0) * 255
-                Rgb(r.toInt(), g.toInt(), b.toInt())
+            1 -> { // RGB or RGBA
+                val alpha = c.getOrNull(0) ?: 1.0
+                val r = (c.getOrNull(1) ?: 0.0) * 255
+                val g = (c.getOrNull(2) ?: 0.0) * 255
+                val b = (c.getOrNull(3) ?: 0.0) * 255
+                if (alpha == 1.0) {
+                    Rgb(r.toInt(), g.toInt(), b.toInt())
+                } else {
+                    Rgba(r.toInt(), g.toInt(), b.toInt(), (alpha * 255).toInt())
+                }
             }
-            2 -> { // Lab
-                val l = ((values.getOrNull(0) as? Number)?.toDouble() ?: 0.0).toFloat()
-                val a = ((values.getOrNull(1) as? Number)?.toDouble() ?: 0.0).toFloat()
-                val b = ((values.getOrNull(2) as? Number)?.toDouble() ?: 0.0).toFloat()
-                Lab(l, a, b)
+            2 -> { // CMYK
+                val cyan = (c.getOrNull(1) ?: 0.0) * 255
+                val magenta = (c.getOrNull(2) ?: 0.0) * 255
+                val yellow = (c.getOrNull(3) ?: 0.0) * 255
+                val black = (c.getOrNull(4) ?: 0.0) * 255
+                Cmyk(cyan.toInt(), magenta.toInt(), yellow.toInt(), black.toInt())
             }
             else -> Rgb(0, 0, 0)
         }
     }
 
     fun encodeColor(color: Color?): Map<String, Any?> {
+        if (color == null) {
+            return mapOf("Type" to 1, "Values" to listOf(0.0, 0.0, 0.0, 0.0))
+        }
         return when (color) {
-            is Rgb -> mapOf("Type" to 1, "Values" to listOf(color.r / 255.0, color.g / 255.0, color.b / 255.0))
-            is Cmyk -> mapOf(
-                "Type" to 0,
-                "Values" to listOf(color.c / 255.0, color.m / 255.0, color.y / 255.0, color.k / 255.0)
-            )
-            is Lab -> mapOf("Type" to 2, "Values" to listOf(color.l.toDouble(), color.a.toDouble(), color.b.toDouble()))
-            else -> mapOf("Type" to 1, "Values" to listOf(0.0, 0.0, 0.0))
+            is GrayscaleColor -> {
+                mapOf("Type" to 0, "Values" to listOf(1.0, color.k / 255.0))
+            }
+            is Rgba -> {
+                mapOf("Type" to 1, "Values" to listOf(color.a / 255.0, color.r / 255.0, color.g / 255.0, color.b / 255.0))
+            }
+            is Rgb -> {
+                mapOf("Type" to 1, "Values" to listOf(1.0, color.r / 255.0, color.g / 255.0, color.b / 255.0))
+            }
+            is Cmyk -> {
+                mapOf("Type" to 2, "Values" to listOf(1.0, color.c / 255.0, color.m / 255.0, color.y / 255.0, color.k / 255.0))
+            }
+            else -> {
+                mapOf("Type" to 1, "Values" to listOf(1.0, 0.0, 0.0, 0.0))
+            }
         }
     }
 
@@ -268,7 +283,13 @@ object TextLayer {
 
     fun decodeEngineData(engineDict: Map<String, Any?>, resourceDict: Map<String, Any?>): LayerTextData {
         val editor = engineDict["Editor"] as? Map<*, *>
-        val text = (editor?.get("Text") as? String) ?: ""
+        val rawText = (editor?.get("Text") as? String) ?: ""
+        var text = rawText.replace("\r", "\n")
+        var removedCharacters = 0
+        while (text.endsWith("\n")) {
+            text = text.substring(0, text.length - 1)
+            removedCharacters++
+        }
 
         val fontSet = (resourceDict["FontSet"] as? List<*>) ?: emptyList<Any>()
         val fonts = fontSet.map {
@@ -293,8 +314,24 @@ object TextLayer {
             @Suppress("UNCHECKED_CAST")
             val styleData = stylesheet?.get("StyleSheetData") as? Map<String, Any?>
             if (styleData != null) {
-                styleRuns.add(TextStyleRun(len, decodeStyle(styleData, fonts)))
+                val decoded = decodeStyle(styleData, fonts)
+                if (decoded.font == null && fonts.isNotEmpty()) {
+                    decoded.font = fonts[0]
+                }
+                styleRuns.add(TextStyleRun(len, decoded))
             }
+        }
+
+        var tempRemoved = removedCharacters
+        while (styleRuns.isNotEmpty() && tempRemoved > 0) {
+            val lastRun = styleRuns.last()
+            val newLen = lastRun.length - 1
+            if (newLen <= 0) {
+                styleRuns.removeAt(styleRuns.size - 1)
+            } else {
+                styleRuns[styleRuns.size - 1] = lastRun.copy(length = newLen)
+            }
+            tempRemoved--
         }
 
         val paragraphRun = engineDict["ParagraphRun"] as? Map<*, *>
@@ -313,6 +350,28 @@ object TextLayer {
             }
         }
 
+        tempRemoved = removedCharacters
+        while (paragraphStyleRuns.isNotEmpty() && tempRemoved > 0) {
+            val lastRun = paragraphStyleRuns.last()
+            val newLen = lastRun.length - 1
+            if (newLen <= 0) {
+                paragraphStyleRuns.removeAt(paragraphStyleRuns.size - 1)
+            } else {
+                paragraphStyleRuns[paragraphStyleRuns.size - 1] = lastRun.copy(length = newLen)
+            }
+            tempRemoved--
+        }
+
+        val baseStyle = TextStyle()
+        val finalStyleRuns = if (styleRuns.isNotEmpty()) {
+            deduplicateStyle(baseStyle, styleRuns)
+        } else styleRuns
+
+        val baseParagraphStyle = ParagraphStyle()
+        val finalParagraphStyleRuns = if (paragraphStyleRuns.isNotEmpty()) {
+            deduplicateParagraphStyle(baseParagraphStyle, paragraphStyleRuns)
+        } else paragraphStyleRuns
+
         val gridInfoNode = engineDict["GridInfo"] as? Map<*, *>
         val gridInfo = TextGridInfo(
             isOn = gridInfoNode?.get("GridIsOn") as? Boolean,
@@ -330,19 +389,53 @@ object TextLayer {
             alignLineHeightToGridFlags = gridInfoNode?.get("AlignLineHeightToGridFlags") as? Boolean
         )
 
+        val superscriptSize = (resourceDict["SuperscriptSize"] as? Number)?.toFloat()
+        val superscriptPosition = (resourceDict["SuperscriptPosition"] as? Number)?.toFloat()
+        val subscriptSize = (resourceDict["SubscriptSize"] as? Number)?.toFloat()
+        val subscriptPosition = (resourceDict["SubscriptPosition"] as? Number)?.toFloat()
+        val smallCapSize = (resourceDict["SmallCapSize"] as? Number)?.toFloat()
+
+        val rendered = engineDict["Rendered"] as? Map<*, *>
+        val shapes = rendered?.get("Shapes") as? Map<*, *>
+        val children = shapes?.get("Children") as? List<*>
+        val firstChild = children?.getOrNull(0) as? Map<*, *>
+        val cookie = firstChild?.get("Cookie") as? Map<*, *>
+        val photoshop = cookie?.get("Photoshop") as? Map<*, *>
+        
+        val shapeType = if (photoshop != null) {
+            val st = (photoshop["ShapeType"] as? Number)?.toInt()
+            if (st == 1) "box" else "point"
+        } else null
+        
+        val pointBase = (photoshop?.get("PointBase") as? List<*>)?.let { list ->
+            FloatArray(list.size) { (list[it] as Number).toFloat() }
+        }
+        val boxBounds = (photoshop?.get("BoxBounds") as? List<*>)?.let { list ->
+            FloatArray(list.size) { (list[it] as Number).toFloat() }
+        }
+
         return LayerTextData(
             text = text,
-            styleRuns = styleRuns,
-            paragraphStyleRuns = paragraphStyleRuns,
+            style = baseStyle,
+            styleRuns = if (finalStyleRuns.isEmpty()) null else finalStyleRuns,
+            paragraphStyle = baseParagraphStyle,
+            paragraphStyleRuns = if (finalParagraphStyleRuns.isEmpty()) null else finalParagraphStyleRuns,
             gridInfo = gridInfo,
             antiAlias = antialias.getOrNull((engineDict["AntiAlias"] as? Number)?.toInt() ?: 1),
-            useFractionalGlyphWidths = engineDict["UseFractionalGlyphWidths"] as? Boolean
+            useFractionalGlyphWidths = engineDict["UseFractionalGlyphWidths"] as? Boolean,
+            superscriptSize = superscriptSize,
+            superscriptPosition = superscriptPosition,
+            subscriptSize = subscriptSize,
+            subscriptPosition = subscriptPosition,
+            smallCapSize = smallCapSize,
+            shapeType = shapeType,
+            pointBase = pointBase,
+            boxBounds = boxBounds
         )
     }
 
     fun encodeEngineData(data: LayerTextData): Map<String, Any?> {
-        val originalText = data.text.replace(Regex("\\r?\\n"), "\r")
-        val text = if (originalText.endsWith("\r")) originalText else originalText + "\r"
+        val text = data.text.replace(Regex("\\r?\\n"), "\r") + "\r"
         val fonts = mutableListOf<Font>(
             Font(name = "AdobeInvisFont", script = 0, type = 0, synthetic = 0)
         )
@@ -350,39 +443,88 @@ object TextLayer {
 
         val styleRunArray = mutableListOf<Map<String, Any?>>()
         val styleRunLengthArray = mutableListOf<Int>()
-        val styleRuns = data.styleRuns ?: listOf(TextStyleRun(text.length, data.style ?: TextStyle()))
-        for (run in styleRuns) {
-            val runLength = run.length
-            styleRunLengthArray.add(runLength)
-
-            // Manual merge
-            val runStyle = run.style
-            val target = mergeStyle(defaultStyle.copy(font = defFont), data.style)
-            val finalStyle = mergeStyle(target, runStyle)
-
+        val styleRuns = data.styleRuns
+        if (styleRuns != null && styleRuns.isNotEmpty()) {
+            var leftLength = text.length
+            for (run in styleRuns) {
+                var runLength = Math.min(run.length, leftLength)
+                leftLength -= runLength
+                if (runLength <= 0) continue
+                if (leftLength == 1 && run == styleRuns.last()) {
+                    runLength++
+                    leftLength--
+                }
+                styleRunLengthArray.add(runLength)
+                val runStyle = run.style
+                val target = mergeStyle(TextStyle(font = defFont), data.style)
+                val finalStyle = mergeStyle(target, runStyle)
+                styleRunArray.add(
+                    mapOf(
+                        "StyleSheet" to mapOf("StyleSheetData" to encodeStyle(finalStyle, fonts))
+                    )
+                )
+            }
+            if (leftLength > 0) {
+                styleRunLengthArray.add(leftLength)
+                styleRunArray.add(
+                    mapOf(
+                        "StyleSheet" to mapOf("StyleSheetData" to encodeStyle(mergeStyle(TextStyle(font = defFont), data.style), fonts))
+                    )
+                )
+            }
+        } else {
+            styleRunLengthArray.add(text.length)
             styleRunArray.add(
                 mapOf(
-                    "StyleSheet" to mapOf("StyleSheetData" to encodeStyle(finalStyle, fonts))
+                    "StyleSheet" to mapOf("StyleSheetData" to encodeStyle(mergeStyle(TextStyle(font = defFont), data.style), fonts))
                 )
             )
         }
 
         val paragraphRunArray = mutableListOf<Map<String, Any?>>()
         val paragraphRunLengthArray = mutableListOf<Int>()
-        val pRuns = data.paragraphStyleRuns ?: listOf(ParagraphStyleRun(text.length, data.paragraphStyle ?: ParagraphStyle()))
-        for (run in pRuns) {
-            val runLength = run.length
-            paragraphRunLengthArray.add(runLength)
-            
-            val runPs = run.style
-            val target = mergeParagraphStyle(defaultParagraphStyle, data.paragraphStyle)
-            val finalPs = mergeParagraphStyle(target, runPs)
-
-            paragraphRunArray.add(
-                mapOf(
-                    "ParagraphSheet" to mapOf("DefaultStyleSheet" to 0, "Properties" to encodeParagraphStyle(finalPs, fonts))
+        val pRuns = data.paragraphStyleRuns
+        if (pRuns != null && pRuns.isNotEmpty()) {
+            var leftLength = text.length
+            for (run in pRuns) {
+                var runLength = Math.min(run.length, leftLength)
+                leftLength -= runLength
+                if (runLength <= 0) continue
+                if (leftLength == 1 && run == pRuns.last()) {
+                    runLength++
+                    leftLength--
+                }
+                paragraphRunLengthArray.add(runLength)
+                val runPs = run.style
+                val target = mergeParagraphStyle(defaultParagraphStyle, data.paragraphStyle)
+                val finalPs = mergeParagraphStyle(target, runPs)
+                paragraphRunArray.add(
+                    mapOf(
+                        "ParagraphSheet" to mapOf("DefaultStyleSheet" to 0, "Properties" to encodeParagraphStyle(finalPs, fonts))
+                    )
                 )
-            )
+            }
+            if (leftLength > 0) {
+                paragraphRunLengthArray.add(leftLength)
+                paragraphRunArray.add(
+                    mapOf(
+                        "ParagraphSheet" to mapOf("DefaultStyleSheet" to 0, "Properties" to encodeParagraphStyle(mergeParagraphStyle(defaultParagraphStyle, data.paragraphStyle), fonts))
+                    )
+                )
+            }
+        } else {
+            var last = 0
+            for (i in 0 until text.length) {
+                if (text[i].code == 13) { // \r
+                    paragraphRunLengthArray.add(i - last + 1)
+                    paragraphRunArray.add(
+                        mapOf(
+                            "ParagraphSheet" to mapOf("DefaultStyleSheet" to 0, "Properties" to encodeParagraphStyle(mergeParagraphStyle(defaultParagraphStyle, data.paragraphStyle), fonts))
+                        )
+                    )
+                    last = i + 1
+                }
+            }
         }
 
         val gridInfo = data.gridInfo ?: defaultGridInfo
@@ -403,33 +545,58 @@ object TextLayer {
             "TransformPoint2" to listOf(0.0, 0.0)
         )
 
+        val styleSheetData = encodeStyle(mergeStyle(TextStyle(font = defFont), data.style), fonts)
         val defaultResources = mapOf(
             "KinsokuSet" to listOf(
                 mapOf(
                     "Name" to "PhotoshopKinsokuHard",
-                    "NoStart" to "",
-                    "NoEnd" to ""
+                    "NoStart" to "、。，．・：；？！ー―’”）〕］｝〉》」』】ヽヾゝゞ々ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶ゛゜?!)]},.:;℃℉¢％‰",
+                    "NoEnd" to "‘“（〔［｛〈《「『【([{￥＄£＠§〒＃",
+                    "Keep" to "―‥",
+                    "Hanging" to "、。.,"
+                ),
+                mapOf(
+                    "Name" to "PhotoshopKinsokuSoft",
+                    "NoStart" to "、。，．・：；？！’”）〕］｝〉》」』】ヽヾゝゞ々",
+                    "NoEnd" to "‘“（〔［｛〈《「『【",
+                    "Keep" to "―‥",
+                    "Hanging" to "、。.,"
                 )
             ),
             "MojiKumiSet" to listOf(
-                mapOf("Name" to "PhotoshopMojiKumiNone")
+                mapOf("InternalName" to "Photoshop6MojiKumiSet1"),
+                mapOf("InternalName" to "Photoshop6MojiKumiSet2"),
+                mapOf("InternalName" to "Photoshop6MojiKumiSet3"),
+                mapOf("InternalName" to "Photoshop6MojiKumiSet4")
             ),
             "TheNormalParagraphSheet" to 0,
             "TheNormalStyleSheet" to 0,
             "ParagraphSheetSet" to listOf(
-                mapOf("DefaultStyleSheet" to 0, "Properties" to encodeParagraphStyle(defaultParagraphStyle, fonts))
+                mapOf(
+                    "Name" to "Normal RGB",
+                    "DefaultStyleSheet" to 0,
+                    "Properties" to encodeParagraphStyle(mergeParagraphStyle(defaultParagraphStyle, data.paragraphStyle), fonts)
+                )
             ),
             "StyleSheetSet" to listOf(
-                mapOf("StyleSheetData" to encodeStyle(defaultStyle, fonts))
+                mapOf(
+                    "Name" to "Normal RGB",
+                    "StyleSheetData" to styleSheetData
+                )
             ),
             "FontSet" to fonts.map {
                 mapOf(
                     "Name" to it.name,
                     "Script" to (it.script ?: 0),
-                    "Type" to (it.type ?: 0),
+                    "FontType" to (it.type ?: 0),
                     "Synthetic" to (it.synthetic ?: 0)
                 )
-            }
+            },
+            "SuperscriptSize" to (data.superscriptSize ?: 0.583f),
+            "SuperscriptPosition" to (data.superscriptPosition ?: 0.333f),
+            "SubscriptSize" to (data.subscriptSize ?: 0.583f),
+            "SubscriptPosition" to (data.subscriptPosition ?: 0.333f),
+            "SmallCapSize" to (data.smallCapSize ?: 0.7f)
         )
 
         val engineDict = mapOf(
@@ -478,7 +645,8 @@ object TextLayer {
 
         return mapOf(
             "EngineDict" to engineDict,
-            "ResourceDict" to defaultResources
+            "ResourceDict" to defaultResources,
+            "DocumentResources" to defaultResources
         )
     }
 
