@@ -17,6 +17,8 @@ import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginValidate
 import java.io.File
 import javax.imageio.ImageIO
+import javax.imageio.spi.IIORegistry
+import com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi
 
 @Serializable
 data class PsdColor(val r: Int, val g: Int, val b: Int, val a: Int)
@@ -59,6 +61,9 @@ class PSDBuilderPlugin {
             val fileSystem = context.fileSystem
             val logger = context.logger
             logger.info("Starting PSD Builder setup...")
+            
+            // Register WebP manually because of fat-jar SPI exclusion
+            IIORegistry.getDefaultInstance().registerServiceProvider(WebPImageReaderSpi())
 
             val resourcesToExtract = listOf(
                 "tools/PSD_builder.exe" to "PSD_builder.exe"

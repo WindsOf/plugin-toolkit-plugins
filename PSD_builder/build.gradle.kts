@@ -16,6 +16,10 @@ kotlin {
     }
 }
 
+val bundle by configurations.creating {
+    isCanBeResolved = true
+}
+
 dependencies {
     implementation(platform(libs.koin.bom))
     implementation(libs.koin.core)
@@ -24,6 +28,7 @@ dependencies {
     ksp(libs.plugin.api)
 
     implementation("com.twelvemonkeys.imageio:imageio-webp:3.10.1")
+    bundle("com.twelvemonkeys.imageio:imageio-webp:3.10.1")
 
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlin.test.junit)
@@ -32,5 +37,12 @@ dependencies {
 
 tasks.test {
     useJUnit()
+}
+
+tasks.named<Jar>("jar") {
+    from({
+        configurations["bundle"].filter { it.name.endsWith("jar") }.map { zipTree(it) }
+    })
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
