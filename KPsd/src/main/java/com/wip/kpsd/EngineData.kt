@@ -15,8 +15,8 @@ object EngineData {
     private val intArrays = setOf("RunLengthArray")
 
     fun serializeFloat(value: Double): String {
-        val str = String.format(java.util.Locale.US, "%.5f", value)
-        var res = str.replace(Regex("(\\d)0+\$"), "$1")
+        val str = String.format(java.util.Locale.US, "%.6f", value)
+        var res = str.replace(Regex("\\.?0+\$"), "")
         if (res.startsWith("0.")) {
             res = res.substring(1)
         } else if (res.startsWith("-0.")) {

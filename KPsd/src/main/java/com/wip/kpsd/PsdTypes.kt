@@ -148,6 +148,48 @@ data class CustomEnvelopeWarp(
     val meshPoints: List<Point>
 )
 
+data class EffectContour(
+    val name: String,
+    val curve: List<Point>
+)
+
+data class LayerEffectStroke(
+    var enabled: Boolean = true,
+    var present: Boolean = true,
+    var showInDialog: Boolean = true,
+    var size: UnitsValue = UnitsValue("Pixels", 1f),
+    var position: String = "outside", // 'inside' | 'center' | 'outside'
+    var fillType: String = "color", // 'color' | 'gradient' | 'pattern'
+    var blendMode: String = "normal",
+    var opacity: Float = 1f,
+    var color: Color? = null,
+    var overprint: Boolean? = null
+)
+
+data class LayerEffectShadow(
+    var enabled: Boolean = true,
+    var present: Boolean = true,
+    var showInDialog: Boolean = true,
+    var size: UnitsValue = UnitsValue("Pixels", 0f),
+    var angle: Float = 120f,
+    var distance: UnitsValue = UnitsValue("Pixels", 0f),
+    var color: Color? = null,
+    var blendMode: String = "multiply",
+    var opacity: Float = 0.75f,
+    var useGlobalLight: Boolean = true,
+    var antialiased: Boolean = false,
+    var choke: UnitsValue = UnitsValue("Pixels", 0f), // spread
+    var layerConceals: Boolean = true
+)
+
+data class LayerEffectsInfo(
+    var disabled: Boolean = false,
+    var scale: Float = 1f,
+    var stroke: List<LayerEffectStroke>? = null,
+    var dropShadow: List<LayerEffectShadow>? = null,
+    var innerShadow: List<LayerEffectShadow>? = null
+)
+
 data class Point(val x: Float, val y: Float)
 
 data class TextStyle(
@@ -321,7 +363,8 @@ data class Layer(
     var nameSource: String? = null,
     var linkGroup: Int? = null,
     var linkGroupEnabled: Boolean? = null,
-    var blendingRanges: BlendingRanges? = null
+    var blendingRanges: BlendingRanges? = null,
+    var effects: LayerEffectsInfo? = null
 )
 
 data class Psd(
@@ -329,6 +372,7 @@ data class Psd(
     var height: Int = 0,
     var channels: Int = 4,
     var bitsPerChannel: Int = 8,
+    var hasAlpha: Boolean = false,
     var colorMode: ColorMode = ColorMode.RGB,
     var palette: MutableList<Rgb>? = null,
     var children: MutableList<Layer> = mutableListOf(),

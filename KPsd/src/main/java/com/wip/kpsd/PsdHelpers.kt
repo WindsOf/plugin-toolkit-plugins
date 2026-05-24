@@ -39,6 +39,37 @@ object PsdHelpers {
 
     val fromBlendMode = toBlendMode.entries.associate { it.value to it.key }
 
+    val fromBlendModeDescriptor = mapOf(
+        "pass through" to "pass",
+        "normal" to "Nrml",
+        "dissolve" to "Dslv",
+        "darken" to "Drkn",
+        "multiply" to "Mltp",
+        "color burn" to "CBrn",
+        "linear burn" to "linearBurn",
+        "darker color" to "darkerColor",
+        "lighten" to "Lghn",
+        "screen" to "Scrn",
+        "color dodge" to "CDdg",
+        "linear dodge" to "linearDodge",
+        "lighter color" to "lighterColor",
+        "overlay" to "Ovrl",
+        "soft light" to "SftL",
+        "hard light" to "HrdL",
+        "vivid light" to "vividLight",
+        "linear light" to "linearLight",
+        "pin light" to "pinLight",
+        "hard mix" to "hardMix",
+        "difference" to "Dfrn",
+        "exclusion" to "Xclu",
+        "subtract" to "blendSubtraction",
+        "divide" to "blendDivide",
+        "hue" to "H   ",
+        "saturation" to "Strt",
+        "color" to "Clr ",
+        "luminosity" to "Lmns"
+    )
+
     fun clamp(value: Float, min: Float, max: Float): Float {
         return if (value < min) min else if (value > max) max else value
     }

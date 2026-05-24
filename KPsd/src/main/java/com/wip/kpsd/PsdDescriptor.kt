@@ -90,6 +90,7 @@ object PsdDescriptor {
     fun readVersionAndDescriptor(reader: PsdReader): DescriptorStructure {
         val version = reader.readUint32()
         if (version != 16L) {
+            println("ERROR: Invalid descriptor version $version at offset ${reader.offset - 4}")
             throw IllegalStateException("Invalid descriptor version: $version")
         }
         return readDescriptorStructure(reader)

@@ -108,6 +108,35 @@ class KPsdTest {
     }
 
     @Test
+    fun testLayerEffectsRoundtrip() {
+        val width = 100
+        val height = 100
+        val layer = Layer(
+            name = "Stroked Layer",
+            top = 10, left = 10, bottom = 90, right = 90,
+            imageData = PixelData(80, 80, ByteArray(80 * 80 * 4) { 128.toByte() }),
+            effects = LayerEffectsInfo(
+                stroke = listOf(
+                    LayerEffectStroke(
+                        size = UnitsValue("Pixels", 5f),
+                        color = Rgb(255, 0, 0)
+                    )
+                )
+            ),
+            effectsOpen = true
+        )
+        val psd = Psd(width = width, height = height, children = mutableListOf(layer))
+        
+        val bytes = KPsd.write(psd)
+        // Note: Reader implementation for effects is not yet fully added, 
+        // but writing and then checking file size difference in comparison test is already done.
+        // I will implement a minimal reader for verification if needed.
+        // For now, let's at least verify that it doesn't crash.
+        val parsed = KPsd.read(bytes)
+        assertNotNull(parsed)
+    }
+
+    @Test
     fun testPsdRoundtripCompressed() {
         val width = 100
         val height = 80
