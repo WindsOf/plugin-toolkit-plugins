@@ -48,7 +48,7 @@ class PSDBuilderCrossModuleTest {
         val imageFile = File(tempDir, "base.png")
         val baseImage = BufferedImage(500, 500, BufferedImage.TYPE_INT_RGB)
         val g = baseImage.createGraphics()
-        g.color = Color.WHITE
+        g.color = Color.RED
         g.fillRect(0, 0, 500, 500)
         g.dispose()
         ImageIO.write(baseImage, "png", imageFile)
@@ -90,6 +90,12 @@ class PSDBuilderCrossModuleTest {
                     put("fontName", "ArialMT")
                     put("fontSize", 24)
                     put("strokeSize", 3)
+                    putJsonObject("color") {
+                        put("r", 255)
+                        put("g", 255)
+                        put("b", 255)
+                        put("a", 255)
+                    }
                 }
             }
             
@@ -145,6 +151,20 @@ class PSDBuilderCrossModuleTest {
                     val nText = nL.text!!.text.trim().replace("\r", " ").replace("\n", " ").replace(Regex("\\s+"), " ")
                     println("    EXE text: [$eText], Native text: [$nText]")
                     assertEquals(eText, nText, "Layer $i text content mismatch in scenario $index")
+                    
+                    assertNotNull(eL.text!!.boxBounds, "Layer $i EXE boxBounds should not be null")
+                    assertNotNull(nL.text!!.boxBounds, "Layer $i Native boxBounds should not be null")
+                    assertEquals(eL.text!!.boxBounds!!.size, nL.text!!.boxBounds!!.size, "Layer $i boxBounds size mismatch")
+                    for (idx in eL.text!!.boxBounds!!.indices) {
+                        assertEquals(eL.text!!.boxBounds!![idx], nL.text!!.boxBounds!![idx], 1e-4f, "Layer $i boxBounds[$idx] mismatch")
+                    }
+
+                    assertNotNull(eL.text!!.transform, "Layer $i EXE transform should not be null")
+                    assertNotNull(nL.text!!.transform, "Layer $i Native transform should not be null")
+                    assertEquals(eL.text!!.transform!!.size, nL.text!!.transform!!.size, "Layer $i transform size mismatch")
+                    for (idx in eL.text!!.transform!!.indices) {
+                        assertEquals(eL.text!!.transform!![idx], nL.text!!.transform!![idx], 1e-4, "Layer $i transform[$idx] mismatch")
+                    }
                 }
             }
         }

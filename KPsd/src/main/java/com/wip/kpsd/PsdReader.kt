@@ -193,7 +193,36 @@ class PsdReader(val bytes: ByteArray) {
                 readLayerChannelImageData(psd, layers[i], channelsInfo[i])
             }
 
-            psd.children = layers
+            // Reconstruct hierarchy
+            val stack = mutableListOf<Layer>()
+            val root = Layer() // dummy root layer to hold children
+            root.children = mutableListOf()
+            stack.add(root)
+
+            for (i in layers.indices.reversed()) {
+                val l = layers[i]
+                val type = l.sectionDivider?.type ?: SectionDividerType.Other
+
+                if (type == SectionDividerType.OpenFolder || type == SectionDividerType.ClosedFolder) {
+                    l.opened = type == SectionDividerType.OpenFolder
+                    l.children = mutableListOf()
+
+                    l.sectionDivider?.key?.let { key ->
+                        PsdHelpers.toBlendMode[key]?.let { l.blendMode = it }
+                    }
+
+                    stack.last().children!!.add(0, l)
+                    stack.add(l)
+                } else if (type == SectionDividerType.BoundingSectionDivider) {
+                    if (stack.size > 1) {
+                        stack.removeAt(stack.size - 1)
+                    }
+                } else {
+                    stack.last().children!!.add(0, l)
+                }
+            }
+
+            psd.children = root.children ?: mutableListOf()
         }
     }
 
@@ -243,14 +272,64 @@ class PsdReader(val bytes: ByteArray) {
     }
 
     private fun readLayerMaskData(layer: Layer) {
-        readSection(1) {
-            // skip
+        readSection(1) { left ->
+            if (left() > 0) {
+                val mask = LayerMaskData()
+                mask.top = readInt32()
+                mask.left = readInt32()
+                mask.bottom = readInt32()
+                mask.right = readInt32()
+                mask.defaultColor = readUint8()
+                val flags = readUint8()
+                mask.positionRelativeToLayer = (flags and 1) != 0
+                mask.disabled = (flags and 2) != 0
+                mask.fromVectorData = (flags and 8) != 0
+
+                layer.mask = mask
+
+                if (left() >= 18) {
+                    val realMask = LayerMaskData()
+                    val realFlags = readUint8()
+                    realMask.positionRelativeToLayer = (realFlags and 1) != 0
+                    realMask.disabled = (realFlags and 2) != 0
+                    realMask.fromVectorData = (realFlags and 8) != 0
+                    realMask.defaultColor = readUint8()
+                    realMask.top = readInt32()
+                    realMask.left = readInt32()
+                    realMask.bottom = readInt32()
+                    realMask.right = readInt32()
+                    layer.realMask = realMask
+                }
+                
+                // Read parameters if present (flags bit 4: MaskHasParametersAppliedToIt = 16)
+                if ((flags and 16) != 0 && left() > 0) {
+                    val params = readUint8()
+                    if ((params and 1) != 0) mask.userMaskDensity = readUint8() / 255f
+                    if ((params and 2) != 0) mask.userMaskFeather = readFloat64()
+                    if ((params and 4) != 0) mask.vectorMaskDensity = readUint8() / 255f
+                    if ((params and 8) != 0) mask.vectorMaskFeather = readFloat64()
+                }
+            }
         }
     }
 
     private fun readLayerBlendingRanges(layer: Layer) {
-        readSection(1) {
-            // skip
+        readSection(1) { left ->
+            if (left() >= 8) {
+                val compositeGrayBlendSource = readBytes(4)
+                val compositeGraphBlendDestinationRange = readBytes(4)
+                val rangesList = mutableListOf<BlendingRange>()
+                while (left() >= 8) {
+                    val sourceRange = readBytes(4)
+                    val destRange = readBytes(4)
+                    rangesList.add(BlendingRange(sourceRange, destRange))
+                }
+                layer.blendingRanges = BlendingRanges(
+                    compositeGrayBlendSource = compositeGrayBlendSource,
+                    compositeGraphBlendDestinationRange = compositeGraphBlendDestinationRange,
+                    ranges = rangesList
+                )
+            }
         }
     }
 
@@ -290,7 +369,9 @@ class PsdReader(val bytes: ByteArray) {
             val textLayout = if (rawEngineData != null) {
                 val parsed = EngineData.parseEngineData(rawEngineData.data)
                 if (parsed != null) {
+                    @Suppress("UNCHECKED_CAST")
                     val engineDict = parsed["EngineDict"] as? Map<String, Any?> ?: emptyMap()
+                    @Suppress("UNCHECKED_CAST")
                     val resourceDict = parsed["ResourceDict"] as? Map<String, Any?> ?: emptyMap()
                     TextLayer.decodeEngineData(engineDict, resourceDict)
                 } else {
@@ -448,6 +529,10 @@ class PsdReader(val bytes: ByteArray) {
 
         val channelData = mutableMapOf<ChannelID, ByteArray>()
         for (c in info) {
+            if (c.length <= 0) {
+                channelData[c.id] = ByteArray(width * height)
+                continue
+            }
             val compressionValue = readInt16()
             val compression = Compression.fromInt(compressionValue)
             if (compression == Compression.RleCompressed) {
@@ -462,8 +547,22 @@ class PsdReader(val bytes: ByteArray) {
                 channelData[c.id] = pixelData.data.sliceArray(0 until width * height)
                 
                 for (len in rowCounts) skipBytes(len)
+            } else if (compression == Compression.ZipWithoutPrediction || compression == Compression.ZipWithPrediction) {
+                val compressedBytes = readBytes(c.length - 2)
+                val pixelData = PixelData(width, height, ByteArray(width * height))
+                PsdHelpers.readDataZip(
+                    compressed = compressedBytes,
+                    pixelData = pixelData,
+                    width = width,
+                    height = height,
+                    bitDepth = 8,
+                    step = 1,
+                    offset = 0,
+                    prediction = compression == Compression.ZipWithPrediction
+                )
+                channelData[c.id] = pixelData.data
             } else {
-                channelData[c.id] = readBytes(width * height)
+                channelData[c.id] = readBytes(c.length - 2)
             }
         }
 

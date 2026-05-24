@@ -430,7 +430,7 @@ class PsdWriter(initialCapacity: Int = 4096) {
                 val key = "TySh"
                 writeSignature("8BIM")
                 writeSignature(key)
-                writeSection(4, writeTotalLength = true, largeSection = false) {
+                writeSection(2, writeTotalLength = true, largeSection = false) {
                     writeInt16(1) // version
                     val transform = text.transform ?: doubleArrayOf(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
                     for (t in transform) writeFloat64(t)
@@ -454,7 +454,7 @@ class PsdWriter(initialCapacity: Int = 4096) {
                 val key = "lyid"
                 writeSignature("8BIM")
                 writeSignature(key)
-                writeSection(4, writeTotalLength = true, largeSection = false) {
+                writeSection(2, writeTotalLength = true, largeSection = false) {
                     writeUint32(id.toLong())
                 }
             }
@@ -473,7 +473,7 @@ class PsdWriter(initialCapacity: Int = 4096) {
                 val key = "lsct"
                 writeSignature("8BIM")
                 writeSignature(key)
-                writeSection(4, writeTotalLength = true, largeSection = false) {
+                writeSection(2, writeTotalLength = true, largeSection = false) {
                     writeInt32(sd.type.value)
                     sd.key?.let { k ->
                         writeSignature("8BIM")
@@ -489,19 +489,22 @@ class PsdWriter(initialCapacity: Int = 4096) {
                 val key = "lfx2"
                 writeSignature("8BIM")
                 writeSignature(key)
-                writeSection(4, writeTotalLength = true, largeSection = false) {
+                writeSection(2, writeTotalLength = true, largeSection = false) {
                     writeInt32(0) // version
                     val desc = buildEffectsDescriptor(effects, multi = false)
-                    PsdDescriptor.writeVersionAndDescriptor(this, "", "lfx2", desc)
+                    PsdDescriptor.writeVersionAndDescriptor(this, "", "null", desc)
                 }
 
-                // Multi effects (lmfx)
-                val mkey = "lmfx"
-                writeSignature("8BIM")
-                writeSignature(mkey)
-                writeSection(4, writeTotalLength = true, largeSection = false) {
-                    val mdesc = buildEffectsDescriptor(effects, multi = true)
-                    PsdDescriptor.writeVersionAndDescriptor(this, "", "lmfx", mdesc)
+                // Multi effects (lmfx) - only write if more than 1 effect total
+                val effectCount = (effects.stroke?.size ?: 0) + (effects.dropShadow?.size ?: 0)
+                if (effectCount > 1) {
+                    val mkey = "lmfx"
+                    writeSignature("8BIM")
+                    writeSignature(mkey)
+                    writeSection(4, writeTotalLength = true, largeSection = false) {
+                        val mdesc = buildEffectsDescriptor(effects, multi = true)
+                        PsdDescriptor.writeVersionAndDescriptor(this, "", "lmfx", mdesc)
+                    }
                 }
             }
         }
@@ -538,7 +541,7 @@ class PsdWriter(initialCapacity: Int = 4096) {
             }
         }
 
-        return DescriptorStructure("", if (multi) "lmfx" else "lfx2", props)
+        return DescriptorStructure("", if (multi) "lmfx" else "null", props)
     }
 
     private fun buildStrokeDescriptor(s: LayerEffectStroke): DescriptorStructure {
@@ -634,11 +637,21 @@ class PsdWriter(initialCapacity: Int = 4096) {
 
     private fun buildWarpDescriptor(warp: Warp?): DescriptorStructure {
         val props = mutableMapOf<String, DescriptorValue>()
-        props["warpStyle"] = EnumValue("warpStyle", warp?.style ?: "none")
+        
+        val rawStyle = warp?.style ?: "none"
+        val styleCapitalized = rawStyle.replaceFirstChar { it.uppercaseChar() }
+        val warpStyleVal = if (styleCapitalized.startsWith("Warp")) {
+            styleCapitalized.replaceFirstChar { it.lowercaseChar() }
+        } else {
+            "warp$styleCapitalized"
+        }
+        props["warpStyle"] = EnumValue("warpStyle", warpStyleVal)
         props["warpValue"] = DoubleValue(warp?.value?.toDouble() ?: 0.0)
         props["warpPerspective"] = DoubleValue(warp?.perspective?.toDouble() ?: 0.0)
         props["warpPerspectiveOther"] = DoubleValue(warp?.perspectiveOther?.toDouble() ?: 0.0)
-        props["warpRotate"] = EnumValue("orientation", warp?.rotate ?: "horizontal")
+        
+        val rawRotate = warp?.rotate ?: "horizontal"
+        props["warpRotate"] = EnumValue("orientation", if (rawRotate == "vertical") "Vrtc" else "Hrzn")
         props["uOrder"] = LongValue(warp?.uOrder ?: 0)
         props["vOrder"] = LongValue(warp?.vOrder ?: 0)
 
@@ -646,12 +659,12 @@ class PsdWriter(initialCapacity: Int = 4096) {
         val bounds = warp?.bounds
         props["bounds"] = DescriptorStructure(
             name = "",
-            classID = "bounds",
+            classID = "Rctn",
             properties = mapOf(
-                "Top " to UnitDoubleValue("Distance", bounds?.top?.value?.toDouble() ?: 0.0),
-                "Left" to UnitDoubleValue("Distance", bounds?.left?.value?.toDouble() ?: 0.0),
-                "Btom" to UnitDoubleValue("Distance", bounds?.bottom?.value?.toDouble() ?: 0.0),
-                "Rght" to UnitDoubleValue("Distance", bounds?.right?.value?.toDouble() ?: 0.0)
+                "Top " to UnitDoubleValue("Pixels", bounds?.top?.value?.toDouble() ?: 0.0),
+                "Left" to UnitDoubleValue("Pixels", bounds?.left?.value?.toDouble() ?: 0.0),
+                "Btom" to UnitDoubleValue("Pixels", bounds?.bottom?.value?.toDouble() ?: 0.0),
+                "Rght" to UnitDoubleValue("Pixels", bounds?.right?.value?.toDouble() ?: 0.0)
             )
         )
 

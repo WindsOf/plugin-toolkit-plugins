@@ -260,7 +260,7 @@ class PSDBuilderPlugin {
                 text = com.wip.kpsd.LayerTextData(
                     text = wrappedText,
                     shapeType = "box",
-                    boxBounds = floatArrayOf(0f, 0f, boxHeight.toFloat(), boxWidth.toFloat()),
+                    boxBounds = floatArrayOf(0f, 0f, boxWidth.toFloat(), boxHeight.toFloat()),
                     transform = doubleArrayOf(1.0, 0.0, 0.0, 1.0, tLeft.toDouble(), tTop.toDouble()),
                     left = 0f,
                     top = 0f,
