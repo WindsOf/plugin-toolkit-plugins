@@ -1,5 +1,10 @@
 package com.wip.psdbuilder
 
+import com.wip.kpsd.LayerEffectShadow
+import com.wip.kpsd.Units
+import com.wip.kpsd.psd
+import com.wip.kpsd.Justification
+import com.wip.kpsd.TextShapeType
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -127,28 +132,72 @@ class PSDBuilderSizeComparisonTest {
     }
 
     private suspend fun testMultipleEffects(nativePlugin: PSDBuilderPlugin, context: org.wip.plugintoolkit.api.PluginContext, outDir: File) {
-        // Create a PSD with both stroke and drop shadow
-        val originalPsd = nativePlugin.buildPsdObject(
-            imagePath = File(outDir.parentFile, "base.png").absolutePath,
-            texts = listOf("Effect Test"),
-            bb = listOf(listOf(0.1, 0.1, 0.9, 0.9)),
-            fontSize = 50,
-            fontName = "ArialMT",
-            borderSize = 5,
-            context = context
-        )
+        val imageFile = File(outDir.parentFile, "base.png")
+        val baseImage = ImageIO.read(imageFile)
+        val width = baseImage.width
+        val height = baseImage.height
 
-        // Manually add a shadow
-        val textLayer = originalPsd.children[1]
-        textLayer.effects?.let { effects ->
-            effects.dropShadow = listOf(
-                com.wip.kpsd.LayerEffectShadow(
-                    size = com.wip.kpsd.UnitsValue("Pixels", 10f),
-                    distance = com.wip.kpsd.UnitsValue("Pixels", 5f),
-                    color = com.wip.kpsd.Rgb(0, 0, 0),
-                    opacity = 0.5f
-                )
-            )
+        val rgbData = IntArray(width * height)
+        baseImage.getRGB(0, 0, width, height, rgbData, 0, width)
+        val bgBytes = ByteArray(width * height * 4)
+        for (i in 0 until width * height) {
+            val argb = rgbData[i]
+            val a = (argb shr 24) and 0xff
+            val r = (argb shr 16) and 0xff
+            val g = (argb shr 8) and 0xff
+            val b = argb and 0xff
+            val base = i * 4
+            bgBytes[base] = r.toByte()
+            bgBytes[base + 1] = g.toByte()
+            bgBytes[base + 2] = b.toByte()
+            bgBytes[base + 3] = a.toByte()
+        }
+        val bgPixelData = com.wip.kpsd.PixelData(width, height, bgBytes)
+
+        val originalPsd = psd(width = width, height = height) {
+            imageData = bgPixelData
+
+            layer(name = "Background") {
+                top = 0
+                left = 0
+                bottom = height
+                right = width
+                imageData = bgPixelData
+            }
+
+            textLayer(name = "Effect Test", textValue = "Effect Test") {
+                top = 50
+                left = 50
+                bottom = 450
+                right = 450
+                shapeType = TextShapeType.BOX
+                boxBounds = floatArrayOf(0f, 0f, 400f, 400f)
+                transform(1.0, 0.0, 0.0, 1.0, 50.0, 50.0)
+
+                style {
+                    font("ArialMT")
+                    this.fontSize = 50f
+                    fillColor(255, 255, 255)
+                }
+
+                paragraphStyle {
+                    justification = Justification.LEFT
+                }
+
+                effectsOpen = true
+                effects {
+                    stroke {
+                        size = com.wip.kpsd.UnitsValue(Units.PIXELS, 5f)
+                        rgb(0, 0, 0)
+                    }
+                    dropShadow {
+                        size = com.wip.kpsd.UnitsValue(Units.PIXELS, 10f)
+                        distance = com.wip.kpsd.UnitsValue(Units.PIXELS, 5f)
+                        rgb(0, 0, 0)
+                        opacity = 0.5f
+                    }
+                }
+            }
         }
 
         val bytes = com.wip.kpsd.KPsd.write(originalPsd, compress = false)

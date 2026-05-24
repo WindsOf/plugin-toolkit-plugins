@@ -1,5 +1,9 @@
 package com.wip.psdbuilder
 
+import com.wip.kpsd.Justification
+import com.wip.kpsd.TextShapeType
+import com.wip.kpsd.psd
+import com.wip.kpsd.Units
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -251,82 +255,68 @@ class PSDBuilderPlugin {
         }
         val bgPixelData = com.wip.kpsd.PixelData(width, height, bgBytes)
 
-        val bgLayer = com.wip.kpsd.Layer(
-            name = "Background",
-            top = 0,
-            left = 0,
-            bottom = height,
-            right = width,
+        return psd(width = width, height = height) {
             imageData = bgPixelData
-        )
 
-        val layers = mutableListOf<com.wip.kpsd.Layer>(bgLayer)
+            layer(name = "Background") {
+                top = 0
+                left = 0
+                bottom = height
+                right = width
+                imageData = bgPixelData
+            }
 
-        for ((index, text) in texts.withIndex()) {
-            val box = bb[index]
-            val tLeft = (box[0] * width).toInt()
-            val tTop = (box[1] * height).toInt()
-            val tRight = (box[2] * width).toInt()
-            val tBottom = (box[3] * height).toInt()
-            
-            val boxWidth = tRight - tLeft
-            val boxHeight = tBottom - tTop
-            val fSize = fontSize ?: 24
-            val fName = if (fontName == "ArialMT" || fontName == "Anime ACE 2.0" || fontName == "Anime Ace 2.0 BB") "AnimeAce2.0BB" else (fontName ?: "AnimeAce2.0BB")
+            for ((index, text) in texts.withIndex()) {
+                val box = bb[index]
+                val tLeft = (box[0] * width).toInt()
+                val tTop = (box[1] * height).toInt()
+                val tRight = (box[2] * width).toInt()
+                val tBottom = (box[3] * height).toInt()
+                
+                val boxWidth = tRight - tLeft
+                val boxHeight = tBottom - tTop
+                val fSize = fontSize ?: 24
+                val fName = if (fontName == "ArialMT" || fontName == "Anime ACE 2.0" || fontName == "Anime Ace 2.0 BB") "AnimeAce2.0BB" else (fontName ?: "AnimeAce2.0BB")
 
-            val wrappedText = wrapText(text, boxWidth, fSize)
+                val wrappedText = wrapText(text, boxWidth, fSize)
 
-            val hasStroke = borderSize != null && borderSize > 0
-            val rot = rotations?.getOrNull(index) ?: 0.0
-            val theta = Math.toRadians(rot)
-            val cos = Math.cos(theta)
-            val sin = Math.sin(theta)
+                val hasStroke = borderSize != null && borderSize > 0
+                val rot = rotations?.getOrNull(index) ?: 0.0
+                val theta = Math.toRadians(rot)
+                val cos = Math.cos(theta)
+                val sin = Math.sin(theta)
 
-            val textLayer = com.wip.kpsd.Layer(
-                name = text,
-                top = tTop,
-                left = tLeft,
-                bottom = tBottom,
-                right = tRight,
-                text = com.wip.kpsd.LayerTextData(
-                    text = wrappedText,
-                    shapeType = "box",
-                    boxBounds = floatArrayOf(0f, 0f, boxWidth.toFloat(), boxHeight.toFloat()),
-                    transform = doubleArrayOf(cos, sin, -sin, cos, tLeft.toDouble(), tTop.toDouble()),
-                    left = 0f,
-                    top = 0f,
-                    right = boxWidth.toFloat(),
-                    bottom = boxHeight.toFloat(),
-                    style = com.wip.kpsd.TextStyle(
-                        font = com.wip.kpsd.Font(name = fName),
-                        fontSize = fSize.toFloat(),
-                        fillColor = com.wip.kpsd.Rgb(255, 255, 255)
-                    ),
-                    paragraphStyle = com.wip.kpsd.ParagraphStyle(
-                        justification = "center"
-                    )
-                ),
-                effects = if (hasStroke) {
-                    com.wip.kpsd.LayerEffectsInfo(
-                        stroke = listOf(
-                            com.wip.kpsd.LayerEffectStroke(
-                                size = com.wip.kpsd.UnitsValue("Pixels", borderSize.toFloat()),
-                                color = com.wip.kpsd.Rgb(0, 0, 0)
-                            )
-                        )
-                    )
-                } else null,
-                effectsOpen = hasStroke
-            )
-            layers.add(textLayer)
+                textLayer(name = text, textValue = wrappedText) {
+                    top = tTop
+                    left = tLeft
+                    bottom = tBottom
+                    right = tRight
+                    shapeType = TextShapeType.BOX
+                    boxBounds = floatArrayOf(0f, 0f, boxWidth.toFloat(), boxHeight.toFloat())
+                    transform(cos, sin, -sin, cos, tLeft.toDouble(), tTop.toDouble())
+                    
+                    style {
+                        font(fName)
+                        this.fontSize = fSize.toFloat()
+                        fillColor(255, 255, 255)
+                    }
+                    
+                    paragraphStyle {
+                        justification = Justification.LEFT
+                    }
+
+                    if (hasStroke) {
+                        effectsOpen = true
+                        effects {
+                            stroke {
+                                size = com.wip.kpsd.UnitsValue(Units.PIXELS, borderSize.toFloat())
+                                rgb(0, 0, 0)
+                            }
+                        }
+                    }
+                }
+            }
         }
-
-        return com.wip.kpsd.Psd(
-            width = width,
-            height = height,
-            children = layers,
-            imageData = bgPixelData
-        )
     }
 
     private fun findTextLayers(layers: List<com.wip.kpsd.Layer>?): List<com.wip.kpsd.Layer> {

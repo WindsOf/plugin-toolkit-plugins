@@ -5,7 +5,7 @@ object TextLayer {
     private val defaultFont = Font(name = "ArialMT", script = 0, type = 0, synthetic = 0)
 
     val defaultParagraphStyle = ParagraphStyle(
-        justification = "left",
+        justification = Justification.LEFT,
         firstLineIndent = 0f,
         startIndent = 0f,
         endIndent = 0f,
@@ -75,8 +75,8 @@ object TextLayer {
         alignLineHeightToGridFlags = false
     )
 
-    val antialias = listOf("none", "sharp", "crisp", "strong", "smooth")
-    val justification = listOf("left", "right", "center")
+    val antialias = listOf(AntiAlias.NONE, AntiAlias.SHARP, AntiAlias.CRISP, AntiAlias.STRONG, AntiAlias.SMOOTH)
+    val justification = listOf(Justification.LEFT, Justification.RIGHT, Justification.CENTER)
 
     fun decodeColor(node: Map<String, Any?>): Color {
         val type = (node["Type"] as? Number)?.toInt() ?: 1
@@ -404,7 +404,7 @@ object TextLayer {
         
         val shapeType = if (photoshop != null) {
             val st = (photoshop["ShapeType"] as? Number)?.toInt()
-            if (st == 1) "box" else "point"
+            if (st == 1) TextShapeType.BOX else TextShapeType.POINT
         } else null
         
         val pointBase = (photoshop?.get("PointBase") as? List<*>)?.let { list ->
@@ -528,9 +528,9 @@ object TextLayer {
         }
 
         val gridInfo = data.gridInfo ?: defaultGridInfo
-        val writingDirection = if (data.orientation == "vertical") 2 else 0
-        val procession = if (data.orientation == "vertical") 1 else 0
-        val shapeType = if (data.shapeType == "box") 1 else 0
+        val writingDirection = if (data.orientation == Orientation.VERTICAL) 2 else 0
+        val procession = if (data.orientation == Orientation.VERTICAL) 1 else 0
+        val shapeType = if (data.shapeType == TextShapeType.BOX) 1 else 0
 
         val photoshopNode = mutableMapOf<String, Any?>("ShapeType" to shapeType)
         if (shapeType == 0) {
@@ -625,7 +625,7 @@ object TextLayer {
                 "GridLeadingFillColor" to encodeColor(gridInfo.leadingFillColor),
                 "AlignLineHeightToGridFlags" to (gridInfo.alignLineHeightToGridFlags ?: false)
             ),
-            "AntiAlias" to maxOf(0, antialias.indexOf(data.antiAlias ?: "sharp")),
+            "AntiAlias" to maxOf(0, antialias.indexOf(data.antiAlias ?: AntiAlias.SHARP)),
             "UseFractionalGlyphWidths" to (data.useFractionalGlyphWidths ?: true),
             "Rendered" to mapOf(
                 "Version" to 1,
