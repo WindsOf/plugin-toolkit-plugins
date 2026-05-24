@@ -1,3 +1,11 @@
+Version: 1.2.0
+Date: 2026-05-24
+Added:
+  - Text inputs are now split into chunks of max 50 texts.
+  - Implemented rate limiting (max 5 simultaneous requests, max 13 requests per minute).
+  - Improved model prompt to strictly return a 1:1 mapped output array.
+  - Added retry logic to discard and retry chunk translation (up to 3 times) if output size does not match input chunk size.
+-------------------------------------------------------------------------------------------------
 Version: 1.1.1
 Date: 2026-05-23
 Changed:

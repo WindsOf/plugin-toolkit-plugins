@@ -28,12 +28,12 @@
     {
       "name": "Manhwa Translator AI",
       "pkg": "com.wip.manhwa_translator_ai",
-      "version": "1.1.1",
+      "version": "1.2.0",
       "fileName": "manhwaTranslatorAI.jar",
       "description": "Translate text from Manhwa/Manga into Italian using Google AI via Koog",
       "targetAppVersion": "1.0.0",
-      "hash": "e888f1d44bf7b80e5af13fe24eebf119b20a371b530423a8fca67fe5c1285fc3",
-      "signature": "jKDXBzlFSBoYUQDeKpAxmw8jhusO3fN67YNE3d+CIitOfYUN0ZwNHF0oe4P9S6nCSzpTm+6GAvAQaZsygIR0UMAprCVbC8okAOULc0MSj/POltUebBU87vH6eZpYTFYpj5NJlPo2Hw+Sl6v2o5sNkTBx8BfNHvIqKi9EZjRedtV4e+ROYOe9oFwRWkyGTOSVoRqU52BgapHPknwqlVlDh1mdoDT6pdzKkk7ANVwtKdzNinc+oSZxl9lRr33hylFjWpa/aCB1bIqmYOGVmoR9RbK2aM1vVZnYZU857g96hi2nME/+f2Gme72akDoH6JRkqAFvDy20TLNMV0tOPi8Jzw=="
+      "hash": "de090dd5864f686a8fe0aa7d6d269b9ef4747b5ba874d88eb2fcb5d3ea639a6e",
+      "signature": "WYenV/nwQwOCPEnCIu2GM++oJhxmGCCa7XfLZwoeWK50U3P29L/Uu2I5gskr6VgR5BTgO66fYzor34LJXD6zDW4JUSdVAVds/nW5I8jqUi1QgUMHdZv4jHwNQA0tAp1uTa4bJ8syQBewVpWIQYQK8YEkVp9JFYCOu7j5sX9ITYiXvC68N3UDvAbMGDug+ILgGPIZh4nBCRRFCRAaVH8A35mFx6WVt7fUIFJn7JAfAHRMZV0OfwXd6z1TAXaDcekXA3U/wOoztaj9MhjeL0PgRQbHOnZR6hlACh5DH+cvLl4Ben3zE09LrFTxOkiJjlOF8JNob55JbTVNxdKnYtjIVQ=="
     },
     {
       "name": "OCR IA",
@@ -48,12 +48,12 @@
     {
       "name": "PSD Builder",
       "pkg": "com.wip.psdbuilder",
-      "version": "4.0.1",
+      "version": "4.1.0",
       "fileName": "PSD_builder.jar",
       "description": "A plugin that builds layered PSD files using PSD_builder.exe.",
       "targetAppVersion": "1.0.0",
-      "hash": "d2a2dcd3cc906670f51bfad396976563739891c249476083fcacea03cebd4945",
-      "signature": "A8uLHpQPTVbHehzH9TZ1sU06p2Bcy0d2w6spBNd1UlNWe9m6XGXjFzatXXE4O/MP7jlVBlrQFiKwNgr0jly6hN+dJez3ILT+vJM0KF9XcVmpuuo8+LTPBd84LCwY6/CkD47pvuVj5IFU9jIqgfEydibUQL2mZod7HlXukPzuvF8DkLCHZ/hr0BMYk0PHNiy6GtR5YdEHsW6DizbZhheMkFmnVutjDIrZIPUup2EEWK2ck6tDO/DcSJFSPqnEupFgOk7n1vQNOUT2tW5xh5/v1mEcmCcQn/FuLynyw94VuBGuM1fk0ZXOV+5BPG7cVJfTo/FsYgCXMbvbMqNymvUv+Q=="
+      "hash": "ece56068276e254d93c81a9fec108119f798741d3162466f776ecfb1221e190e",
+      "signature": "Y1Bod+4b8zrO4pT0PW49MC/GDZ0UYw83JkBKoK9sfPcZwjZHQrU1KGOI14cr90og2Skled9gyD1se9WCZE9dzGsVcxfxVUM/d9jZ62QqwqeiiYlDkLT/3V5rfOHa8kLllxUaCLobV9X/VVAK2WmhtVeuPB8liGNqeCn4iXawv5kknXPjWTbmtQ6GBs9RDyjezTrXQgpVyWt75xGLVLlUlislWGs6DDlCOd+k9ZZMnWd6v92KzvrBjO5GPKjFZj1IOQspks5uQYOvem3hvkcui7NYNMWOWO5drAtATRArR83KSI2QpaxyH3K6xhFP0nu8+J+9tQUxdoPiKPvfaUV3+Q=="
     },
     {
       "name": "PSD Builder Native",

@@ -11,6 +11,12 @@ import kotlinx.serialization.json.*
 import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.PluginSignal
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import java.util.concurrent.ConcurrentLinkedQueue
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 @Serializable
 data class TranslationResponse(
@@ -26,10 +32,34 @@ class KoogAITranslatorService(private val context: PluginContext) {
     private val progressReporter = context.progress
     private var isCancelled = false
 
+    private val requestTimes = ConcurrentLinkedQueue<Long>()
+    private val concurrentSemaphore = Semaphore(5)
+
+    private suspend fun acquireRateLimit() {
+        val maxRequestsPerMinute = 13
+        val windowMs = 60_000L
+
+        while (true) {
+            val now = System.currentTimeMillis()
+            while (requestTimes.peek()?.let { now - it > windowMs } == true) {
+                requestTimes.poll()
+            }
+            if (requestTimes.size < maxRequestsPerMinute) {
+                requestTimes.add(now)
+                break
+            }
+            val oldest = requestTimes.peek() ?: now
+            val waitTime = windowMs - (now - oldest)
+            if (waitTime > 0) {
+                delay(waitTime + 100)
+            }
+        }
+    }
+
     private suspend fun <T> retryWithBackoff(
         block: suspend () -> T
     ): T {
-        val delaysMs = listOf(5000L, 10000L, 10000L, 10000L, 120000L) // 5s, 10s, 10s, 10s, 2m
+        val delaysMs = listOf(5000L, 10000L, 15000L) // Max 3 retries
         val maxAttempts = delaysMs.size + 1
         var lastException: Throwable? = null
         for (attempt in 1..maxAttempts) {
@@ -76,10 +106,38 @@ class KoogAITranslatorService(private val context: PluginContext) {
             throw IllegalArgumentException(msg)
         }
 
-        // ── Executor + Model ───────────────────────────────────────────
-        val executor = simpleGoogleAIExecutor(effectiveApiKey)
+        // ── Chunking & Concurrency ──────────────────────────────────────
+        val chunks = input.chunked(50)
+        logger.info("Split ${input.size} texts into ${chunks.size} chunks of max 50 items.")
         
-        // Note: Using dynamic model ID from UI settings.
+        val results = mutableListOf<String>()
+        
+        coroutineScope {
+            val deferreds = chunks.mapIndexed { index, chunk ->
+                async {
+                    concurrentSemaphore.withPermit {
+                        acquireRateLimit()
+                        translateChunkWithRetry(chunk, dictionary, effectiveApiKey, useStructuredOutput, modelId, index)
+                    }
+                }
+            }
+            // Await all chunks and flatten
+            results.addAll(deferreds.awaitAll().flatten())
+        }
+        
+        return results
+    }
+
+    private suspend fun translateChunkWithRetry(
+        chunk: List<String>,
+        dictionary: String,
+        apiKey: String,
+        useStructuredOutput: Boolean,
+        modelId: String,
+        chunkIndex: Int
+    ): List<String> {
+        val executor = simpleGoogleAIExecutor(apiKey)
+        
         val model = LLModel(
             provider = LLMProvider.Google,
             id = modelId,
@@ -91,7 +149,6 @@ class KoogAITranslatorService(private val context: PluginContext) {
             contextLength = 100000,
         )
 
-        // ── Prompt ─────────────────────────────────────────────────────
         val dictionaryInstructions = if (dictionary.isNotEmpty()) {
             "ADHERE STRICTLY TO THESE DICTIONARY GUIDELINES:\n$dictionary"
         } else {
@@ -120,6 +177,8 @@ class KoogAITranslatorService(private val context: PluginContext) {
             3. $dictionaryInstructions
             4. If a string is a sound effect (SFX), translate it if appropriate for Italian comics or leave it in English/Korean as per standard scanlation practices.
             5. Return ONLY the JSON object containing the list of translated strings. $jsonFormatRequirement
+            
+            CRITICAL REQUIREMENT: You MUST return EXACTLY ${chunk.size} translations in the output array, maintaining a strict 1:1 mapping with the input.
         """.trimIndent()
 
         val translationSchema = buildJsonObject {
@@ -137,7 +196,7 @@ class KoogAITranslatorService(private val context: PluginContext) {
             }
         }
 
-        try {
+        return retryWithBackoff {
             val llmParams = if (useStructuredOutput) {
                 LLMParams(
                     schema = LLMParams.Schema.JSON.Basic(
@@ -154,14 +213,12 @@ class KoogAITranslatorService(private val context: PluginContext) {
                 params = llmParams
             ) {
                 user {
-                    text(promptInstructions + "\n\nStrings to translate:\n" + input.joinToString("\n") { "[TEXT]: $it" })
+                    text(promptInstructions + "\n\nStrings to translate:\n" + chunk.joinToString("\n") { "[TEXT]: $it" })
                 }
             }
 
-            logger.info("Sending translation request for ${input.size} strings... (Structured Output: $useStructuredOutput)")
-            val responses = retryWithBackoff {
-                executor.execute(translatePrompt, model)
-            }
+            logger.info("Sending translation request for chunk $chunkIndex (${chunk.size} strings)...")
+            val responses = executor.execute(translatePrompt, model)
             
             var rawResponse = responses.joinToString("\n") { it.content }.trim()
 
@@ -175,17 +232,12 @@ class KoogAITranslatorService(private val context: PluginContext) {
             val json = Json { ignoreUnknownKeys = true }
             val responseObj = json.decodeFromString<TranslationResponse>(jsonToParse)
 
-            if (responseObj.translations.size != input.size) {
-                logger.warn("Received ${responseObj.translations.size} translations for ${input.size} inputs. Alignment might be off.")
+            if (responseObj.translations.size != chunk.size) {
+                throw IllegalStateException("Mismatch in chunk $chunkIndex: Expected ${chunk.size} translations, got ${responseObj.translations.size}")
             }
 
-            logger.info("Translation completed successfully.")
-            
-            return responseObj.translations
-
-        } catch (e: Throwable) {
-            logger.error("Error during translation: ${e::class.simpleName}: ${e.message}")
-            throw e
+            logger.info("Translation for chunk $chunkIndex completed successfully.")
+            responseObj.translations
         }
     }
 

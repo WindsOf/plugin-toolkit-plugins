@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.manhwa_translator_ai",
         "name": "Manhwa Translator AI",
-        "version": "1.1.1",
+        "version": "1.2.0",
         "description": "Translate text from Manhwa/Manga into Italian using Google AI via Koog"
     },
     "requirements": {
@@ -88,6 +88,18 @@
     },
     "changelog": {
         "releases": [
+            {
+                "version": "1.2.0",
+                "date": "2026-05-24",
+                "categories": {
+                    "Added": [
+                        "Text inputs are now split into chunks of max 50 texts.",
+                        "Implemented rate limiting (max 5 simultaneous requests, max 13 requests per minute).",
+                        "Improved model prompt to strictly return a 1:1 mapped output array.",
+                        "Added retry logic to discard and retry chunk translation (up to 3 times) if output size does not match input chunk size."
+                    ]
+                }
+            },
             {
                 "version": "1.1.1",
                 "date": "2026-05-23",

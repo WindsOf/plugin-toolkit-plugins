@@ -50,7 +50,7 @@ data class PsdPayload(
 @PluginInfo(
     id = "com.wip.psdbuilder",
     name = "PSD Builder",
-    version = "4.0.1",
+    version = "4.1.0",
     description = "A plugin that builds layered PSD files using PSD_builder.exe."
 )
 class PSDBuilderPlugin {
@@ -90,6 +90,15 @@ class PSDBuilderPlugin {
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    private fun normalizeBoundingBox(box: List<Double>): List<Double> {
+        if (box.size >= 4) return box.take(4)
+        if (box.size == 3) {
+            val w = kotlin.math.abs(box[2] - box[0])
+            return listOf(box[0], box[1], box[2], box[1] + w)
+        }
+        return listOf(0.4, 0.4, 0.6, 0.6)
     }
 
     @PluginValidate
@@ -151,7 +160,13 @@ class PSDBuilderPlugin {
             else -> "AnimeAce2.0BB"
         }
 
-        val psdTexts = texts.zip(bb).map { (text, box) ->
+        if (texts.size != bb.size) {
+            logger.warn("Mismatch in inputs sizes: texts (${texts.size}) != bb (${bb.size}). Missing bounding boxes will be defaulted.")
+        }
+        
+        val safeBb = List(texts.size) { i -> if (i < bb.size) bb[i] else emptyList() }
+        val psdTexts = texts.zip(safeBb).map { (text, rawBox) ->
+            val box = normalizeBoundingBox(rawBox)
             val left = (box[0] * width).toInt()
             val top = (box[1] * height).toInt()
             val right = (box[2] * width).toInt()
@@ -244,43 +259,55 @@ class PSDBuilderPlugin {
             File(outputDir).apply { mkdirs() }
         }
 
-        val minSize = minOf(texts.size, bb.size, pageNames.size)
-        if (minSize != texts.size || minSize != bb.size || minSize != pageNames.size) {
-            logger.warn("Size mismatch in Add Text to Chapter inputs: texts (${texts.size}), bb (${bb.size}), pageNames (${pageNames.size}). Truncating to $minSize.")
+        val maxTexts = maxOf(texts.size, pageNames.size, bb.size)
+        if (maxTexts != texts.size || maxTexts != bb.size || maxTexts != pageNames.size) {
+            logger.warn("Mismatch in Add Text to Chapter inputs: texts (${texts.size}), bb (${bb.size}), pageNames (${pageNames.size}). Missing bounds will be defaulted.")
         }
-        val groupedData = (0 until minSize).groupBy { pageNames[it] }
-        val totalPages = groupedData.size
+        
+        val safeTexts = List(maxTexts) { i -> if (i < texts.size) texts[i] else "" }
+        val safePageNames = List(maxTexts) { i -> if (i < pageNames.size) pageNames[i] else "" }
+        val safeBb = List(maxTexts) { i -> if (i < bb.size) bb[i] else emptyList() }
+
+        val groupedData = (0 until maxTexts).groupBy { safePageNames[it] }
+        
+        val supportedExtensions = setOf("png", "jpg", "jpeg", "webp")
+        val allImages = folder.listFiles { file -> 
+            file.isFile && file.extension.lowercase() in supportedExtensions
+        }?.sortedBy { it.name } ?: emptyList()
+
+        val totalPages = allImages.size
         var processedPages = 0
 
         val semaphore = Semaphore(4) // Max 4 concurrent exe processes
 
         coroutineScope {
-            groupedData.map { (pageName, indices) ->
+            allImages.map { imageFile ->
                 async {
                     semaphore.withPermit {
-                        val imageFile = File(folder, pageName)
-                        if (imageFile.exists()) {
-                            logger.info("Processing page: $pageName")
-                            val outputPsdPath = File(outDir, pageName.substringBeforeLast(".") + ".psd").absolutePath
-                            
-                            val pageTexts = indices.map { texts[it] }
-                            val pageBb = indices.map { bb[it] }
+                        val pageName = imageFile.name
+                        logger.info("Processing page: $pageName")
+                        val outputPsdPath = File(outDir, imageFile.nameWithoutExtension + ".psd").absolutePath
+                        
+                        val indices = groupedData[pageName] ?: emptyList()
+                        val pageTexts = indices.map { safeTexts[it] }
+                        val pageBb = indices.map { safeBb[it] }
 
-                            val baseImage = withContext(Dispatchers.IO) { ImageIO.read(imageFile) }
-                            if (baseImage != null) {
-                                val width = baseImage.width.toDouble()
-                                val height = baseImage.height.toDouble()
+                        val baseImage: java.awt.image.BufferedImage? = withContext(Dispatchers.IO) { javax.imageio.ImageIO.read(imageFile) }
+                        if (baseImage != null) {
+                            val width = baseImage.width.toDouble()
+                            val height = baseImage.height.toDouble()
 
-                                val psdFontString = when (fontName) {
-                                    PsdFont.ARIAL -> "ArialMT"
-                                    else -> "AnimeAce2.0BB"
-                                }
+                            val psdFontString = when (fontName) {
+                                PsdFont.ARIAL -> "ArialMT"
+                                else -> "AnimeAce2.0BB"
+                            }
 
-                                val psdTexts = pageTexts.zip(pageBb).map { (text, box) ->
-                                    val left = (box[0] * width).toInt()
-                                    val top = (box[1] * height).toInt()
-                                    val right = (box[2] * width).toInt()
-                                    val bottom = (box[3] * height).toInt()
+                            val psdTexts = pageTexts.zip(pageBb).map { (text, rawBox) ->
+                                val box = normalizeBoundingBox(rawBox)
+                                val left = (box[0] * width).toInt()
+                                val top = (box[1] * height).toInt()
+                                val right = (box[2] * width).toInt()
+                                val bottom = (box[3] * height).toInt()
 
                                     PsdText(
                                         text = text,
@@ -300,7 +327,7 @@ class PSDBuilderPlugin {
                                 if (imageFile.extension.equals("webp", ignoreCase = true)) {
                                     targetImageFile = File(outDir, "temp_image_${imageFile.nameWithoutExtension}.png")
                                     withContext(Dispatchers.IO) {
-                                        ImageIO.write(baseImage, "png", targetImageFile)
+                                    javax.imageio.ImageIO.write(baseImage, "png", targetImageFile)
                                     }
                                     isTempImage = true
                                 }
@@ -314,19 +341,16 @@ class PSDBuilderPlugin {
                                 val tempJsonFile = File(outDir, "temp_payload_${imageFile.nameWithoutExtension}.json")
                                 withContext(Dispatchers.IO) { tempJsonFile.writeText(jsonPayload) }
 
-                                try {
-                                    executeBuilder(tempJsonFile.absolutePath, outputPsdPath, context)
-                                } finally {
-                                    if (leaveIntermediateFiles != true) {
-                                        tempJsonFile.delete()
-                                        if (isTempImage) targetImageFile.delete()
-                                    }
+                            try {
+                                executeBuilder(tempJsonFile.absolutePath, outputPsdPath, context)
+                            } finally {
+                                if (leaveIntermediateFiles != true) {
+                                    tempJsonFile.delete()
+                                    if (isTempImage) targetImageFile.delete()
                                 }
-                            } else {
-                                logger.warn("Failed to read image bounds for: $pageName")
                             }
                         } else {
-                            logger.warn("Image file not found for page name: $pageName")
+                            logger.warn("Failed to read image bounds for: $pageName")
                         }
                         
                         synchronized(this@PSDBuilderPlugin) {
