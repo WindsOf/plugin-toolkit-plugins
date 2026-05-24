@@ -11,6 +11,8 @@ import java.io.FileNotFoundException
 import java.awt.Color
 import java.awt.image.BufferedImage
 import javax.imageio.ImageIO
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.*
 
@@ -100,10 +102,75 @@ class PSDBuilderSizeComparisonTest {
         val nativeSize = nativePsdPath.length()
         val difference = Math.abs(exeSize - nativeSize).toDouble() / exeSize
 
+        val nativeHex = nativePsdPath.readBytes().joinToString("") { "%02x".format(it) }
+        assertTrue(nativeHex.contains("6c667832"), "Native PSD should contain 'lfx2' block")
+        assertTrue(nativeHex.contains("6c6d6678"), "Native PSD should contain 'lmfx' block")
+
         println("EXE Size: $exeSize bytes")
         println("Native Size: $nativeSize bytes")
         println("Difference: ${String.format("%.2f", difference * 100)}%")
 
+        testMultipleEffects(nativePlugin, context, outDir)
+
+        testTinyPsd(nativePlugin, context, outDir)
+
         assertTrue(difference < 0.1, "PSD file size difference is too large: ${String.format("%.2f", difference * 100)}% (EXE: $exeSize, Native: $nativeSize)")
+    }
+
+    private suspend fun testTinyPsd(nativePlugin: PSDBuilderPlugin, context: PluginContext, outDir: File) {
+        // ... Tiny 1x1 test ...
+    }
+
+    private suspend fun testMultipleEffects(nativePlugin: PSDBuilderPlugin, context: org.wip.plugintoolkit.api.PluginContext, outDir: File) {
+        // Create a PSD with both stroke and drop shadow
+        val originalPsd = nativePlugin.buildPsdObject(
+            imagePath = File(outDir.parentFile, "base.png").absolutePath,
+            texts = listOf("Effect Test"),
+            bb = listOf(listOf(0.1, 0.1, 0.9, 0.9)),
+            fontSize = 50,
+            fontName = "ArialMT",
+            borderSize = 5,
+            context = context
+        )
+
+        // Manually add a shadow
+        val textLayer = originalPsd.children[1]
+        textLayer.effects?.let { effects ->
+            effects.dropShadow = listOf(
+                com.wip.kpsd.LayerEffectShadow(
+                    size = com.wip.kpsd.UnitsValue("Pixels", 10f),
+                    distance = com.wip.kpsd.UnitsValue("Pixels", 5f),
+                    color = com.wip.kpsd.Rgb(0, 0, 0),
+                    opacity = 0.5f
+                )
+            )
+        }
+
+        val bytes = com.wip.kpsd.KPsd.write(originalPsd, compress = false)
+        val effectsPsdFile = File(outDir, "effects_test.psd")
+        effectsPsdFile.writeBytes(bytes)
+
+        println("Hex dump around 6476:")
+        val startDump = 6400
+        val endDump = minOf(bytes.size, 6600)
+        for (i in startDump until endDump step 16) {
+            val endSlice = minOf(i + 16, bytes.size)
+            val slice = bytes.sliceArray(i until endSlice)
+            println("%04x: %s".format(i, slice.joinToString(" ") { "%02x".format(it) }))
+        }
+
+        val hex = bytes.joinToString("") { "%02x".format(it) }
+        assertTrue(hex.contains("6c667832"), "Should contain 'lfx2' block")
+        assertTrue(hex.contains("6c6d6678"), "Should contain 'lmfx' block")
+        assertTrue(hex.contains("44725368"), "Should contain 'DrSh' (Drop Shadow) block inside effects")
+
+        // Try reading it back
+        val parsed = com.wip.kpsd.KPsd.read(bytes)
+        val parsedEffects = parsed.children[1].effects
+        assertNotNull(parsedEffects)
+        assertEquals(1, parsedEffects!!.stroke?.size)
+        assertEquals(1, parsedEffects!!.dropShadow?.size)
+        assertEquals(5f, parsedEffects!!.stroke!![0].size.value)
+        assertEquals(10f, parsedEffects!!.dropShadow!![0].size.value)
     }
 }

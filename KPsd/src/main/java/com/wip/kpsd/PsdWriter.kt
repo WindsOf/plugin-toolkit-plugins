@@ -428,10 +428,9 @@ class PsdWriter(initialCapacity: Int = 4096) {
             val text = target.text
             if (text != null) {
                 val key = "TySh"
-                val isLarge = large && key in largeKeys
-                writeSignature(if (isLarge) "8B64" else "8BIM")
+                writeSignature("8BIM")
                 writeSignature(key)
-                writeSection(2, writeTotalLength = true, largeSection = isLarge) {
+                writeSection(4, writeTotalLength = true, largeSection = false) {
                     writeInt16(1) // version
                     val transform = text.transform ?: doubleArrayOf(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
                     for (t in transform) writeFloat64(t)
@@ -453,20 +452,18 @@ class PsdWriter(initialCapacity: Int = 4096) {
 
             target.id?.let { id ->
                 val key = "lyid"
-                val isLarge = large && key in largeKeys
-                writeSignature(if (isLarge) "8B64" else "8BIM")
+                writeSignature("8BIM")
                 writeSignature(key)
-                writeSection(2, writeTotalLength = true, largeSection = isLarge) {
+                writeSection(4, writeTotalLength = true, largeSection = false) {
                     writeUint32(id.toLong())
                 }
             }
 
             target.name?.let { name ->
                 val key = "luni"
-                val isLarge = large && key in largeKeys
-                writeSignature(if (isLarge) "8B64" else "8BIM")
+                writeSignature("8BIM")
                 writeSignature(key)
-                writeSection(4, writeTotalLength = true, largeSection = isLarge) {
+                writeSection(4, writeTotalLength = true, largeSection = false) {
                     writeInt32(name.length)
                     writeUnicodeStringWithoutLength(name)
                 }
@@ -474,10 +471,9 @@ class PsdWriter(initialCapacity: Int = 4096) {
 
             target.sectionDivider?.let { sd ->
                 val key = "lsct"
-                val isLarge = large && key in largeKeys
-                writeSignature(if (isLarge) "8B64" else "8BIM")
+                writeSignature("8BIM")
                 writeSignature(key)
-                writeSection(2, writeTotalLength = true, largeSection = isLarge) {
+                writeSection(4, writeTotalLength = true, largeSection = false) {
                     writeInt32(sd.type.value)
                     sd.key?.let { k ->
                         writeSignature("8BIM")
@@ -488,42 +484,142 @@ class PsdWriter(initialCapacity: Int = 4096) {
                     }
                 }
             }
+
+            target.effects?.let { effects ->
+                val key = "lfx2"
+                writeSignature("8BIM")
+                writeSignature(key)
+                writeSection(4, writeTotalLength = true, largeSection = false) {
+                    writeInt32(0) // version
+                    val desc = buildEffectsDescriptor(effects, multi = false)
+                    PsdDescriptor.writeVersionAndDescriptor(this, "", "lfx2", desc)
+                }
+
+                // Multi effects (lmfx)
+                val mkey = "lmfx"
+                writeSignature("8BIM")
+                writeSignature(mkey)
+                writeSection(4, writeTotalLength = true, largeSection = false) {
+                    val mdesc = buildEffectsDescriptor(effects, multi = true)
+                    PsdDescriptor.writeVersionAndDescriptor(this, "", "lmfx", mdesc)
+                }
+            }
+        }
+    }
+
+    private fun buildEffectsDescriptor(e: LayerEffectsInfo, multi: Boolean): DescriptorStructure {
+        val props = mutableMapOf<String, DescriptorValue>()
+        props["masterFXSwitch"] = BooleanValue(!e.disabled)
+        props["Scl "] = UnitDoubleValue("#Prc", e.scale * 100.0)
+
+        if (multi) {
+            var numEnabled = 0
+            e.stroke?.let { list ->
+                val multiList = list.map { s ->
+                    if (s.enabled) numEnabled++
+                    buildStrokeDescriptor(s)
+                }
+                props["frameFXMulti"] = ListValue(multiList)
+            }
+            e.dropShadow?.let { list ->
+                val multiList = list.map { s ->
+                    if (s.enabled) numEnabled++
+                    buildShadowDescriptor(s, "DrSh")
+                }
+                props["dropShadowMulti"] = ListValue(multiList)
+            }
+            props["numModifyingFX"] = LongValue(numEnabled)
+        } else {
+            e.stroke?.firstOrNull()?.let { s ->
+                props["FrFX"] = buildStrokeDescriptor(s)
+            }
+            e.dropShadow?.firstOrNull()?.let { s ->
+                props["DrSh"] = buildShadowDescriptor(s, "DrSh")
+            }
+        }
+
+        return DescriptorStructure("", if (multi) "lmfx" else "lfx2", props)
+    }
+
+    private fun buildStrokeDescriptor(s: LayerEffectStroke): DescriptorStructure {
+        val props = mutableMapOf<String, DescriptorValue>()
+        props["enab"] = BooleanValue(s.enabled)
+        props["present"] = BooleanValue(s.present)
+        props["showInDialog"] = BooleanValue(s.showInDialog)
+        props["Styl"] = EnumValue("FStl", when (s.position) {
+            "inside" -> "InsF"
+            "center" -> "CtrF"
+            else -> "OutF"
+        })
+        props["PntT"] = EnumValue("FrFl", when (s.fillType) {
+            "gradient" -> "GrFl"
+            "pattern" -> "Ptrn"
+            else -> "SClr"
+        })
+        props["Md  "] = EnumValue("BlnM", PsdHelpers.fromBlendModeDescriptor[s.blendMode] ?: "Nrml")
+        props["Opct"] = UnitDoubleValue("#Prc", s.opacity * 100.0)
+        props["Sz  "] = UnitDoubleValue(if (s.size.units == "Pixels") "#Pxl" else "#Pnt", s.size.value.toDouble())
+        s.color?.let { props["Clr "] = buildColorDescriptor(it) }
+        s.overprint?.let { props["overprint"] = BooleanValue(it) }
+
+        return DescriptorStructure("", "FrFX", props)
+    }
+
+    private fun buildShadowDescriptor(s: LayerEffectShadow, classID: String): DescriptorStructure {
+        val props = mutableMapOf<String, DescriptorValue>()
+        props["enab"] = BooleanValue(s.enabled)
+        props["present"] = BooleanValue(s.present)
+        props["showInDialog"] = BooleanValue(s.showInDialog)
+        props["Md  "] = EnumValue("BlnM", PsdHelpers.fromBlendModeDescriptor[s.blendMode] ?: "Nrml")
+        s.color?.let { props["Clr "] = buildColorDescriptor(it) }
+        props["Opct"] = UnitDoubleValue("#Prc", s.opacity * 100.0)
+        props["uglg"] = BooleanValue(s.useGlobalLight)
+        props["lagl"] = UnitDoubleValue("#Ang", s.angle.toDouble())
+        props["Dstn"] = UnitDoubleValue(if (s.distance.units == "Pixels") "#Pxl" else "#Rlt", s.distance.value.toDouble())
+        props["blur"] = UnitDoubleValue(if (s.size.units == "Pixels") "#Pxl" else "#Rlt", s.size.value.toDouble())
+        props["Ckmt"] = UnitDoubleValue("#Prc", s.choke.value.toDouble())
+        props["AntA"] = BooleanValue(s.antialiased)
+        // contour missing for now
+        if (classID == "DrSh") {
+            props["layerConceals"] = BooleanValue(s.layerConceals)
+        }
+        return DescriptorStructure("", classID, props)
+    }
+
+    private fun buildColorDescriptor(color: Color): DescriptorStructure {
+        val props = mutableMapOf<String, DescriptorValue>()
+        return when (color) {
+            is Rgb -> {
+                props["Rd  "] = DoubleValue(color.r.toDouble())
+                props["Grn "] = DoubleValue(color.g.toDouble())
+                props["Bl  "] = DoubleValue(color.b.toDouble())
+                DescriptorStructure("", "RGBC", props)
+            }
+            is Rgba -> {
+                props["Rd  "] = DoubleValue(color.r.toDouble())
+                props["Grn "] = DoubleValue(color.g.toDouble())
+                props["Bl  "] = DoubleValue(color.b.toDouble())
+                // alpha usually ignored in descriptor color
+                DescriptorStructure("", "RGBC", props)
+            }
+            else -> DescriptorStructure("", "RGBC", props) // fallback
         }
     }
 
     private fun buildTextDescriptor(text: LayerTextData): DescriptorStructure {
         val props = mutableMapOf<String, DescriptorValue>()
         props["Txt "] = TextValue((text.text).replace(Regex("\\r?\\n"), "\r"))
-        props["textGridding"] = EnumValue("textGridding", text.gridding ?: "none")
-        props["Ornt"] = EnumValue("orientation", text.orientation ?: "horizontal")
-        props["AntA"] = EnumValue("antiAlias", text.antiAlias ?: "sharp")
+        props["textGridding"] = EnumValue("textGridding", if (text.gridding == "round") "Rnd " else "None")
+        props["Ornt"] = EnumValue("Ornt", if (text.orientation == "vertical") "Vrtc" else "Hrzn")
+        props["AntA"] = EnumValue("Annt", when(text.antiAlias) {
+            "none" -> "Anno"
+            "crisp" -> "AnCr"
+            "strong" -> "AnSt"
+            "smooth" -> "AnSm"
+            "sharp" -> "antiAliasSharp"
+            else -> "antiAliasSharp"
+        })
         props["TextIndex"] = LongValue(text.index ?: 0)
-
-        // Bounds mappings
-        text.bounds?.let { b ->
-            props["bounds"] = DescriptorStructure(
-                name = "",
-                classID = "bounds",
-                properties = mapOf(
-                    "Top " to UnitDoubleValue("Distance", b.top.value.toDouble()),
-                    "Left" to UnitDoubleValue("Distance", b.left.value.toDouble()),
-                    "Btom" to UnitDoubleValue("Distance", b.bottom.value.toDouble()),
-                    "Rght" to UnitDoubleValue("Distance", b.right.value.toDouble())
-                )
-            )
-        }
-        text.boundingBox?.let { b ->
-            props["boundingBox"] = DescriptorStructure(
-                name = "",
-                classID = "bounds",
-                properties = mapOf(
-                    "Top " to UnitDoubleValue("Distance", b.top.value.toDouble()),
-                    "Left" to UnitDoubleValue("Distance", b.left.value.toDouble()),
-                    "Btom" to UnitDoubleValue("Distance", b.bottom.value.toDouble()),
-                    "Rght" to UnitDoubleValue("Distance", b.right.value.toDouble())
-                )
-            )
-        }
 
         // EngineData
         val serializedData = EngineData.serializeEngineData(TextLayer.encodeEngineData(text))

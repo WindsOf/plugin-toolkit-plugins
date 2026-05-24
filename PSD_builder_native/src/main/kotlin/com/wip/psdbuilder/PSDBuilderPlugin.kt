@@ -67,41 +67,19 @@ class PSDBuilderPlugin {
         val logger = context.logger
         logger.info("Starting buildPsdFromInputs for $imagePath")
 
-        val inputFile = File(imagePath)
-        if (!inputFile.exists()) {
-            throw IllegalArgumentException("Image file not found: $imagePath")
-        }
-
-        val baseImage = withContext(Dispatchers.IO) { ImageIO.read(inputFile) }
-            ?: throw IllegalArgumentException("Failed to read image bounds for $imagePath")
-        val width = baseImage.width.toDouble()
-        val height = baseImage.height.toDouble()
-
-        val psdTexts = texts.zip(bb).map { (text, box) ->
-            val left = (box[0] * width).toInt()
-            val top = (box[1] * height).toInt()
-            val right = (box[2] * width).toInt()
-            val bottom = (box[3] * height).toInt()
-
-            PsdText(
-                text = text,
-                left = left,
-                top = top,
-                right = right,
-                bottom = bottom,
-                fontName = fontName,
-                fontSize = fontSize,
-                color = PsdColor(0, 0, 0, 255),
-                strokeSize = borderSize
-            )
-        }
-
-        val outDir = if (outputDir.isNullOrBlank()) inputFile.parentFile else File(outputDir)
+        val outDir = if (outputDir.isNullOrBlank()) File(imagePath).parentFile else File(outputDir)
         if (!outDir.exists()) outDir.mkdirs()
 
-        val outputPsdPath = File(outDir, inputFile.nameWithoutExtension + ".psd").absolutePath
+        val outputPsdPath = File(outDir, File(imagePath).nameWithoutExtension + ".psd").absolutePath
 
-        buildPsdNative(inputFile.absolutePath, psdTexts, outputPsdPath, context)
+        val psd = buildPsdObject(imagePath, texts, bb, fontSize, fontName, borderSize, context)
+        val psdBytes = withContext(Dispatchers.Default) {
+            com.wip.kpsd.KPsd.write(psd, compress = false)
+        }
+        withContext(Dispatchers.IO) {
+            File(outputPsdPath).writeBytes(psdBytes)
+        }
+        
         return outputPsdPath
     }
 
@@ -142,9 +120,6 @@ class PSDBuilderPlugin {
         }
 
         val minSize = minOf(texts.size, bb.size, pageNames.size)
-        if (minSize != texts.size || minSize != bb.size || minSize != pageNames.size) {
-            logger.warn("Size mismatch in Add Text to Chapter inputs: texts (${texts.size}), bb (${bb.size}), pageNames (${pageNames.size}). Truncating to $minSize.")
-        }
         val groupedData = (0 until minSize).groupBy { pageNames[it] }
         val totalPages = groupedData.size
         var processedPages = 0
@@ -157,42 +132,18 @@ class PSDBuilderPlugin {
                     semaphore.withPermit {
                         val imageFile = File(folder, pageName)
                         if (imageFile.exists()) {
-                            logger.info("Processing page natively: $pageName")
                             val outputPsdPath = File(outDir, pageName.substringBeforeLast(".") + ".psd").absolutePath
                             
                             val pageTexts = indices.map { texts[it] }
                             val pageBb = indices.map { bb[it] }
 
-                            val baseImage = withContext(Dispatchers.IO) { ImageIO.read(imageFile) }
-                            if (baseImage != null) {
-                                val width = baseImage.width.toDouble()
-                                val height = baseImage.height.toDouble()
-
-                                val psdTexts = pageTexts.zip(pageBb).map { (text, box) ->
-                                    val left = (box[0] * width).toInt()
-                                    val top = (box[1] * height).toInt()
-                                    val right = (box[2] * width).toInt()
-                                    val bottom = (box[3] * height).toInt()
-
-                                    PsdText(
-                                        text = text,
-                                        left = left,
-                                        top = top,
-                                        right = right,
-                                        bottom = bottom,
-                                        fontName = fontName,
-                                        fontSize = fontSize,
-                                        color = PsdColor(0, 0, 0, 255),
-                                        strokeSize = borderSize
-                                    )
-                                }
-
-                                buildPsdNative(imageFile.absolutePath, psdTexts, outputPsdPath, context)
-                            } else {
-                                logger.warn("Failed to read image bounds for: $pageName")
+                            val psd = buildPsdObject(imageFile.absolutePath, pageTexts, pageBb, fontSize, fontName, borderSize, context)
+                            val psdBytes = withContext(Dispatchers.Default) {
+                                com.wip.kpsd.KPsd.write(psd, compress = false)
                             }
-                        } else {
-                            logger.warn("Image file not found for page name: $pageName")
+                            withContext(Dispatchers.IO) {
+                                File(outputPsdPath).writeBytes(psdBytes)
+                            }
                         }
                         
                         synchronized(this@PSDBuilderPlugin) {
@@ -204,7 +155,6 @@ class PSDBuilderPlugin {
             }.awaitAll()
         }
 
-        logger.info("Processed $processedPages pages natively to ${outDir.absolutePath}")
         return outDir.absolutePath
     }
 
@@ -223,41 +173,34 @@ class PSDBuilderPlugin {
         }
         val jsonContent = withContext(Dispatchers.IO) { jsonFile.readText() }
         val payload = Json.decodeFromString<PsdPayload>(jsonContent)
-        buildPsdNative(payload.backgroundImage, payload.texts, outputPsdPath, context)
+        
+        val texts = payload.texts.map { it.text }
+        // buildPsdObject wants normalized BBs, but payload has raw coords.
+        // Let's create a specialized object builder or handle coords correctly.
+        val baseImage = withContext(Dispatchers.IO) { ImageIO.read(File(payload.backgroundImage)) }
+        val width = baseImage.width.toDouble()
+        val height = baseImage.height.toDouble()
+        val bb = payload.texts.map { listOf(it.left / width, it.top / height, it.right / width, it.bottom / height) }
+        
+        val psd = buildPsdObject(payload.backgroundImage, texts, bb, payload.texts.firstOrNull()?.fontSize, payload.texts.firstOrNull()?.fontName, payload.texts.firstOrNull()?.strokeSize, context)
+        val psdBytes = withContext(Dispatchers.Default) {
+            com.wip.kpsd.KPsd.write(psd, compress = false)
+        }
+        withContext(Dispatchers.IO) {
+            File(outputPsdPath).writeBytes(psdBytes)
+        }
         return outputPsdPath
     }
 
-    private fun wrapText(text: String, maxWidth: Int, fontSize: Int): String {
-        val approxCharWidth = fontSize * 0.6
-        val maxChars = maxOf(1, (maxWidth / approxCharWidth).toInt())
-        
-        val words = text.split(Regex("\\s+"))
-        val lines = mutableListOf<String>()
-        var currentLine = ""
-        
-        for (word in words) {
-            if ((currentLine + word).length > maxChars) {
-                if (currentLine.isNotEmpty()) {
-                    lines.add(currentLine.trim())
-                    currentLine = "$word "
-                } else {
-                    lines.add(word)
-                    currentLine = ""
-                }
-            } else {
-                currentLine += "$word "
-            }
-        }
-        if (currentLine.isNotEmpty()) {
-            lines.add(currentLine.trim())
-        }
-        return lines.joinToString("\r")
-    }
-
-    private suspend fun buildPsdNative(imagePath: String, psdTexts: List<PsdText>, outputPath: String, context: PluginContext) {
-        val logger = context.logger
-        logger.info("Building native PSD: $imagePath -> $outputPath")
-
+    suspend fun buildPsdObject(
+        imagePath: String,
+        texts: List<String>,
+        bb: List<List<Double>>,
+        fontSize: Int? = 24,
+        fontName: String? = "Anime Ace 2.0 BB",
+        borderSize: Int? = 3,
+        context: PluginContext
+    ): com.wip.kpsd.Psd {
         val inputFile = File(imagePath)
         val baseImage = withContext(Dispatchers.IO) { ImageIO.read(inputFile) }
             ?: throw IllegalArgumentException("Failed to read image: $imagePath")
@@ -293,61 +236,92 @@ class PSDBuilderPlugin {
 
         val layers = mutableListOf<com.wip.kpsd.Layer>(bgLayer)
 
-        for ((index, t) in psdTexts.withIndex()) {
-            val boxWidth = t.right - t.left
-            val boxHeight = t.bottom - t.top
-            val fontSize = t.fontSize ?: 24
-            val fontName = if (t.fontName == "ArialMT" || t.fontName == "Anime ACE 2.0" || t.fontName == "Anime Ace 2.0 BB") "AnimeAce2.0BB" else (t.fontName ?: "AnimeAce2.0BB")
+        for ((index, text) in texts.withIndex()) {
+            val box = bb[index]
+            val tLeft = (box[0] * width).toInt()
+            val tTop = (box[1] * height).toInt()
+            val tRight = (box[2] * width).toInt()
+            val tBottom = (box[3] * height).toInt()
+            
+            val boxWidth = tRight - tLeft
+            val boxHeight = tBottom - tTop
+            val fSize = fontSize ?: 24
+            val fName = if (fontName == "ArialMT" || fontName == "Anime ACE 2.0" || fontName == "Anime Ace 2.0 BB") "AnimeAce2.0BB" else (fontName ?: "AnimeAce2.0BB")
 
-            val wrappedText = wrapText(t.text, boxWidth, fontSize)
+            val wrappedText = wrapText(text, boxWidth, fSize)
 
-            val hasStroke = t.strokeSize != null && t.strokeSize > 0
+            val hasStroke = borderSize != null && borderSize > 0
             val textLayer = com.wip.kpsd.Layer(
                 name = "Testo $index",
-                top = t.top,
-                left = t.left,
-                bottom = t.bottom,
-                right = t.right,
+                top = tTop,
+                left = tLeft,
+                bottom = tBottom,
+                right = tRight,
                 text = com.wip.kpsd.LayerTextData(
                     text = wrappedText,
                     shapeType = "box",
                     boxBounds = floatArrayOf(0f, 0f, boxHeight.toFloat(), boxWidth.toFloat()),
-                    transform = doubleArrayOf(1.0, 0.0, 0.0, 1.0, t.left.toDouble(), t.top.toDouble()),
+                    transform = doubleArrayOf(1.0, 0.0, 0.0, 1.0, tLeft.toDouble(), tTop.toDouble()),
                     left = 0f,
                     top = 0f,
                     right = boxWidth.toFloat(),
                     bottom = boxHeight.toFloat(),
                     style = com.wip.kpsd.TextStyle(
-                        font = com.wip.kpsd.Font(name = fontName),
-                        fontSize = fontSize.toFloat(),
-                        fillColor = com.wip.kpsd.Rgb(t.color?.r ?: 0, t.color?.g ?: 0, t.color?.b ?: 0),
-                        strokeColor = if (hasStroke) com.wip.kpsd.Rgb(255, 255, 255) else null,
-                        strokeFlag = if (hasStroke) true else null,
-                        outlineWidth = if (hasStroke) t.strokeSize!!.toFloat() else null,
-                        fillFlag = if (hasStroke) true else null,
-                        fillFirst = if (hasStroke) true else null
+                        font = com.wip.kpsd.Font(name = fName),
+                        fontSize = fSize.toFloat(),
+                        fillColor = com.wip.kpsd.Rgb(255, 255, 255)
                     ),
                     paragraphStyle = com.wip.kpsd.ParagraphStyle(
                         justification = "center"
                     )
-                )
+                ),
+                effects = if (hasStroke) {
+                    com.wip.kpsd.LayerEffectsInfo(
+                        stroke = listOf(
+                            com.wip.kpsd.LayerEffectStroke(
+                                size = com.wip.kpsd.UnitsValue("Pixels", borderSize!!.toFloat()),
+                                color = com.wip.kpsd.Rgb(0, 0, 0)
+                            )
+                        )
+                    )
+                } else null,
+                effectsOpen = hasStroke
             )
             layers.add(textLayer)
         }
 
-        val psd = com.wip.kpsd.Psd(
+        return com.wip.kpsd.Psd(
             width = width,
             height = height,
             children = layers,
             imageData = bgPixelData
         )
+    }
 
-        val psdBytes = withContext(Dispatchers.Default) {
-            com.wip.kpsd.KPsd.write(psd, compress = false)
+    private fun wrapText(text: String, maxWidth: Int, fontSize: Int): String {
+        val approxCharWidth = fontSize * 0.6
+        val maxChars = maxOf(1, (maxWidth / approxCharWidth).toInt())
+        
+        val words = text.split(Regex("\\s+"))
+        val lines = mutableListOf<String>()
+        var currentLine = ""
+        
+        for (word in words) {
+            if ((currentLine + word).length > maxChars) {
+                if (currentLine.isNotEmpty()) {
+                    lines.add(currentLine.trim())
+                    currentLine = "$word "
+                } else {
+                    lines.add(word)
+                    currentLine = ""
+                }
+            } else {
+                currentLine += "$word "
+            }
         }
-
-        withContext(Dispatchers.IO) {
-            File(outputPath).writeBytes(psdBytes)
+        if (currentLine.isNotEmpty()) {
+            lines.add(currentLine.trim())
         }
+        return lines.joinToString("\r")
     }
 }
