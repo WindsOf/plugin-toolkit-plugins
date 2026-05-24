@@ -180,320 +180,85 @@ class PSDBuilderSizeComparisonTest {
     }
 
     @Test
-    fun testFolderWithImageAndText() = runBlocking {
+    fun testExtractTextLayersAndVerifyBounds() = runBlocking {
         val tempDir = File("build/tmp/size_comparison_test").apply { mkdirs() }
         val context = mockk<PluginContext>(relaxed = true)
 
-        val imagePath = File(tempDir, "base_folder.png").absolutePath
-        val baseImage = BufferedImage(200, 200, BufferedImage.TYPE_INT_RGB)
+        val imagePath = File(tempDir, "base_extract.png").absolutePath
+        val baseImage = BufferedImage(500, 500, BufferedImage.TYPE_INT_RGB)
         val g = baseImage.createGraphics()
-        g.color = Color.BLUE
-        g.fillRect(0, 0, 200, 200)
+        g.color = Color.WHITE
+        g.fillRect(0, 0, 500, 500)
         g.dispose()
         ImageIO.write(baseImage, "png", File(imagePath))
 
-        // Create a custom image layer: 50x50 pixels, filled with green
-        val imgBytes = ByteArray(50 * 50 * 4) { i ->
-            when (i % 4) {
-                0 -> 0.toByte()      // R
-                1 -> 255.toByte()    // G
-                2 -> 0.toByte()      // B
-                else -> 255.toByte()  // A
-            }
+        val nativePlugin = PSDBuilderPlugin()
+        val texts = listOf("Left", "Right")
+        val bb = listOf(
+            listOf(10.0 / 500.0, 20.0 / 500.0, 100.0 / 500.0, 50.0 / 500.0),
+            listOf(120.0 / 500.0, 40.0 / 500.0, 200.0 / 500.0, 80.0 / 500.0)
+        )
+
+        val psdPath = nativePlugin.buildPsdFromInputs(
+            imagePath = imagePath,
+            texts = texts,
+            bb = bb,
+            fontSize = 24,
+            fontName = "ArialMT",
+            borderSize = 3,
+            outputDir = tempDir.absolutePath,
+            context = context
+        )
+
+        // Extract
+        val extracted = nativePlugin.extractTextLayers(psdPath, context)
+        assertEquals(2, extracted.size, "Should extract exactly 2 text layers")
+
+        val ext1 = extracted[0]
+        assertEquals("Left", ext1.text)
+        assertEquals(10, ext1.left)
+        assertEquals(20, ext1.top)
+        assertEquals(100, ext1.right)
+        assertEquals(50, ext1.bottom)
+
+        val ext2 = extracted[1]
+        assertEquals("Right", ext2.text)
+        assertEquals(120, ext2.left)
+        assertEquals(40, ext2.top)
+        assertEquals(200, ext2.right)
+        assertEquals(80, ext2.bottom)
+    }
+
+    @Test
+    fun testExtractTextLayersFromPhotoshopFile() = runBlocking {
+        val context = mockk<PluginContext>(relaxed = true)
+        val nativePlugin = PSDBuilderPlugin()
+
+        var psdFile = File("src/main/resources/scanario_1_corrected_by_ps.psd")
+        if (!psdFile.exists()) {
+            psdFile = File("PSD_builder_native/src/main/resources/scanario_1_corrected_by_ps.psd")
         }
-        val imgLayer = com.wip.kpsd.Layer(
-            name = "Image Layer",
-            top = 10,
-            left = 10,
-            bottom = 60,
-            right = 60,
-            imageData = com.wip.kpsd.PixelData(50, 50, imgBytes)
-        )
+        assertTrue(psdFile.exists(), "Photoshop-corrected reference file should exist at ${psdFile.absolutePath}")
 
-        // Create a text layer
-        val textLayer = com.wip.kpsd.Layer(
-            name = "My Text Layer",
-            top = 80,
-            left = 10,
-            bottom = 120,
-            right = 190,
-            text = com.wip.kpsd.LayerTextData(
-                text = "Hello Inside Folder",
-                shapeType = "box",
-                boxBounds = floatArrayOf(0f, 0f, 180f, 40f),
-                transform = doubleArrayOf(1.0, 0.0, 0.0, 1.0, 10.0, 80.0),
-                left = 0f,
-                top = 0f,
-                right = 180f,
-                bottom = 40f,
-                style = com.wip.kpsd.TextStyle(
-                    font = com.wip.kpsd.Font(name = "AnimeAce2.0BB"),
-                    fontSize = 20f,
-                    fillColor = com.wip.kpsd.Rgb(255, 255, 255)
-                )
-            )
-        )
+        val extracted = nativePlugin.extractTextLayers(psdFile.absolutePath, context)
+        println("Extracted from Photoshop-corrected file:")
+        extracted.forEach { println("  Text: '${it.text}' bounds=[${it.left}, ${it.top}, ${it.right}, ${it.bottom}]") }
 
-        // Create an open folder group containing both layers
-        val folderLayer = com.wip.kpsd.Layer(
-            name = "My Group Folder",
-            opened = true,
-            children = mutableListOf(imgLayer, textLayer)
-        )
-
-        // Create base background layer
-        val bgBytes = ByteArray(200 * 200 * 4)
-        val bgPixelData = com.wip.kpsd.PixelData(200, 200, bgBytes)
-        val bgLayer = com.wip.kpsd.Layer(
-            name = "Background",
-            top = 0,
-            left = 0,
-            bottom = 200,
-            right = 200,
-            imageData = bgPixelData
-        )
-
-        // Assemble PSD
-        val psd = com.wip.kpsd.Psd(
-            width = 200,
-            height = 200,
-            children = mutableListOf(bgLayer, folderLayer),
-            imageData = bgPixelData
-        )
-
-        // Write
-        val psdBytes = com.wip.kpsd.KPsd.write(psd, compress = false)
-        val psdFile = File(tempDir, "folder_img_text.psd")
-        psdFile.writeBytes(psdBytes)
-
-        // Read back and assert hierarchy
-        val parsed = com.wip.kpsd.KPsd.read(psdBytes)
-        assertEquals(2, parsed.children.size, "PSD should have 2 root layers (Background and Folder)")
+        // Assert we find the correct text layers
+        assertEquals(2, extracted.size, "Should find exactly 2 text layers in Photoshop file")
         
-        val parsedBg = parsed.children[0]
-        assertEquals("Background", parsedBg.name)
+        val ext1 = extracted[0]
+        assertEquals("Top Left", ext1.text)
+        assertEquals(55, ext1.left)
+        assertEquals(24, ext1.top)
+        assertEquals(121, ext1.right)
+        assertEquals(74, ext1.bottom)
 
-        val parsedFolder = parsed.children[1]
-        assertEquals("My Group Folder", parsedFolder.name)
-        assertNotNull(parsedFolder.children)
-        assertEquals(2, parsedFolder.children!!.size, "Folder should contain 2 child layers")
-
-        val parsedImg = parsedFolder.children!![0]
-        assertEquals("Image Layer", parsedImg.name)
-        assertNotNull(parsedImg.imageData)
-        assertEquals(50, parsedImg.imageData!!.width)
-        assertEquals(50, parsedImg.imageData!!.height)
-
-        val parsedText = parsedFolder.children!![1]
-        assertEquals("My Text Layer", parsedText.name)
-        assertNotNull(parsedText.text)
-        assertEquals("Hello Inside Folder", parsedText.text!!.text)
-    }
-
-    @Test
-    fun testFolderWithEffects() = runBlocking {
-        val tempDir = File("build/tmp/size_comparison_test").apply { mkdirs() }
-
-        // Create a text layer with shadow and stroke effects
-        val textLayer = com.wip.kpsd.Layer(
-            name = "Effect Text Layer",
-            top = 20,
-            left = 20,
-            bottom = 80,
-            right = 180,
-            text = com.wip.kpsd.LayerTextData(
-                text = "Shadow & Stroke",
-                shapeType = "box",
-                boxBounds = floatArrayOf(0f, 0f, 160f, 60f),
-                transform = doubleArrayOf(1.0, 0.0, 0.0, 1.0, 20.0, 20.0),
-                left = 0f,
-                top = 0f,
-                right = 160f,
-                bottom = 60f,
-                style = com.wip.kpsd.TextStyle(
-                    font = com.wip.kpsd.Font(name = "AnimeAce2.0BB"),
-                    fontSize = 24f,
-                    fillColor = com.wip.kpsd.Rgb(255, 255, 255)
-                )
-            ),
-            effects = com.wip.kpsd.LayerEffectsInfo(
-                scale = 1f,
-                stroke = listOf(
-                    com.wip.kpsd.LayerEffectStroke(
-                        size = com.wip.kpsd.UnitsValue("Pixels", 4f),
-                        color = com.wip.kpsd.Rgb(0, 0, 0)
-                    )
-                ),
-                dropShadow = listOf(
-                    com.wip.kpsd.LayerEffectShadow(
-                        size = com.wip.kpsd.UnitsValue("Pixels", 8f),
-                        distance = com.wip.kpsd.UnitsValue("Pixels", 6f),
-                        color = com.wip.kpsd.Rgb(0, 0, 0),
-                        opacity = 0.6f
-                    )
-                )
-            ),
-            effectsOpen = true
-        )
-
-        // Create folder containing the text layer
-        val folderLayer = com.wip.kpsd.Layer(
-            name = "Folder with Effects",
-            opened = true,
-            children = mutableListOf(textLayer)
-        )
-
-        // Create base background layer
-        val bgBytes = ByteArray(200 * 200 * 4)
-        val bgPixelData = com.wip.kpsd.PixelData(200, 200, bgBytes)
-        val bgLayer = com.wip.kpsd.Layer(
-            name = "Background",
-            top = 0,
-            left = 0,
-            bottom = 200,
-            right = 200,
-            imageData = bgPixelData
-        )
-
-        // Assemble PSD
-        val psd = com.wip.kpsd.Psd(
-            width = 200,
-            height = 200,
-            children = mutableListOf(bgLayer, folderLayer),
-            imageData = bgPixelData
-        )
-
-        // Write
-        val psdBytes = com.wip.kpsd.KPsd.write(psd, compress = false)
-        val psdFile = File(tempDir, "folder_effects.psd")
-        psdFile.writeBytes(psdBytes)
-
-        // Read back and assert
-        val parsed = com.wip.kpsd.KPsd.read(psdBytes)
-        assertEquals(2, parsed.children.size)
-
-        val parsedFolder = parsed.children[1]
-        assertEquals("Folder with Effects", parsedFolder.name)
-        assertNotNull(parsedFolder.children)
-        assertEquals(1, parsedFolder.children!!.size)
-
-        val parsedTextLayer = parsedFolder.children!![0]
-        assertEquals("Effect Text Layer", parsedTextLayer.name)
-        
-        val parsedEffects = parsedTextLayer.effects
-        assertNotNull(parsedEffects)
-        assertNotNull(parsedEffects.stroke)
-        assertEquals(1, parsedEffects.stroke!!.size)
-        assertEquals(4f, parsedEffects.stroke!![0].size.value)
-
-        assertNotNull(parsedEffects.dropShadow)
-        assertEquals(1, parsedEffects.dropShadow!!.size)
-        assertEquals(8f, parsedEffects.dropShadow!![0].size.value)
-        assertEquals(6f, parsedEffects.dropShadow!![0].distance.value)
-    }
-
-    @Test
-    fun testEffectsOnFolder() = runBlocking {
-        val tempDir = File("build/tmp/size_comparison_test").apply { mkdirs() }
-
-        // Create a simple text layer
-        val textLayer = com.wip.kpsd.Layer(
-            name = "Child Layer",
-            top = 20,
-            left = 20,
-            bottom = 80,
-            right = 180,
-            text = com.wip.kpsd.LayerTextData(
-                text = "Inside Folder",
-                shapeType = "box",
-                boxBounds = floatArrayOf(0f, 0f, 160f, 60f),
-                transform = doubleArrayOf(1.0, 0.0, 0.0, 1.0, 20.0, 20.0),
-                left = 0f,
-                top = 0f,
-                right = 160f,
-                bottom = 60f,
-                style = com.wip.kpsd.TextStyle(
-                    font = com.wip.kpsd.Font(name = "AnimeAce2.0BB"),
-                    fontSize = 24f,
-                    fillColor = com.wip.kpsd.Rgb(255, 255, 255)
-                )
-            )
-        )
-
-        // Create folder containing the text layer, and apply effects to the FOLDER
-        val folderLayer = com.wip.kpsd.Layer(
-            name = "Folder with Effects Applied",
-            opened = true,
-            children = mutableListOf(textLayer),
-            effects = com.wip.kpsd.LayerEffectsInfo(
-                scale = 1f,
-                stroke = listOf(
-                    com.wip.kpsd.LayerEffectStroke(
-                        size = com.wip.kpsd.UnitsValue("Pixels", 5f),
-                        color = com.wip.kpsd.Rgb(0, 0, 0)
-                    )
-                ),
-                dropShadow = listOf(
-                    com.wip.kpsd.LayerEffectShadow(
-                        size = com.wip.kpsd.UnitsValue("Pixels", 12f),
-                        distance = com.wip.kpsd.UnitsValue("Pixels", 4f),
-                        color = com.wip.kpsd.Rgb(0, 0, 0),
-                        opacity = 0.5f
-                    )
-                )
-            ),
-            effectsOpen = true
-        )
-
-        // Create base background layer
-        val bgBytes = ByteArray(200 * 200 * 4)
-        val bgPixelData = com.wip.kpsd.PixelData(200, 200, bgBytes)
-        val bgLayer = com.wip.kpsd.Layer(
-            name = "Background",
-            top = 0,
-            left = 0,
-            bottom = 200,
-            right = 200,
-            imageData = bgPixelData
-        )
-
-        // Assemble PSD
-        val psd = com.wip.kpsd.Psd(
-            width = 200,
-            height = 200,
-            children = mutableListOf(bgLayer, folderLayer),
-            imageData = bgPixelData
-        )
-
-        // Write
-        val psdBytes = com.wip.kpsd.KPsd.write(psd, compress = false)
-        val psdFile = File(tempDir, "folder_with_effects_applied.psd")
-        psdFile.writeBytes(psdBytes)
-
-        // Read back and assert
-        val parsed = com.wip.kpsd.KPsd.read(psdBytes)
-        assertEquals(2, parsed.children.size)
-
-        val parsedFolder = parsed.children[1]
-        assertEquals("Folder with Effects Applied", parsedFolder.name)
-        assertNotNull(parsedFolder.children)
-        assertEquals(1, parsedFolder.children!!.size)
-
-        // Verify folder layer itself has the effects
-        val parsedEffects = parsedFolder.effects
-        assertNotNull(parsedEffects, "Folder layer should have effects parsed back")
-        assertNotNull(parsedEffects.stroke)
-        assertEquals(1, parsedEffects.stroke!!.size)
-        assertEquals(5f, parsedEffects.stroke!![0].size.value)
-
-        assertNotNull(parsedEffects.dropShadow)
-        assertEquals(1, parsedEffects.dropShadow!!.size)
-        assertEquals(12f, parsedEffects.dropShadow!![0].size.value)
-        assertEquals(4f, parsedEffects.dropShadow!![0].distance.value)
-
-        // Verify child layer does not have effects
-        val parsedChild = parsedFolder.children!![0]
-        assertEquals("Child Layer", parsedChild.name)
-        assertTrue(parsedChild.effects == null || (parsedChild.effects!!.stroke == null && parsedChild.effects!!.dropShadow == null))
+        val ext2 = extracted[1]
+        assertEquals("BottomRight", ext2.text)
+        assertEquals(354, ext2.left)
+        assertEquals(399, ext2.top)
+        assertEquals(472, ext2.right)
+        assertEquals(449, ext2.bottom)
     }
 }

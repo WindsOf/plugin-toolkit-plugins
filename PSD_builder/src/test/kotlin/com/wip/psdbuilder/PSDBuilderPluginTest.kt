@@ -81,7 +81,7 @@ class PSDBuilderPluginTest {
             listOf(0.1, 0.1, 0.5, 0.4),  // centered around (20, 20) to (100, 80)
             listOf(0.6, 0.7, 0.9, 0.9)   // centered around (120, 140) to (180, 180)
         )
-        val fontName = "ArialMT"
+        val fontName = PsdFont.ARIAL
         val fontSize = 24
         val borderSize = 3
 
