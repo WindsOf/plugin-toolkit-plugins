@@ -47,9 +47,14 @@ async function generatePSD(jsonPath, outputPath) {
         const boxHeight = bottom - top;
         
         const strokeSize = txtConfig.strokeSize !== undefined ? txtConfig.strokeSize : 3;
+        
+        const rotation = txtConfig.rotation || 0.0;
+        const theta = rotation * Math.PI / 180.0;
+        const cos = Math.cos(theta);
+        const sin = Math.sin(theta);
 
         childrenNodes.push({
-            name: `Testo ${index}`,
+            name: textContent,
             left: left,
             top: top,
             right: right,
@@ -73,7 +78,7 @@ async function generatePSD(jsonPath, outputPath) {
                 text: textContent, // Nessun wrapping manuale!
                 shapeType: 'box', // Trasforma in Paragrafo nativo di Photoshop
                 boxBounds: [0, 0, boxWidth, boxHeight], // Formato: [Left, Top, Right, Bottom]
-                transform: [1, 0, 0, 1, left, top], // Offset globale del livello
+                transform: [cos, sin, -sin, cos, left, top], // Offset globale del livello con rotazione
                 left: 0,
                 top: 0,
                 right: boxWidth,
