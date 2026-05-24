@@ -251,7 +251,7 @@ class PsdReader(val bytes: ByteArray) {
             left = left,
             bottom = bottom,
             right = right,
-            blendMode = PsdHelpers.toBlendMode[blendMode] ?: "normal",
+            blendMode = PsdHelpers.toBlendMode[blendMode] ?: BlendMode.NORMAL,
             opacity = opacity,
             hidden = (flags and 0x02) != 0,
             transparencyProtected = (flags and 0x01) != 0,
@@ -439,19 +439,20 @@ class PsdReader(val bytes: ByteArray) {
     private fun parseStrokeDescriptor(s: DescriptorStructure): LayerEffectStroke {
         val enabled = (s.properties["enab"] as? BooleanValue)?.value ?: true
         val position = when ((s.properties["Styl"] as? EnumValue)?.value) {
-            "InsF" -> "inside"
-            "CtrF" -> "center"
-            else -> "outside"
+            "InsF" -> StrokePosition.INSIDE
+            "CtrF" -> StrokePosition.CENTER
+            else -> StrokePosition.OUTSIDE
         }
         val fillType = when ((s.properties["PntT"] as? EnumValue)?.value) {
-            "GrFl" -> "gradient"
-            "Ptrn" -> "pattern"
-            else -> "color"
+            "GrFl" -> StrokeFillType.GRADIENT
+            "Ptrn" -> StrokeFillType.PATTERN
+            else -> StrokeFillType.COLOR
         }
-        val blendMode = (s.properties["Md  "] as? EnumValue)?.value ?: "Nrml"
+        val blendModeVal = (s.properties["Md  "] as? EnumValue)?.value ?: "Nrml"
+        val blendMode = PsdHelpers.fromBlendModeDescriptor.entries.firstOrNull { it.value == blendModeVal }?.key ?: BlendMode.NORMAL
         val opacity = (s.properties["Opct"] as? UnitDoubleValue)?.value?.div(100.0f)?.toFloat() ?: 1.0f
         val sizeVal = s.properties["Sz  "] as? UnitDoubleValue
-        val size = UnitsValue(sizeVal?.units ?: "Pixels", sizeVal?.value?.toFloat() ?: 1.0f)
+        val size = UnitsValue(Units.fromString(sizeVal?.units ?: "Pixels"), sizeVal?.value?.toFloat() ?: 1.0f)
         val color = s.properties["Clr "]?.let { parseColorDescriptor(it as DescriptorStructure) }
 
         return LayerEffectStroke(
@@ -467,17 +468,18 @@ class PsdReader(val bytes: ByteArray) {
 
     private fun parseShadowDescriptor(s: DescriptorStructure): LayerEffectShadow {
         val enabled = (s.properties["enab"] as? BooleanValue)?.value ?: true
-        val blendMode = (s.properties["Md  "] as? EnumValue)?.value ?: "Nrml"
+        val blendModeVal = (s.properties["Md  "] as? EnumValue)?.value ?: "Nrml"
+        val blendMode = PsdHelpers.fromBlendModeDescriptor.entries.firstOrNull { it.value == blendModeVal }?.key ?: BlendMode.MULTIPLY
         val color = s.properties["Clr "]?.let { parseColorDescriptor(it as DescriptorStructure) }
         val opacity = (s.properties["Opct"] as? UnitDoubleValue)?.value?.div(100.0f)?.toFloat() ?: 1.0f
         val useGlobalLight = (s.properties["uglg"] as? BooleanValue)?.value ?: true
         val angle = (s.properties["lagl"] as? UnitDoubleValue)?.value?.toFloat() ?: 120f
         val distanceVal = s.properties["Dstn"] as? UnitDoubleValue
-        val distance = UnitsValue(distanceVal?.units ?: "Pixels", distanceVal?.value?.toFloat() ?: 0f)
+        val distance = UnitsValue(Units.fromString(distanceVal?.units ?: "Pixels"), distanceVal?.value?.toFloat() ?: 0f)
         val sizeVal = s.properties["blur"] as? UnitDoubleValue
-        val size = UnitsValue(sizeVal?.units ?: "Pixels", sizeVal?.value?.toFloat() ?: 0f)
+        val size = UnitsValue(Units.fromString(sizeVal?.units ?: "Pixels"), sizeVal?.value?.toFloat() ?: 0f)
         val chokeVal = s.properties["Ckmt"] as? UnitDoubleValue
-        val choke = UnitsValue(chokeVal?.units ?: "Percent", chokeVal?.value?.toFloat() ?: 0f)
+        val choke = UnitsValue(Units.fromString(chokeVal?.units ?: "Percent"), chokeVal?.value?.toFloat() ?: 0f)
 
         return LayerEffectShadow(
             enabled = enabled,
@@ -500,18 +502,19 @@ class PsdReader(val bytes: ByteArray) {
     }
 
     private fun parseWarpDescriptor(desc: DescriptorStructure): Warp {
-        val style = (desc.properties["warpStyle"] as? EnumValue)?.value ?: "warpNone"
+        val styleStr = (desc.properties["warpStyle"] as? EnumValue)?.value ?: "warpNone"
+        val style = WarpStyle.fromString(styleStr.removePrefix("warp"))
         val value = (desc.properties["warpValue"] as? DoubleValue)?.value?.toFloat() ?: 0f
         val perspective = (desc.properties["warpPerspective"] as? DoubleValue)?.value?.toFloat() ?: 0f
         val perspectiveOther = (desc.properties["warpPerspectiveOther"] as? DoubleValue)?.value?.toFloat() ?: 0f
         val rotate = (desc.properties["warpRotate"] as? EnumValue)?.value ?: "Hrzn"
 
         return Warp(
-            style = style.removePrefix("warp"),
+            style = style,
             value = value,
             perspective = perspective,
             perspectiveOther = perspectiveOther,
-            rotate = if (rotate == "Vrtc") "vertical" else "horizontal"
+            rotate = if (rotate == "Vrtc") Orientation.VERTICAL else Orientation.HORIZONTAL
         )
     }
 

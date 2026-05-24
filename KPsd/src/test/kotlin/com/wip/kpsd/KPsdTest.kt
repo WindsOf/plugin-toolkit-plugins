@@ -123,7 +123,7 @@ class KPsdTest {
             effects = LayerEffectsInfo(
                 stroke = listOf(
                     LayerEffectStroke(
-                        size = UnitsValue("Pixels", 5f),
+                        size = UnitsValue(Units.PIXELS, 5f),
                         color = Rgb(255, 0, 0)
                     )
                 )
@@ -406,7 +406,7 @@ class KPsdTest {
                 TextStyleRun(4, TextStyle(fillColor = Rgb(0, 0, 255)))
             ),
             paragraphStyleRuns = listOf(
-                ParagraphStyleRun(14, ParagraphStyle(justification = "center"))
+                ParagraphStyleRun(14, ParagraphStyle(justification = Justification.CENTER))
             )
         )
 
@@ -642,7 +642,7 @@ class KPsdTest {
             right = 190,
             text = LayerTextData(
                 text = "Hello Inside Folder",
-                shapeType = "box",
+                shapeType = TextShapeType.BOX,
                 boxBounds = floatArrayOf(0f, 0f, 180f, 40f),
                 transform = doubleArrayOf(1.0, 0.0, 0.0, 1.0, 10.0, 80.0),
                 left = 0f,
@@ -726,7 +726,7 @@ class KPsdTest {
             right = 180,
             text = LayerTextData(
                 text = "Shadow & Stroke",
-                shapeType = "box",
+                shapeType = TextShapeType.BOX,
                 boxBounds = floatArrayOf(0f, 0f, 160f, 60f),
                 transform = doubleArrayOf(1.0, 0.0, 0.0, 1.0, 20.0, 20.0),
                 left = 0f,
@@ -743,14 +743,14 @@ class KPsdTest {
                 scale = 1f,
                 stroke = listOf(
                     LayerEffectStroke(
-                        size = UnitsValue("Pixels", 4f),
+                        size = UnitsValue(Units.PIXELS, 4f),
                         color = Rgb(0, 0, 0)
                     )
                 ),
                 dropShadow = listOf(
                     LayerEffectShadow(
-                        size = UnitsValue("Pixels", 8f),
-                        distance = UnitsValue("Pixels", 6f),
+                        size = UnitsValue(Units.PIXELS, 8f),
+                        distance = UnitsValue(Units.PIXELS, 6f),
                         color = Rgb(0, 0, 0),
                         opacity = 0.6f
                     )
@@ -828,7 +828,7 @@ class KPsdTest {
             right = 180,
             text = LayerTextData(
                 text = "Inside Folder",
-                shapeType = "box",
+                shapeType = TextShapeType.BOX,
                 boxBounds = floatArrayOf(0f, 0f, 160f, 60f),
                 transform = doubleArrayOf(1.0, 0.0, 0.0, 1.0, 20.0, 20.0),
                 left = 0f,
@@ -852,14 +852,14 @@ class KPsdTest {
                 scale = 1f,
                 stroke = listOf(
                     LayerEffectStroke(
-                        size = UnitsValue("Pixels", 5f),
+                        size = UnitsValue(Units.PIXELS, 5f),
                         color = Rgb(0, 0, 0)
                     )
                 ),
                 dropShadow = listOf(
                     LayerEffectShadow(
-                        size = UnitsValue("Pixels", 12f),
-                        distance = UnitsValue("Pixels", 4f),
+                        size = UnitsValue(Units.PIXELS, 12f),
+                        distance = UnitsValue(Units.PIXELS, 4f),
                         color = Rgb(0, 0, 0),
                         opacity = 0.5f
                     )
@@ -918,6 +918,77 @@ class KPsdTest {
         val parsedChild = parsedFolder.children!![0]
         assertEquals("Child Layer", parsedChild.name)
         assertTrue(parsedChild.effects == null || (parsedChild.effects!!.stroke == null && parsedChild.effects!!.dropShadow == null))
+    }
+
+    @Test
+    fun testPsdBuilderDSL() {
+        val width = 200
+        val height = 150
+        val bgData = ByteArray(width * height * 4) { 128.toByte() }
+        val bgPixelData = PixelData(width, height, bgData)
+
+        val doc = psd(width = width, height = height) {
+            layer("Background") {
+                top = 0
+                left = 0
+                bottom = height
+                right = width
+                imageData = bgPixelData
+            }
+
+            group("Texts", opened = true) {
+                
+                textLayer("Hello Text", textValue = "Hello World") {
+                    top = 10
+                    left = 20
+                    bottom = 50
+                    right = 180
+                    
+                    transform(1.0, 0.0, 0.0, 1.0, 20.0, 10.0)
+                    antiAlias = AntiAlias.SMOOTH
+                    
+                    style {
+                        font(name = "ArialMT")
+                        fontSize = 24.0f
+                        fillColor(0, 0, 0)
+                    }
+                    
+                    paragraphStyle {
+                        justification = Justification.CENTER
+                    }
+                }
+            }
+        }
+
+        // Verify DSL-created document parameters
+        assertEquals(width, doc.width)
+        assertEquals(height, doc.height)
+        assertEquals(2, doc.children.size)
+
+        val parsedBg = doc.children[0]
+        assertEquals("Background", parsedBg.name)
+        assertEquals(0, parsedBg.left)
+        assertEquals(width, parsedBg.right)
+
+        val parsedFolder = doc.children[1]
+        assertEquals("Texts", parsedFolder.name)
+        assertEquals(1, parsedFolder.children!!.size)
+
+        val parsedTextLayer = parsedFolder.children!![0]
+        assertEquals("Hello Text", parsedTextLayer.name)
+        assertEquals("Hello World", parsedTextLayer.text!!.text)
+        assertEquals(AntiAlias.SMOOTH, parsedTextLayer.text!!.antiAlias)
+        assertEquals(Justification.CENTER, parsedTextLayer.text!!.paragraphStyle?.justification)
+        assertEquals("ArialMT", parsedTextLayer.text!!.style?.font?.name)
+
+        // Write and read back to make sure everything serializes/deserializes properly
+        val bytes = KPsd.write(doc, compress = false)
+        val readBack = KPsd.read(bytes)
+
+        assertNotNull(readBack)
+        assertEquals(2, readBack.children.size)
+        assertEquals("Texts", readBack.children[1].name)
+        assertEquals("Hello Text", readBack.children[1].children!![0].name)
     }
 }
 

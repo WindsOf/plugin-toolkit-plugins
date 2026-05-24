@@ -255,11 +255,11 @@ class PsdWriter(initialCapacity: Int = 4096) {
                 writePascalString("", 2)
                 writeSection(2) {
                     writeFixedPoint32(info.horizontalResolution)
-                    writeUint16(if (info.horizontalResolutionUnit == "PPI") 1 else 2)
-                    writeUint16(if (info.widthUnit == "Inches") 1 else 2) // simplification
+                    writeUint16(if (info.horizontalResolutionUnit == ResolutionUnit.PPI) 1 else 2)
+                    writeUint16(if (info.widthUnit == MeasurementUnit.INCHES) 1 else 2) // simplification
                     writeFixedPoint32(info.verticalResolution)
-                    writeUint16(if (info.verticalResolutionUnit == "PPI") 1 else 2)
-                    writeUint16(if (info.heightUnit == "Inches") 1 else 2) // simplification
+                    writeUint16(if (info.verticalResolutionUnit == ResolutionUnit.PPI) 1 else 2)
+                    writeUint16(if (info.heightUnit == MeasurementUnit.INCHES) 1 else 2) // simplification
                 }
             }
         }
@@ -550,18 +550,18 @@ class PsdWriter(initialCapacity: Int = 4096) {
         props["present"] = BooleanValue(s.present)
         props["showInDialog"] = BooleanValue(s.showInDialog)
         props["Styl"] = EnumValue("FStl", when (s.position) {
-            "inside" -> "InsF"
-            "center" -> "CtrF"
+            StrokePosition.INSIDE -> "InsF"
+            StrokePosition.CENTER -> "CtrF"
             else -> "OutF"
         })
         props["PntT"] = EnumValue("FrFl", when (s.fillType) {
-            "gradient" -> "GrFl"
-            "pattern" -> "Ptrn"
+            StrokeFillType.GRADIENT -> "GrFl"
+            StrokeFillType.PATTERN -> "Ptrn"
             else -> "SClr"
         })
         props["Md  "] = EnumValue("BlnM", PsdHelpers.fromBlendModeDescriptor[s.blendMode] ?: "Nrml")
         props["Opct"] = UnitDoubleValue("#Prc", s.opacity * 100.0)
-        props["Sz  "] = UnitDoubleValue(if (s.size.units == "Pixels") "#Pxl" else "#Pnt", s.size.value.toDouble())
+        props["Sz  "] = UnitDoubleValue(if (s.size.units == Units.PIXELS) "#Pxl" else "#Pnt", s.size.value.toDouble())
         s.color?.let { props["Clr "] = buildColorDescriptor(it) }
         s.overprint?.let { props["overprint"] = BooleanValue(it) }
 
@@ -578,8 +578,8 @@ class PsdWriter(initialCapacity: Int = 4096) {
         props["Opct"] = UnitDoubleValue("#Prc", s.opacity * 100.0)
         props["uglg"] = BooleanValue(s.useGlobalLight)
         props["lagl"] = UnitDoubleValue("#Ang", s.angle.toDouble())
-        props["Dstn"] = UnitDoubleValue(if (s.distance.units == "Pixels") "#Pxl" else "#Rlt", s.distance.value.toDouble())
-        props["blur"] = UnitDoubleValue(if (s.size.units == "Pixels") "#Pxl" else "#Rlt", s.size.value.toDouble())
+        props["Dstn"] = UnitDoubleValue(if (s.distance.units == Units.PIXELS) "#Pxl" else "#Rlt", s.distance.value.toDouble())
+        props["blur"] = UnitDoubleValue(if (s.size.units == Units.PIXELS) "#Pxl" else "#Rlt", s.size.value.toDouble())
         props["Ckmt"] = UnitDoubleValue("#Prc", s.choke.value.toDouble())
         props["AntA"] = BooleanValue(s.antialiased)
         // contour missing for now
@@ -612,14 +612,14 @@ class PsdWriter(initialCapacity: Int = 4096) {
     private fun buildTextDescriptor(text: LayerTextData): DescriptorStructure {
         val props = mutableMapOf<String, DescriptorValue>()
         props["Txt "] = TextValue((text.text).replace(Regex("\\r?\\n"), "\r"))
-        props["textGridding"] = EnumValue("textGridding", if (text.gridding == "round") "Rnd " else "None")
-        props["Ornt"] = EnumValue("Ornt", if (text.orientation == "vertical") "Vrtc" else "Hrzn")
+        props["textGridding"] = EnumValue("textGridding", if (text.gridding == TextGridding.ROUND) "Rnd " else "None")
+        props["Ornt"] = EnumValue("Ornt", if (text.orientation == Orientation.VERTICAL) "Vrtc" else "Hrzn")
         props["AntA"] = EnumValue("Annt", when(text.antiAlias) {
-            "none" -> "Anno"
-            "crisp" -> "AnCr"
-            "strong" -> "AnSt"
-            "smooth" -> "AnSm"
-            "sharp" -> "antiAliasSharp"
+            AntiAlias.NONE -> "Anno"
+            AntiAlias.CRISP -> "AnCr"
+            AntiAlias.STRONG -> "AnSt"
+            AntiAlias.SMOOTH -> "AnSm"
+            AntiAlias.SHARP -> "antiAliasSharp"
             else -> "antiAliasSharp"
         })
         props["TextIndex"] = LongValue(text.index ?: 0)
@@ -638,8 +638,8 @@ class PsdWriter(initialCapacity: Int = 4096) {
     private fun buildWarpDescriptor(warp: Warp?): DescriptorStructure {
         val props = mutableMapOf<String, DescriptorValue>()
         
-        val rawStyle = warp?.style ?: "none"
-        val styleCapitalized = rawStyle.replaceFirstChar { it.uppercaseChar() }
+        val rawStyle = warp?.style ?: WarpStyle.NONE
+        val styleCapitalized = rawStyle.value.replaceFirstChar { it.uppercaseChar() }
         val warpStyleVal = if (styleCapitalized.startsWith("Warp")) {
             styleCapitalized.replaceFirstChar { it.lowercaseChar() }
         } else {
@@ -650,8 +650,8 @@ class PsdWriter(initialCapacity: Int = 4096) {
         props["warpPerspective"] = DoubleValue(warp?.perspective?.toDouble() ?: 0.0)
         props["warpPerspectiveOther"] = DoubleValue(warp?.perspectiveOther?.toDouble() ?: 0.0)
         
-        val rawRotate = warp?.rotate ?: "horizontal"
-        props["warpRotate"] = EnumValue("orientation", if (rawRotate == "vertical") "Vrtc" else "Hrzn")
+        val rawRotate = warp?.rotate ?: Orientation.HORIZONTAL
+        props["warpRotate"] = EnumValue("orientation", if (rawRotate == Orientation.VERTICAL) "Vrtc" else "Hrzn")
         props["uOrder"] = LongValue(warp?.uOrder ?: 0)
         props["vOrder"] = LongValue(warp?.vOrder ?: 0)
 
@@ -661,10 +661,10 @@ class PsdWriter(initialCapacity: Int = 4096) {
             name = "",
             classID = "Rctn",
             properties = mapOf(
-                "Top " to UnitDoubleValue("Pixels", bounds?.top?.value?.toDouble() ?: 0.0),
-                "Left" to UnitDoubleValue("Pixels", bounds?.left?.value?.toDouble() ?: 0.0),
-                "Btom" to UnitDoubleValue("Pixels", bounds?.bottom?.value?.toDouble() ?: 0.0),
-                "Rght" to UnitDoubleValue("Pixels", bounds?.right?.value?.toDouble() ?: 0.0)
+                "Top " to UnitDoubleValue(bounds?.top?.units?.value ?: "Pixels", bounds?.top?.value?.toDouble() ?: 0.0),
+                "Left" to UnitDoubleValue(bounds?.left?.units?.value ?: "Pixels", bounds?.left?.value?.toDouble() ?: 0.0),
+                "Btom" to UnitDoubleValue(bounds?.bottom?.units?.value ?: "Pixels", bounds?.bottom?.value?.toDouble() ?: 0.0),
+                "Rght" to UnitDoubleValue(bounds?.right?.units?.value ?: "Pixels", bounds?.right?.value?.toDouble() ?: 0.0)
             )
         )
 
