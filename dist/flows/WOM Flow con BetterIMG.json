@@ -1,5 +1,7 @@
 {
     "name": "WOM Flow con BetterIMG",
+    "version": "1.0.1",
+    "description": "Flow per WOM con il miglioramento di immagini",
     "nodes": [
         {
             "type": "capability",
@@ -1476,7 +1478,5 @@
             "targetNodeId": 3,
             "targetPortId": "outFolder"
         }
-    ],
-    "version": "1.0.0",
-    "description": null
+    ]
 }

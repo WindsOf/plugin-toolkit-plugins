@@ -1,5 +1,7 @@
 {
     "name": "WOM Flow",
+    "version": "1.0.1",
+    "description": "Flow per WOM senza miglioramento delle immagini",
     "nodes": [
         {
             "type": "system",
@@ -1217,7 +1219,5 @@
             "targetNodeId": 17,
             "targetPortId": "inputFolder"
         }
-    ],
-    "version": "1.0.0",
-    "description": null
+    ]
 }
