@@ -1,6 +1,6 @@
 {
     "name": "WOM Flow con BetterIMG",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "Flow per WOM con il miglioramento di immagini",
     "nodes": [
         {

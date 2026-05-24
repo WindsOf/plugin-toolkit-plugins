@@ -1,6 +1,6 @@
 {
     "name": "WOM Flow",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "Flow per WOM senza miglioramento delle immagini",
     "nodes": [
         {

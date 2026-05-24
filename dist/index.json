@@ -88,18 +88,18 @@
     {
       "name": "WOM Flow",
       "fileName": "WOM_Flow.json",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "description": "Flow per WOM senza miglioramento delle immagini",
-      "hash": "66c1f4edaf3202da895fa39951f8663fd8a59dedb9e2a4dc441f905f4cace5f9",
-      "signature": "j0BOW5HqfFREz1mOAEYE9xQ3IB6eLkVG2eMAtN4TtO70Hl4uGK0JQhPweyKMhUfxLZ4AWFM4CeLO0yp2GP5PVbXqg5n7Ge6d1YJ34gKGvmqJg6n7m++lOLc2ZPI+N+RtFlcLWwfP/oDo601Jh4k+OToHI9WaAbkBbLF1v4q+gSnLbu2Q1MoOjdxjmCJl+JQJvh4fYif93Q7cUHSMnSC16gleJc+5LQqhO1OY57Lrxxe1Ck4nsuV8S+0r1TFHc/sSy9XBhKmgAN31taZXwnNZS/2rfOwg/ffwt3f6bLDDMNz6Sgtfkc+0Pqw1vT6IJV3KDcnQNXFy5MKBF1sbe7N4uw=="
+      "hash": "d28f6dbfb330439fe26841628d8a38dfe509fa00c6a810d8ff0dbc07504edcb9",
+      "signature": "Q88a1H8qGYRrpJBHFDLX7nNVoE58qRh2mxXai4sixPBh/lTNoFnbgkRgVNu0/YOr6iLmk6rpG6vPvoX7QuBOWWcUSgy5lsWE2bVj/daFH+PD/1rd6GMgQkWME36Aarl3amPEGXEgl+sXGPj7H4JeQPR7sylOqZJp2fbxkqIdmw4juX323mi4S1nwITzHpgu6EfeCwR0YKScnbZzqzusmNbAFUAeleZqrIaT+DboOFPnxZy7I7/XysiTy9zgWTN/MDvHBGlYLI+TXueC/8DZfkc48cCdKvTYgZS2M6lv+zC+aT9eb5ii6WDSIs9+hVY3T6NO+Fr/6A2WL8ZoXYm2FcQ=="
     },
     {
       "name": "WOM Flow con BetterIMG",
       "fileName": "WOM_Flow_con_BetterIMG.json",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "description": "Flow per WOM con il miglioramento di immagini",
-      "hash": "3c3dafa5103e5f3fb58862bd7b730f0145239ddc1eb15a7c8c05736a62865c72",
-      "signature": "lvTuV0MbMREgUpmIFs9n6R1u26H24/oNLXbPbmnvje7EJDmFu9TKjF/w8QEJ+9VYhRRMgTz7cg69SCrq6RI/RSJj02rPm/JmKhiSOJ6uAVmumRYsFCGy1/Ym+vMbk4Atp2A7XHJ9aNe2MBw5h0k9kpiUiMl8uDio1W0yV3Wf888j7+wVNNt6j8OgyY1G+VFA9cdM63RMml3YaB1VYfq+7ez1kcIZu8IBtkaxlrmkEb4aAeP68QhSNGmJU2nZhkZ0Zu86owaylvOjLU0kpyqP5k5Qye0FE+BAPp4WhOgRfqjzs7jWUcoQmHYNqJNDond6GBnSoCpbbsiIDpevTgPI5A=="
+      "hash": "02eaca1cb6b49ca072c74effbc0fd426161cde78a46454057e15e780a9290117",
+      "signature": "W1PpjAaHnuOhHFsxO6cO6eWpsoNXDUa4ubmQNmZnoreNANGVUYOJWZiiy28TNzOyFuUEq/CIFPtokK4EiLPYptKHhkE+NS4r3P+i8Fq3tuYyKt2TjhNNNb3FjfFJuKftAGrKWASNxAzSgONUicifuEXKRyaTOurfwd4DUwEeqsJyxe6HoBNFpgfeZpgcIeRSGjADF2M/4RFEf0zjq9uclAw8qMCgZtI5N6jI7MkPdYMc/Nj2NJ/v8VcDduX5etT6lSnNx4cRt46n2YMSgoA1VS7vm/JxoACsmcraAGHi2AVjTEt6eaGDXFstYPtMS2tsafuBhQjgxWnXU2PKqxyq0A=="
     }
   ],
   "signPublicKey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtBeECp5qqAsmv+6EqOOrniZet5dSiuaTQqhnNwp2Ij/LxPn6NaHTRegIvKDmbVKZhnVz2nWkAvRNPjieJG+anZPks1RtMIGSnQndA+XbrU6JzDGo8PiQhkPdr+2604NHrTnY0SRgBtSHwOKFcDUOFOyE1ZbDTgXvii5NnfFlvALwrpRj2NsqZwdnX5oAcd4boAHLGU9Z4yWocYHP29/6ACshtgI0ysJNTsDIFnccScr/O+0vXZyHcr3vrC6esogarc/1qRxRQbH0QKwTliqUWb/ax4z0bZxc3X76iF4A88wpKWxCSLlM9jX7uq14PgWTPBi9XpUvasAVh6qzDpoThQIDAQAB",
