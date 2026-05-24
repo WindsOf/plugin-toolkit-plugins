@@ -1,4 +1,4 @@
-Version: 4.0.0
+Version: 4.0.1
 Date: 2026-05-24
 Changed:
   - Fixed an issue where intermediate debugging files were saved into the invisible internal plugin workspace folder. They are now saved directly into the user-specified `outputDir` (or alongside the source images), making the "Keep intermediate files" option actually usable.

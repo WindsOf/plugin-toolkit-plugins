@@ -50,10 +50,17 @@ data class PsdPayload(
 @PluginInfo(
     id = "com.wip.psdbuilder",
     name = "PSD Builder",
-    version = "4.0.0",
+    version = "4.0.1",
     description = "A plugin that builds layered PSD files using PSD_builder.exe."
 )
 class PSDBuilderPlugin {
+    init {
+        try {
+            IIORegistry.getDefaultInstance().registerServiceProvider(WebPImageReaderSpi())
+        } catch (e: Exception) {
+            // Ignore
+        }
+    }
 
     @PluginSetup
     suspend fun setup(context: PluginContext): Result<Unit> {
@@ -126,6 +133,8 @@ class PSDBuilderPlugin {
     ): String {
         val logger = context.logger
         logger.info("Starting buildPsdFromInputs for $imagePath")
+        
+        IIORegistry.getDefaultInstance().registerServiceProvider(WebPImageReaderSpi())
 
         val inputFile = File(imagePath)
         if (!inputFile.exists()) {
@@ -221,6 +230,8 @@ class PSDBuilderPlugin {
         val logger = context.logger
         logger.info("Starting buildPsdForChapter for $inputFolder")
         val progressReporter = context.progress
+        
+        IIORegistry.getDefaultInstance().registerServiceProvider(WebPImageReaderSpi())
         
         val folder = File(inputFolder)
         if (!folder.exists() || !folder.isDirectory) {
