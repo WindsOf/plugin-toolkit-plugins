@@ -56,7 +56,7 @@ class KoogOcrService(private val context: PluginContext) {
     private suspend fun <T> retryWithBackoff(
         block: suspend () -> T
     ): T {
-        val delaysMs = listOf(5000L, 10000L, 15000L) // Max 3 retries
+        val delaysMs = listOf(10000L, 10000L, 10000L, 10000L, 10000L, 10000L, 10000L) // Max 7 retries
         val maxAttempts = delaysMs.size + 1
         var lastException: Throwable? = null
 

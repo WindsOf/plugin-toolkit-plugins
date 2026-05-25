@@ -1,3 +1,19 @@
+Version: 1.3.0
+Date: 2026-05-25
+Added:
+  - Introdotta la feature "Context Images": passando le immagini originali del manhwa all'intelligenza artificiale, essa potrà utilizzarle come contesto visivo per tradurre in modo più preciso.
+  - La nuova modalità carica fino a 5 immagini in simultanea per richiesta ed è attivabile opzionalmente dalla UI.
+-------------------------------------------------------------------------------------------------
+Version: 1.2.4
+Date: 2026-05-25
+Added:
+  - Aggiunto il supporto al modello `Gemini 3.5 Flash` come opzione IA.
+-------------------------------------------------------------------------------------------------
+Version: 1.2.1
+Date: 2026-05-25
+Changed:
+  - Aumentato il limite massimo di retry a 5 tentativi consecutivi (con ritardi progressivi).
+-------------------------------------------------------------------------------------------------
 Version: 1.2.0
 Date: 2026-05-24
 Added:

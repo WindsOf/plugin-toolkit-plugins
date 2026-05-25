@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import java.io.File
 
 @Serializable
 data class TranslationResponse(
@@ -59,7 +60,7 @@ class KoogAITranslatorService(private val context: PluginContext) {
     private suspend fun <T> retryWithBackoff(
         block: suspend () -> T
     ): T {
-        val delaysMs = listOf(5000L, 10000L, 15000L) // Max 3 retries
+        val delaysMs = listOf(5000L, 10000L, 10000L, 10000L, 15000L) // Max 5 retries
         val maxAttempts = delaysMs.size + 1
         var lastException: Throwable? = null
         for (attempt in 1..maxAttempts) {
@@ -88,12 +89,17 @@ class KoogAITranslatorService(private val context: PluginContext) {
         }
     }
 
+    private data class TextEntry(val index: Int, val text: String, val pageName: String)
+
     suspend fun performTranslation(
         input: List<String>,
         dictionary: String,
         apiKey: String,
         useStructuredOutput: Boolean = true,
-        modelId: String
+        modelId: String,
+        pageNames: List<String>? = null,
+        inputFolder: String? = null,
+        useContextImages: Boolean = false
     ): List<String> {
         if (input.isEmpty()) return emptyList()
 
@@ -107,29 +113,76 @@ class KoogAITranslatorService(private val context: PluginContext) {
         }
 
         // ── Chunking & Concurrency ──────────────────────────────────────
-        val chunks = input.chunked(50)
-        logger.info("Split ${input.size} texts into ${chunks.size} chunks of max 50 items.")
+        val results = arrayOfNulls<String>(input.size)
+
+        val isContextModeValid = useContextImages && pageNames != null && inputFolder != null && pageNames.size == input.size
         
-        val results = mutableListOf<String>()
-        
+        if (useContextImages && !isContextModeValid) {
+            logger.warn("Context Images enabled but missing/invalid inputs (pageNames or inputFolder mismatch). Falling back to text-only mode.")
+        }
+
         coroutineScope {
-            val deferreds = chunks.mapIndexed { index, chunk ->
-                async {
-                    concurrentSemaphore.withPermit {
-                        acquireRateLimit()
-                        translateChunkWithRetry(chunk, dictionary, effectiveApiKey, useStructuredOutput, modelId, index)
+            if (isContextModeValid && pageNames != null && inputFolder != null) {
+                // Image Context Mode
+                val entries = input.mapIndexed { index, text -> TextEntry(index, text, pageNames[index]) }
+                val groupedByPage = entries.groupBy { it.pageName }
+                val uniquePages = groupedByPage.keys.toList()
+
+                // LLMs support max 5 images per request usually
+                val pageChunks = uniquePages.chunked(5)
+                logger.info("Context mode active. Split ${uniquePages.size} images into ${pageChunks.size} chunks.")
+
+                val deferreds = pageChunks.mapIndexed { index, pageChunk ->
+                    async {
+                        concurrentSemaphore.withPermit {
+                            acquireRateLimit()
+                            val chunkEntries = pageChunk.flatMap { groupedByPage[it] ?: emptyList() }
+                            val chunkTexts = chunkEntries.map { it.text }
+                            val images = pageChunk.map { File(inputFolder, it) }.filter { it.exists() }
+                            
+                            val translations = translateChunkWithRetry(
+                                chunkTexts, images, dictionary, effectiveApiKey, useStructuredOutput, modelId, index
+                            )
+
+                            // Place translations in correct original indices
+                            chunkEntries.forEachIndexed { i, entry ->
+                                results[entry.index] = translations.getOrNull(i) ?: "[Translation Missing]"
+                            }
+                        }
                     }
                 }
+                deferreds.awaitAll()
+            } else {
+                // Text-only mode (Classic)
+                val chunks = input.chunked(50)
+                logger.info("Text mode. Split ${input.size} texts into ${chunks.size} chunks of max 50 items.")
+                
+                val deferreds = chunks.mapIndexed { index, chunk ->
+                    async {
+                        concurrentSemaphore.withPermit {
+                            acquireRateLimit()
+                            val translations = translateChunkWithRetry(
+                                chunk, null, dictionary, effectiveApiKey, useStructuredOutput, modelId, index
+                            )
+                            val startIndex = index * 50
+                            translations.forEachIndexed { i, translatedText ->
+                                if (startIndex + i < results.size) {
+                                    results[startIndex + i] = translatedText
+                                }
+                            }
+                        }
+                    }
+                }
+                deferreds.awaitAll()
             }
-            // Await all chunks and flatten
-            results.addAll(deferreds.awaitAll().flatten())
         }
         
-        return results
+        return results.map { it ?: "" }
     }
 
     private suspend fun translateChunkWithRetry(
         chunk: List<String>,
+        images: List<File>?,
         dictionary: String,
         apiKey: String,
         useStructuredOutput: Boolean,
@@ -167,9 +220,13 @@ class KoogAITranslatorService(private val context: PluginContext) {
             """.trimIndent()
         } else ""
 
+        val imageContextRule = if (!images.isNullOrEmpty()) {
+            "\nContext Images are provided. Use them to understand the scene, characters, and tone, but DO NOT transcribe them. Only translate the strings provided."
+        } else ""
+
         val promptInstructions = """
             You are a professional Manhwa/Manga translator. 
-            Translate the following list of strings into natural, expressive Italian.
+            Translate the following list of strings into natural, expressive Italian.$imageContextRule
             
             GUIDELINES:
             1. Maintain the exact same order as the input list.
@@ -213,6 +270,13 @@ class KoogAITranslatorService(private val context: PluginContext) {
                 params = llmParams
             ) {
                 user {
+                    images?.forEach { img ->
+                        try {
+                            image(kotlinx.io.files.Path(img.absolutePath))
+                        } catch (e: Exception) {
+                            logger.warn("Could not attach image ${img.name}: ${e.message}")
+                        }
+                    }
                     text(promptInstructions + "\n\nStrings to translate:\n" + chunk.joinToString("\n") { "[TEXT]: $it" })
                 }
             }

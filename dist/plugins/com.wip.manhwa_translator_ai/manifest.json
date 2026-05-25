@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.manhwa_translator_ai",
         "name": "Manhwa Translator AI",
-        "version": "1.2.0",
+        "version": "1.3.0",
         "description": "Translate text from Manhwa/Manga into Italian using Google AI via Koog"
     },
     "requirements": {
@@ -40,8 +40,36 @@
                         "className": "com.wip.manhwaTranslatorAI.AIModel",
                         "options": [
                             "GEMMA_26B",
-                            "GEMMA_31B"
+                            "GEMMA_31B",
+                            "GEMINI_3_5_FLASH"
                         ]
+                    }
+                },
+                "pageNames": {
+                    "defaultValue": [],
+                    "description": "List of page names matching the input texts (from OCR)",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
+                    }
+                },
+                "inputFolder": {
+                    "defaultValue": "",
+                    "description": "Path to the folder containing the images",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "useContextImages": {
+                    "defaultValue": false,
+                    "description": "Send images to AI for visual context (Requires Gemini 1.5/Gemma)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "BOOLEAN"
                     }
                 }
             },
@@ -88,6 +116,34 @@
     },
     "changelog": {
         "releases": [
+            {
+                "version": "1.3.0",
+                "date": "2026-05-25",
+                "categories": {
+                    "Added": [
+                        "Introdotta la feature \"Context Images\": passando le immagini originali del manhwa all'intelligenza artificiale, essa potrà utilizzarle come contesto visivo per tradurre in modo più preciso.",
+                        "La nuova modalità carica fino a 5 immagini in simultanea per richiesta ed è attivabile opzionalmente dalla UI."
+                    ]
+                }
+            },
+            {
+                "version": "1.2.4",
+                "date": "2026-05-25",
+                "categories": {
+                    "Added": [
+                        "Aggiunto il supporto al modello `Gemini 3.5 Flash` come opzione IA."
+                    ]
+                }
+            },
+            {
+                "version": "1.2.1",
+                "date": "2026-05-25",
+                "categories": {
+                    "Changed": [
+                        "Aumentato il limite massimo di retry a 5 tentativi consecutivi (con ritardi progressivi)."
+                    ]
+                }
+            },
             {
                 "version": "1.2.0",
                 "date": "2026-05-24",

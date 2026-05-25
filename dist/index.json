@@ -28,22 +28,22 @@
     {
       "name": "Manhwa Translator AI",
       "pkg": "com.wip.manhwa_translator_ai",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "fileName": "manhwaTranslatorAI.jar",
       "description": "Translate text from Manhwa/Manga into Italian using Google AI via Koog",
       "targetAppVersion": "1.0.0",
-      "hash": "de090dd5864f686a8fe0aa7d6d269b9ef4747b5ba874d88eb2fcb5d3ea639a6e",
-      "signature": "WYenV/nwQwOCPEnCIu2GM++oJhxmGCCa7XfLZwoeWK50U3P29L/Uu2I5gskr6VgR5BTgO66fYzor34LJXD6zDW4JUSdVAVds/nW5I8jqUi1QgUMHdZv4jHwNQA0tAp1uTa4bJ8syQBewVpWIQYQK8YEkVp9JFYCOu7j5sX9ITYiXvC68N3UDvAbMGDug+ILgGPIZh4nBCRRFCRAaVH8A35mFx6WVt7fUIFJn7JAfAHRMZV0OfwXd6z1TAXaDcekXA3U/wOoztaj9MhjeL0PgRQbHOnZR6hlACh5DH+cvLl4Ben3zE09LrFTxOkiJjlOF8JNob55JbTVNxdKnYtjIVQ=="
+      "hash": "778304c6c6ddc4b1823a0af890153b61845302d25b625fef663aafb98635c8cf",
+      "signature": "jDg198bhGA3xAF2sLUZWZAZ4uX+ptX3JdUH+hz0SZZSG50ECBSOEgK5hNQwDmWEo5wcJo5xw6hzZf4nmKrQs3lTOldXfZ+69j8GBmjughwWJJQZSjAzuEnHGLnhnwVHHId723XYTBmORROyW4WXmpC8FtneHbyYTzZ427nWJKrlQaZmcHb3oeSJfJw3lvCr4dG8BUatN5sugPHnRuYmwWJTTPhBmY1Yz7HRU8RKIs3NtQ3fMC3dSoHm7ET/RMEBDWsLsYrCIZzSy9AA77s+2MbGNGBkY2YyaFhmgI7wb82uQsR7r0Zh4882mb/YRXLmF0be0TP1QugdIHHNfk9sffA=="
     },
     {
       "name": "OCR IA",
       "pkg": "com.wip.ocr_ia",
-      "version": "2.3.2",
+      "version": "2.3.4",
       "fileName": "OCR_IA.jar",
       "description": "Advanced OCR plugin using Google AI (Gemma 4 31B/26B) via Koog",
       "targetAppVersion": "1.0.0",
-      "hash": "91be5db32b5448b01eaedf7c25d3dd05e2c91d869dfe17668168c926dd87e6dc",
-      "signature": "Ziha+B/qN5NN4yQUlEyfKmigxurqcQ6km56QrsUVUJ1YDTpZ0Rt0SC4nftIN7KMHHPp6qzo/pJ7jYbo4x+mXLIhMAIWs3p6f5t8FH9WKQlxAkF2s4N5A+U+v79n4VTyWLKvaQqydBoY/tM9iXq3Q3KfEoA8y0gp5y1yorycTY52BdPW+Ad76qIwJi/zlQ9pJx3atFrmJsUC/qyx8UYmSk2mWjd+F7hqM9zTO5UBr1pFAsO+5nBBEETvHoCK+vGDOtMiNuHXqF0VF4bNnwgsraTucFf+Rkl+y6cj2M7gvM9YHMudDtQOj/OrhD8T3HiTrQLPrjRTKD7OejVBk0V7r7A=="
+      "hash": "81c0ac4dc27f7caca1ae21236b5dac79c8571fd6b15560d4b64afaaa4cf40a84",
+      "signature": "k2Yso7NGoud0Sr95itPPvourWEwlbsrfivCAaO0dyn4919ZX7kPv3dyR9aa+8PvXPH1cFXRKcSVRAOg3czi8r8or29CvM69lD1ZL6B6qFismOz32B3JBBTRi3esmaTFCg25OZe4yjzN6lAf54ZaiyWfkE/6PW8rsgNH8UkQODN9ekH3bSiX0qprbFunhz+fHkFDlvg8W59TKtuGOsa1pH2lTgCel7uFO56Tt0Wh197EjelLYkczIddfNUebC6+9e0b9T7VHn8leQuQ9BGbLh0wZlcPpLSSav3eML2AMOzhujq3SM8w/KbhH0nuOPCEpdMhXA9omxer9v7hTRAVnAtg=="
     },
     {
       "name": "PSD Builder",
