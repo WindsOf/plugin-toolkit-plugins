@@ -27,6 +27,7 @@ turbine = "1.2.1"
 buildkonfig = "0.19.0"
 koog = "0.8.0"
 openpdf = "3.0.5"
+kpsd = "1.0.0"
 
 
 
@@ -92,6 +93,7 @@ kermit = { module = "co.touchlab:kermit", version.ref = "kermit" }
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
 # Github authentication
 plugin-api = { module = "org.wip.plugintoolkit:plugin-api", version.ref = "plugin-toolkit" }
+kpsd = { module = "com.wip:kpsd", version.ref = "kpsd" }
 # JitPack
 # plugin-api = { module = "com.github.Wip-Sama:plugin-toolkit", version.ref = "plugin-toolkit" }
 
