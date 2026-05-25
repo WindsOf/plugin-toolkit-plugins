@@ -194,11 +194,12 @@ class KoogAITranslatorService(private val context: PluginContext) {
         val model = LLModel(
             provider = LLMProvider.Google,
             id = modelId,
-            capabilities = listOf(
-                LLMCapability.Completion,
-                LLMCapability.Temperature,
-                LLMCapability.Thinking
-            ),
+            capabilities = buildList {
+                add(LLMCapability.Completion)
+                add(LLMCapability.Temperature)
+                add(LLMCapability.Thinking)
+                if (!images.isNullOrEmpty()) add(LLMCapability.Vision.Image)
+            },
             contextLength = 100000,
         )
 
