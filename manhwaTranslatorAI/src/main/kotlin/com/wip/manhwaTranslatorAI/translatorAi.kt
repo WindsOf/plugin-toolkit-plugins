@@ -33,7 +33,7 @@ enum class AIModel(val id: String) {
 @PluginInfo(
         id = "com.wip.manhwa_translator_ai",
         name = "Manhwa Translator AI",
-        version = "1.3.0",
+        version = "1.3.1",
         description = "Translate text from Manhwa/Manga into Italian using Google AI via Koog"
 )
 class TranslatorAI(val settings: TranslatorAISettings) {

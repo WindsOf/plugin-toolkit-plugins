@@ -1,3 +1,8 @@
+Version: 1.3.1
+Date: 2026-05-25
+Fixed:
+  - Aggiunta la capability `Vision.Image` al modello LLM quando vengono passate immagini in modalità Context Images (fix errore "non supporta le immagini").
+-------------------------------------------------------------------------------------------------
 Version: 1.3.0
 Date: 2026-05-25
 Added:
