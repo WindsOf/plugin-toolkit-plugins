@@ -21,7 +21,12 @@ async function generatePSD(jsonPath, outputPath) {
 
     const childrenNodes = [
         {
-            name: 'Background',
+            name: 'background',
+            imageData: canvasData,
+            left: 0, top: 0, right: canvasData.width, bottom: canvasData.height
+        },
+        {
+            name: 'clean',
             imageData: canvasData,
             left: 0, top: 0, right: canvasData.width, bottom: canvasData.height
         }
@@ -48,8 +53,10 @@ async function generatePSD(jsonPath, outputPath) {
         
         const strokeSize = txtConfig.strokeSize !== undefined ? txtConfig.strokeSize : 3;
 
+        const layerName = textContent.length > 20 ? textContent.substring(0, 20) : (textContent || `Testo ${index}`);
+
         childrenNodes.push({
-            name: `Testo ${index}`,
+            name: layerName,
             left: left,
             top: top,
             right: right,

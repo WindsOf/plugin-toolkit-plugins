@@ -38,22 +38,22 @@
     {
       "name": "OCR IA",
       "pkg": "com.wip.ocr_ia",
-      "version": "2.3.4",
+      "version": "2.3.5",
       "fileName": "OCR_IA.jar",
       "description": "Advanced OCR plugin using Google AI (Gemma 4 31B/26B) via Koog",
       "targetAppVersion": "1.0.0",
-      "hash": "81c0ac4dc27f7caca1ae21236b5dac79c8571fd6b15560d4b64afaaa4cf40a84",
-      "signature": "k2Yso7NGoud0Sr95itPPvourWEwlbsrfivCAaO0dyn4919ZX7kPv3dyR9aa+8PvXPH1cFXRKcSVRAOg3czi8r8or29CvM69lD1ZL6B6qFismOz32B3JBBTRi3esmaTFCg25OZe4yjzN6lAf54ZaiyWfkE/6PW8rsgNH8UkQODN9ekH3bSiX0qprbFunhz+fHkFDlvg8W59TKtuGOsa1pH2lTgCel7uFO56Tt0Wh197EjelLYkczIddfNUebC6+9e0b9T7VHn8leQuQ9BGbLh0wZlcPpLSSav3eML2AMOzhujq3SM8w/KbhH0nuOPCEpdMhXA9omxer9v7hTRAVnAtg=="
+      "hash": "a82a3024e3efa69d7f034e2ba77f931db3ef50cbd3cca52eab9c2852a6d084a1",
+      "signature": "qIx4M3gzSyfQb9Ld60x6/NRHlheMI8MjENSk93AiV2kPgP/WqkTmgNmgsGaNpa8Cf1oE+1638++FXtunvRm4SDYD7mIr9M9adGRFNLG1PBgCtEK5PJV7vjKuP+RNIJK3Cdo0wkOK+QdJrkmZ7wOANdX5Gr9miMgZtqSTE8E8Xs507rIvcUaTMAUMv3vgiAuraxRbRHyqQJNk4BmsA0f6qBcfG2e30I7h7fJrZ2JVXz3ToxoRSPbwRqAPIUovBRMdqg9+c0D8Cz5hblgkxZADu804gY8GoruiEqBtJ5XAJqSXZNQDf58M0ue87ijx4R/0FGS4E92drQPSgKwLdU5OPQ=="
     },
     {
       "name": "PSD Builder",
       "pkg": "com.wip.psdbuilder",
-      "version": "4.1.0",
+      "version": "4.2.0",
       "fileName": "PSD_builder.jar",
       "description": "A plugin that builds layered PSD files using PSD_builder.exe.",
       "targetAppVersion": "1.0.0",
-      "hash": "ece56068276e254d93c81a9fec108119f798741d3162466f776ecfb1221e190e",
-      "signature": "Y1Bod+4b8zrO4pT0PW49MC/GDZ0UYw83JkBKoK9sfPcZwjZHQrU1KGOI14cr90og2Skled9gyD1se9WCZE9dzGsVcxfxVUM/d9jZ62QqwqeiiYlDkLT/3V5rfOHa8kLllxUaCLobV9X/VVAK2WmhtVeuPB8liGNqeCn4iXawv5kknXPjWTbmtQ6GBs9RDyjezTrXQgpVyWt75xGLVLlUlislWGs6DDlCOd+k9ZZMnWd6v92KzvrBjO5GPKjFZj1IOQspks5uQYOvem3hvkcui7NYNMWOWO5drAtATRArR83KSI2QpaxyH3K6xhFP0nu8+J+9tQUxdoPiKPvfaUV3+Q=="
+      "hash": "5639f5ccc49d4a0d9b5f4a957e6c2382b14def2921dc3d8a888c9ada1db0e0a7",
+      "signature": "quVTklPX4FMzAItyALxvAmaLNq+Spn00/Ys1wr5T1myf+Q9EZCqNcP+Fqby67ixHCR5UMR3dv1+SJczZc7ZhNLEKCCGIOPUAo8p/0Z50j1Boj0NCpZOa8zYdFnpVbq6mZ7pzWsGfa+PunXRdL0ejA1p7Fe6WUnAyl2Ep0d1JDMsnYNfE1SdQQEkLw9iFOZUJpITQDnFz7dPH6AoYCi6H1hsJ2GEtukNZi6tg76PEeOzZSSq1pZG7SGkbpQC1L9v8IFOoYYzinIee+eAEGcur+GRQHKx/0I55WdeDO4TvwqxSuNLzPkMVm5wzStVbBItdq+vfQX/lMXuicLLTt1TF/Q=="
     },
     {
       "name": "PSD Builder Native",

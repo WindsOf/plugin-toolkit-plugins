@@ -1,3 +1,8 @@
+Version: 2.3.5
+Date: 2026-05-29
+Changed:
+  - Aggiornato il prompt per ignorare gli SFX/onomatopee disegnati direttamente sull'artwork e fuori dai balloon.
+-------------------------------------------------------------------------------------------------
 Version: 2.3.4
 Date: 2026-05-25
 Changed:

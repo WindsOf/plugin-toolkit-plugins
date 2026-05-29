@@ -172,7 +172,8 @@ class KoogOcrService(private val context: PluginContext) {
 
         // ── Prompt ─────────────────────────────────────────────────────
         val promptInstructions =
-            "Analyze this comic panel. Locate ALL areas containing text (speech bubbles, captions, etc.). " +
+            "Analyze this comic panel. Locate ALL areas containing text (speech bubbles, captions, and text boxes). " +
+            "Do NOT transcribe sound effects (SFX) or onomatopoeia that appear OUTSIDE of speech bubbles (e.g. drawn directly on the artwork). " +
             "For each text area provide:\n" +
             " 1. The bounding box of the TEXT ITSELF (not the balloon outline).\n" +
             " Express coordinates as FRACTIONS of the image dimensions, between 0.0 and 1.0:\n" +
