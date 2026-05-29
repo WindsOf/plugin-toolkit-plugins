@@ -112,6 +112,14 @@ class KoogAITranslatorService(private val context: PluginContext) {
             throw IllegalArgumentException(msg)
         }
 
+        // ── Dictionary Handling ─────────────────────────────────────────
+        val dictionaryContent = try {
+            val file = File(dictionary)
+            if (file.exists() && file.isFile) file.readText() else dictionary
+        } catch (e: Exception) {
+            dictionary
+        }
+
         // ── Chunking & Concurrency ──────────────────────────────────────
         val results = arrayOfNulls<String>(input.size)
 
@@ -127,21 +135,40 @@ class KoogAITranslatorService(private val context: PluginContext) {
                 val entries = input.mapIndexed { index, text -> TextEntry(index, text, pageNames[index]) }
                 val groupedByPage = entries.groupBy { it.pageName }
                 val uniquePages = groupedByPage.keys.toList()
+                
+                val pageChunks = mutableListOf<List<TextEntry>>()
+                var currentChunk = mutableListOf<TextEntry>()
+                var currentImagesCount = 0
+                
+                for (page in uniquePages) {
+                    val pageEntries = groupedByPage[page] ?: emptyList()
+                    
+                    // Flush if adding this page would exceed 5 images OR 50 texts (and the chunk is already not empty)
+                    if (currentChunk.isNotEmpty() && (currentImagesCount + 1 > 5 || currentChunk.size + pageEntries.size > 50)) {
+                        pageChunks.add(currentChunk)
+                        currentChunk = mutableListOf()
+                        currentImagesCount = 0
+                    }
+                    
+                    currentChunk.addAll(pageEntries)
+                    currentImagesCount++
+                }
+                if (currentChunk.isNotEmpty()) {
+                    pageChunks.add(currentChunk)
+                }
 
-                // LLMs support max 5 images per request usually
-                val pageChunks = uniquePages.chunked(5)
-                logger.info("Context mode active. Split ${uniquePages.size} images into ${pageChunks.size} chunks.")
+                logger.info("Context mode active. Split ${entries.size} texts into ${pageChunks.size} chunks (max 50 texts/5 images).")
 
-                val deferreds = pageChunks.mapIndexed { index, pageChunk ->
+                val deferreds = pageChunks.mapIndexed { index, chunkEntries ->
                     async {
                         concurrentSemaphore.withPermit {
                             acquireRateLimit()
-                            val chunkEntries = pageChunk.flatMap { groupedByPage[it] ?: emptyList() }
                             val chunkTexts = chunkEntries.map { it.text }
-                            val images = pageChunk.map { File(inputFolder, it) }.filter { it.exists() }
+                            val uniqueChunkPages = chunkEntries.map { it.pageName }.distinct()
+                            val images = uniqueChunkPages.map { File(inputFolder, it) }.filter { it.exists() }
                             
                             val translations = translateChunkWithRetry(
-                                chunkTexts, images, dictionary, effectiveApiKey, useStructuredOutput, modelId, index
+                                chunkTexts, images, dictionaryContent, effectiveApiKey, useStructuredOutput, modelId, index
                             )
 
                             // Place translations in correct original indices
@@ -162,7 +189,7 @@ class KoogAITranslatorService(private val context: PluginContext) {
                         concurrentSemaphore.withPermit {
                             acquireRateLimit()
                             val translations = translateChunkWithRetry(
-                                chunk, null, dictionary, effectiveApiKey, useStructuredOutput, modelId, index
+                                chunk, null, dictionaryContent, effectiveApiKey, useStructuredOutput, modelId, index
                             )
                             val startIndex = index * 50
                             translations.forEachIndexed { i, translatedText ->
@@ -217,7 +244,7 @@ class KoogAITranslatorService(private val context: PluginContext) {
             {
               "translations": ["string1", "string2", ...]
             }
-            Do not include any other text, explanations, or markdown formatting outside of the JSON block if possible.
+            Do not include any other text, explanations, or markdown formatting outside of the JSON block.
             """.trimIndent()
         } else ""
 

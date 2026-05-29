@@ -28,12 +28,12 @@
     {
       "name": "Manhwa Translator AI",
       "pkg": "com.wip.manhwa_translator_ai",
-      "version": "1.3.1",
+      "version": "1.3.3",
       "fileName": "manhwaTranslatorAI.jar",
       "description": "Translate text from Manhwa/Manga into Italian using Google AI via Koog",
       "targetAppVersion": "1.0.0",
-      "hash": "797dddb96306d6ad0d6b535104a766b4da7abf5a08b934de53bfdd91642ef11f",
-      "signature": "OMORgTSzDM3Yvh9NCksWZAw6vVWMkMTZZsCIV75xnuToUFL2F6EwLj5Pms0P/HhrqJXqezGwNENGsVLuQ7pPYGWX31HfDKOq3BlZlztCM4eFFFZPaQXekKeHb+I8KJwpZcUtIpmhEdOpGQ8mHTjhw31lC0b7oAicrVLi2mPmCYeSS2l55IUqGOlJu1KB8NQWMZgiXxc3mvp3zhGdgYMiayNnnMH8v1GZpZPSYXPr34GUiEw1mpSSviUoiR7WU4MVxZkLaJZJXXksjXoYTQReB4feZQoV/tMz/dY8AygP0GKFWB4ajXlVf7v5eIB+6f8MbcfW/ZzwCL3dxAbxRn0c1A=="
+      "hash": "20163dbd720ce0f74e616c4fd3be7db465f50c0fe8a4e52daec605750ea6a67b",
+      "signature": "Unj70ljgAwnn5AwKuciFiPj8AMMZZmMJQbyqz6TX9hzbnT97u1SlxNiSAOJfMEQH/SiVA/e8rlJskkp6oEQ/r2TiTXiV7uD1MlptBVaP9MG66bbWE8Iu57Y2gyGqtV5Xfk9I18RHIQHrxR0A0jsVScviuZD2qkju2Xwb/6esB56l9GVgiDmoU5BCS/hsWgGha/BA1AXyV4PVAPIgZZhAXoSNjpcZEVEQZJy/M94Dk5+LOqH83QRkNkQ9qjcYz83DTNVukcZ8TRWzZhaxzjS967jXnCGL7JPJIXnt+lWPlnl2KJeejGJflNH9LmaeLpdoMUa69+t0wzeOllFFPvU4Dw=="
     },
     {
       "name": "OCR IA",

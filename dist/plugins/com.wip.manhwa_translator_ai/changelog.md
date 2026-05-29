@@ -1,3 +1,14 @@
+Version: 1.3.3
+Date: 2026-05-29
+Changed:
+  - Aggiornata la logica di chunking per la modalità Context Images: ora il sistema dà assoluta priorità al mantenimento di tutti i testi di una singola immagine nello stesso blocco. Se aggiungere una nuova immagine fa superare i 50 dialoghi, l'immagine va nel blocco successivo. I testi di una singola immagine non vengono mai spezzati a metà su due invii diversi, garantendo la totale coerenza tra immagine e testo per l'IA.
+-------------------------------------------------------------------------------------------------
+Version: 1.3.2
+Date: 2026-05-29
+Changed:
+  - Il glossario ora supporta nativamente la lettura da file (se viene passato un percorso valido al file di testo, lo legge in automatico).
+  - Assicurato che la modalità Context Images non sfori mai i 50 dialoghi per chiamata, per prevenire allucinazioni o mancate traduzioni.
+-------------------------------------------------------------------------------------------------
 Version: 1.3.1
 Date: 2026-05-25
 Fixed:
