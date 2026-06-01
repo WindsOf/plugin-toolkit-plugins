@@ -26,3 +26,4 @@ PluginDevelopment.md
 /betterimg/src/main/resources/scripts/__pycache__
 /PSD_builder/dist
 /ag-psd/
+/.venv/Scripts

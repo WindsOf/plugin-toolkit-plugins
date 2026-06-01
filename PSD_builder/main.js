@@ -34,11 +34,97 @@ async function generatePSD(jsonPath, outputPath) {
 
     const textsList = payload.texts || [];
 
+    function calculateOptimalTextProperties(text, originalW, originalH) {
+        if (!text || text.trim() === "") {
+            return {
+                fontSize: 24,
+                newW: originalW,
+                newH: originalH,
+                textHeight: 24 * 1.15,
+                offsetY: 0
+            };
+        }
+
+        const aspectRatio = 0.85; // Stima larghezza media carattere per font molto larghi (es. Anime Ace)
+        const lineHeightRatio = 1.15; // Stima altezza riga
+        const maxScale = 1.05; // Ingrandimento massimo consentito (5%)
+        
+        let W_max = originalW * maxScale;
+        let H_max = originalH * maxScale;
+
+        let optimalS = 10;
+        let finalW = originalW;
+        let finalH = originalH;
+        let finalTextHeight = originalH;
+
+        for (let S = 100; S >= 18; S--) {
+            let cw = S * aspectRatio;
+            let lh = S * lineHeightRatio;
+            
+            let linesCount = 0;
+            let paragraphs = text.trim().split('\n');
+            let longestLine = 0;
+
+            for (let p of paragraphs) {
+                let words = p.trim().split(/\s+/);
+                if (words.length === 0 || (words.length === 1 && words[0] === "")) {
+                    linesCount++;
+                    continue;
+                }
+                let currentLineWidth = 0;
+                for (let i = 0; i < words.length; i++) {
+                    let w = words[i];
+                    let wordWidth = w.length * cw;
+                    
+                    if (currentLineWidth === 0) {
+                        currentLineWidth = wordWidth;
+                    } else if (currentLineWidth + cw + wordWidth <= W_max) {
+                        currentLineWidth += cw + wordWidth;
+                    } else {
+                        linesCount++;
+                        if (currentLineWidth > longestLine) longestLine = currentLineWidth;
+                        currentLineWidth = wordWidth;
+                    }
+                }
+                if (currentLineWidth > 0) {
+                    linesCount++;
+                    if (currentLineWidth > longestLine) longestLine = currentLineWidth;
+                }
+            }
+            
+            let totalH = linesCount * lh;
+            
+            if (totalH <= H_max && longestLine <= W_max) {
+                optimalS = S;
+                finalTextHeight = totalH;
+                
+                if (totalH > originalH || longestLine > originalW) {
+                    finalW = W_max;
+                    finalH = H_max;
+                } else {
+                    finalW = originalW;
+                    finalH = originalH;
+                }
+                break;
+            }
+        }
+
+        let offsetY = (finalH - finalTextHeight) / 2;
+        if (offsetY < 0) offsetY = 0;
+
+        return {
+            fontSize: optimalS,
+            newW: finalW,
+            newH: finalH,
+            textHeight: finalTextHeight,
+            offsetY: offsetY
+        };
+    }
+
     textsList.forEach((txtConfig, index) => {
         const textContent = txtConfig.text || "";
         let fontName = txtConfig.fontName || 'AnimeAce2.0BB';
 
-        const fontSize = txtConfig.fontSize || 24;
         const left = txtConfig.left;
         const top = txtConfig.top;
         const right = txtConfig.right;
@@ -48,8 +134,19 @@ async function generatePSD(jsonPath, outputPath) {
             throw new Error(`Missing mandatory bounding box coordinates (left, top, right, bottom) for text layer ${index}`);
         }
 
-        const boxWidth = right - left;
-        const boxHeight = bottom - top;
+        const originalW = right - left;
+        const originalH = bottom - top;
+        
+        const opt = calculateOptimalTextProperties(textContent, originalW, originalH);
+        const fontSize = opt.fontSize;
+        const boxWidth = opt.newW;
+        const textHeight = opt.textHeight;
+        
+        const cx = left + originalW / 2;
+        const cy = top + originalH / 2;
+        
+        const newLeft = cx - boxWidth / 2;
+        const newTop = cy - textHeight / 2;
         
         const strokeSize = txtConfig.strokeSize !== undefined ? txtConfig.strokeSize : 3;
 
@@ -57,10 +154,10 @@ async function generatePSD(jsonPath, outputPath) {
 
         childrenNodes.push({
             name: layerName,
-            left: left,
-            top: top,
-            right: right,
-            bottom: bottom,
+            left: newLeft,
+            top: newTop,
+            right: newLeft + boxWidth,
+            bottom: newTop + textHeight,
             ...(strokeSize > 0 ? {
                 effects: {
                     stroke: [{
@@ -79,12 +176,12 @@ async function generatePSD(jsonPath, outputPath) {
             text: {
                 text: textContent, // Nessun wrapping manuale!
                 shapeType: 'box', // Trasforma in Paragrafo nativo di Photoshop
-                boxBounds: [0, 0, boxWidth, boxHeight], // Formato: [Left, Top, Right, Bottom]
-                transform: [1, 0, 0, 1, left, top], // Offset globale del livello
+                boxBounds: [0, 0, boxWidth, textHeight], // Formato: [Left, Top, Right, Bottom]
+                transform: [1, 0, 0, 1, newLeft, newTop], // Offset globale del livello
                 left: 0,
                 top: 0,
                 right: boxWidth,
-                bottom: boxHeight,
+                bottom: textHeight,
                 style: {
                     font: { name: fontName },
                     fontSize: fontSize,
