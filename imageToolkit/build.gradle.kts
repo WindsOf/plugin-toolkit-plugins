@@ -24,6 +24,7 @@ dependencies {
     implementation(libs.plugin.api)
     ksp(libs.plugin.api)
     implementation(libs.openpdf)
+    implementation("com.twelvemonkeys.imageio:imageio-webp:3.10.1")
 
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlin.test.junit)
