@@ -145,7 +145,7 @@ async function generatePSD(jsonPath, outputPath) {
         const cx = left + originalW / 2;
         const cy = top + originalH / 2;
 
-        const newLeft = cx - boxWidth / 2 + fontSize;
+        const newLeft = cx - boxWidth / 2 + fontSize / 3;
         const newTop = cy - textHeight / 2 + fontSize;
 
         const strokeSize = txtConfig.strokeSize !== undefined ? txtConfig.strokeSize : 3;
