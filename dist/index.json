@@ -18,12 +18,12 @@
     {
       "name": "Image Toolkit",
       "pkg": "com.wip.imageToolkit",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "fileName": "imageToolkit.jar",
       "description": "A plugin that provides toolkit to work with images.",
       "targetAppVersion": "1.0.0",
-      "hash": "8252ecf49d60aa2d1f66c02a21fea44ba8b0b36c635158b6148a4d3c40079492",
-      "signature": "Vk8zdnFtX2azzfuvPU0Qm9hNLI59o3VMhbvFgxJzr0NoE8xRap5UEQ44TAVOoe7psLBPUc6S+Zc8LiptelinOAavp9KoDKx2dJFBhwbjeQyhsIaMV5VbZZ1BT0mJjGsA0YmRbgfdQvBTTijzjlOlnOLmoUmaZMB1/h9/Rti1p5811920KphJOFxXSUbqTsnUGLnUIc9Q4i5VCzlOnmC6oPaeAOlwdD8E0efY6YVbM4hcTM6blRHIs4GcuublR6IzXiK8HnqhIWORvs043nWWCOftyNOJk50VLcjOkdR+KLVpI4Tqhm4dRtUBwc1u4hHjRRBG+9HeT/rHwoCmEvwMZg=="
+      "hash": "a6bc6b34df4d6a19671525f20641fc5ffd974504d519e8d3e04d49e98522d082",
+      "signature": "qv6aBWsjZV0Tb79jITxutk0UaFTs++LbmcDz8NF+CmeIfIRGMEAgjCy4+oTU49exn6oi7Qapj7ptW0C7QTityf0K4wAUfML0RZ4HO87kqlH4X4T2AqxCdJIPaFfdChFRRgkgA2l4Ra5MRzezuyDeqciWvcfdW8qMzTg/R/wsikZmBDymOFvYXIx4mEMJtB4JmC3fbDIWDcVwIHGrEtlYP3Ts4iIHWiPt/BAMBq+JbvaGNUZjGjBXsZP6e48BUPpcDOPvxv3uevbqP6t0hJlwlnJHiB9ndXkdp1N21jeA6/Za27JQsulj3jLaxvyMMl7/CsUlBHwKN2MWOAxJ32R3sQ=="
     },
     {
       "name": "Manhwa Translator AI",
