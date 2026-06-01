@@ -13,13 +13,23 @@ import javax.imageio.ImageIO
 import kotlin.math.abs
 import java.awt.image.BufferedImage
 
+import com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi
+import javax.imageio.spi.IIORegistry
+
 @PluginInfo(
     id = "com.wip.slicer",
     name = "Slicer",
-    version = "1.1.0",
+    version = "1.1.2",
     description = "A plugin that provides vertical images sliding capabilities for manhwa."
 )
 class Slicer {
+    init {
+        try {
+            IIORegistry.getDefaultInstance().registerServiceProvider(WebPImageReaderSpi())
+        } catch (e: Exception) {
+            // Ignore
+        }
+    }
     @Capability(
         name = "slicer",
         description = "Slices a list of images"
