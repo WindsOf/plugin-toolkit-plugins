@@ -121,6 +121,7 @@ async function generatePSD(jsonPath, outputPath) {
         };
     }
 
+    const textChildrenNodes = [];
     textsList.forEach((txtConfig, index) => {
         const textContent = txtConfig.text || "";
         let fontName = txtConfig.fontName || 'AnimeAce2.0BB';
@@ -152,7 +153,7 @@ async function generatePSD(jsonPath, outputPath) {
 
         const layerName = textContent.length > 20 ? textContent.substring(0, 20) : (textContent || `Testo ${index}`);
 
-        childrenNodes.push({
+        textChildrenNodes.push({
             name: layerName,
             left: newLeft,
             top: newTop,
@@ -174,10 +175,10 @@ async function generatePSD(jsonPath, outputPath) {
                 }
             } : {}),
             text: {
-                text: textContent, // Nessun wrapping manuale!
-                shapeType: 'box', // Trasforma in Paragrafo nativo di Photoshop
-                boxBounds: [0, 0, boxWidth, textHeight], // Formato: [Left, Top, Right, Bottom]
-                transform: [1, 0, 0, 1, newLeft, newTop], // Offset globale del livello
+                text: textContent,
+                shapeType: 'box',
+                boxBounds: [0, 0, boxWidth, textHeight],
+                transform: [1, 0, 0, 1, newLeft, newTop],
                 left: 0,
                 top: 0,
                 right: boxWidth,
@@ -193,6 +194,14 @@ async function generatePSD(jsonPath, outputPath) {
             }
         });
     });
+
+    if (textChildrenNodes.length > 0) {
+        childrenNodes.push({
+            name: "Testi",
+            opened: true,
+            children: textChildrenNodes
+        });
+    }
 
     const psdLayout = {
         width: canvasData.width,

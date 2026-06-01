@@ -1,3 +1,12 @@
+Version: 4.4.2
+Date: 2026-06-01
+Added:
+  - Tutti i livelli di testo generati ora vengono raggruppati automaticamente all'interno di un'apposita cartella (livello gruppo) chiamata "Testi", per mantenere più ordinati i file PSD prodotti.
+Fixed:
+  - Risolti problemi di compilazione e pacchettizzazione (build process) del file sorgente Javascript nell'eseguibile PSD_builder.exe finale, garantendo che le modifiche allo script vengano applicate correttamente.
+Changed:
+  - Modificate dinamicamente le stime e i calcoli di compensazione delle bounding box per adattarsi meglio a font molto larghi (es. Anime Ace) modificando anche i rientri verticali/orizzontali di base, permettendo al testo di allinearsi più fedelmente verso il basso-destra secondo le logiche desiderate.
+-------------------------------------------------------------------------------------------------
 Version: 4.2.0
 Date: 2026-05-29
 Added:
