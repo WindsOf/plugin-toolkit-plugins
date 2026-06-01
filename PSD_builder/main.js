@@ -48,7 +48,7 @@ async function generatePSD(jsonPath, outputPath) {
         const aspectRatio = 0.85; // Stima larghezza media carattere per font molto larghi (es. Anime Ace)
         const lineHeightRatio = 1.15; // Stima altezza riga
         const maxScale = 1.05; // Ingrandimento massimo consentito (5%)
-        
+
         let W_max = originalW * maxScale;
         let H_max = originalH * maxScale;
 
@@ -60,7 +60,7 @@ async function generatePSD(jsonPath, outputPath) {
         for (let S = 100; S >= 18; S--) {
             let cw = S * aspectRatio;
             let lh = S * lineHeightRatio;
-            
+
             let linesCount = 0;
             let paragraphs = text.trim().split('\n');
             let longestLine = 0;
@@ -75,7 +75,7 @@ async function generatePSD(jsonPath, outputPath) {
                 for (let i = 0; i < words.length; i++) {
                     let w = words[i];
                     let wordWidth = w.length * cw;
-                    
+
                     if (currentLineWidth === 0) {
                         currentLineWidth = wordWidth;
                     } else if (currentLineWidth + cw + wordWidth <= W_max) {
@@ -91,13 +91,13 @@ async function generatePSD(jsonPath, outputPath) {
                     if (currentLineWidth > longestLine) longestLine = currentLineWidth;
                 }
             }
-            
+
             let totalH = linesCount * lh;
-            
+
             if (totalH <= H_max && longestLine <= W_max) {
                 optimalS = S;
                 finalTextHeight = totalH;
-                
+
                 if (totalH > originalH || longestLine > originalW) {
                     finalW = W_max;
                     finalH = H_max;
@@ -136,18 +136,18 @@ async function generatePSD(jsonPath, outputPath) {
 
         const originalW = right - left;
         const originalH = bottom - top;
-        
+
         const opt = calculateOptimalTextProperties(textContent, originalW, originalH);
         const fontSize = opt.fontSize;
         const boxWidth = opt.newW;
         const textHeight = opt.textHeight;
-        
+
         const cx = left + originalW / 2;
         const cy = top + originalH / 2;
-        
-        const newLeft = cx - boxWidth / 2 - fontSize;
-        const newTop = cy - textHeight / 2 - fontSize;
-        
+
+        const newLeft = cx - boxWidth / 2 + fontSize;
+        const newTop = cy - textHeight / 2 + fontSize;
+
         const strokeSize = txtConfig.strokeSize !== undefined ? txtConfig.strokeSize : 3;
 
         const layerName = textContent.length > 20 ? textContent.substring(0, 20) : (textContent || `Testo ${index}`);
