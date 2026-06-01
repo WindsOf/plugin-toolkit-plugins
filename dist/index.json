@@ -68,12 +68,12 @@
     {
       "name": "Slicer",
       "pkg": "com.wip.slicer",
-      "version": "1.1.3",
+      "version": "1.1.4",
       "fileName": "slicer.jar",
       "description": "A plugin that provides vertical images sliding capabilities for manhwa.",
       "targetAppVersion": "1.0.0",
-      "hash": "b52b689fea8775ac730d6a3c812ea858c18d3c2281305f476a8dbdfa2e67504b",
-      "signature": "Sx+0yArBnaURO9W7+uSJAk/LZKUzdahylPS/nds2Khup4HSkHkc+XCRfujlZRduFizliA2IkPnwmGxCwi4EJWRlPYGPpOotHb5fQUO4pyBcwz3GIjUTQA6lXpwtcpvenftBaZ9sgq8Hj5yDZlp8kM/fnKDxYJn+lPzblwiAeB6KhOcbSed7nhLkNRcR5FWYu7l75JJDklCFDwsB9GvHc5zrG0YolS+5KUhcypW12mw0qd/Zkok0QugQlpAAgO9ygixpbH5V0VH3Ztn5M2BPgZUm7vaR8z3/gQpjCiAT68hiwa6wVdoto8Mwi64KFNs7mvPf93LG2/MLHJ7dvwGkwEA=="
+      "hash": "0e4e8115a36cbc5d59c3d7b4fe14f31ca3a13b49159558c20bf7fde68a101a29",
+      "signature": "ZfewA/A/B/8T5xSXgEI5jpqqZAVNLbfJFH5LvgbpOO9sLa03iG5VM7IjafGoe3bBIgq2x0Q5/nMXJ5jHVyuE5QJgCcneA2npQXIPqR9gpTC4KN04a2F9BvLsgg1j1fvF6vEjqTKvm4d1OtqZ6Qc0Bo1zhYCo8RKDNbAFmuO6IyLlWoI8wC/BNYhz0rKW2YUwCJkxMUFLVPusAGdLTUQOSqGjlk4oN3k3g8+om0OdSnSWSX0xsl0emLHG3EBq1DZHSTnOKc9jR/ZIci/vHltwK2rTudeuwQ6/Y02DtZNgZcVhVXJYgoGbcmR/jgymjRJzEJy96yA3djzCQG88A3VeKw=="
     }
   ],
   "flows": [
