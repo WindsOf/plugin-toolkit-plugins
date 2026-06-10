@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.ocr_ia",
         "name": "OCR IA",
-        "version": "2.3.2",
+        "version": "2.3.5",
         "description": "Advanced OCR plugin using Google AI (Gemma 4 31B/26B) via Koog"
     },
     "requirements": {
@@ -151,6 +151,33 @@
     },
     "changelog": {
         "releases": [
+            {
+                "version": "2.3.5",
+                "date": "2026-05-29",
+                "categories": {
+                    "Changed": [
+                        "Aggiornato il prompt per ignorare gli SFX/onomatopee disegnati direttamente sull'artwork e fuori dai balloon."
+                    ]
+                }
+            },
+            {
+                "version": "2.3.4",
+                "date": "2026-05-25",
+                "categories": {
+                    "Changed": [
+                        "Portato il numero di retry a 7 tentativi con un ritardo fisso di 10 secondi per ciascuno."
+                    ]
+                }
+            },
+            {
+                "version": "2.3.3",
+                "date": "2026-05-25",
+                "categories": {
+                    "Changed": [
+                        "Aumentato il limite massimo di retry a 5 tentativi consecutivi (con ritardi progressivi)."
+                    ]
+                }
+            },
             {
                 "version": "2.3.2",
                 "date": "2026-05-24",

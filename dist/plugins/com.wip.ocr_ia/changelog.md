@@ -1,3 +1,18 @@
+Version: 2.3.5
+Date: 2026-05-29
+Changed:
+  - Aggiornato il prompt per ignorare gli SFX/onomatopee disegnati direttamente sull'artwork e fuori dai balloon.
+-------------------------------------------------------------------------------------------------
+Version: 2.3.4
+Date: 2026-05-25
+Changed:
+  - Portato il numero di retry a 7 tentativi con un ritardo fisso di 10 secondi per ciascuno.
+-------------------------------------------------------------------------------------------------
+Version: 2.3.3
+Date: 2026-05-25
+Changed:
+  - Aumentato il limite massimo di retry a 5 tentativi consecutivi (con ritardi progressivi).
+-------------------------------------------------------------------------------------------------
 Version: 2.3.2
 Date: 2026-05-24
 Changed:

@@ -1,3 +1,18 @@
+Version: 4.4.2
+Date: 2026-06-01
+Added:
+  - Tutti i livelli di testo generati ora vengono raggruppati automaticamente all'interno di un'apposita cartella (livello gruppo) chiamata "Testi", per mantenere più ordinati i file PSD prodotti.
+Fixed:
+  - Risolti problemi di compilazione e pacchettizzazione (build process) del file sorgente Javascript nell'eseguibile PSD_builder.exe finale, garantendo che le modifiche allo script vengano applicate correttamente.
+Changed:
+  - Modificate dinamicamente le stime e i calcoli di compensazione delle bounding box per adattarsi meglio a font molto larghi (es. Anime Ace) modificando anche i rientri verticali/orizzontali di base, permettendo al testo di allinearsi più fedelmente verso il basso-destra secondo le logiche desiderate.
+-------------------------------------------------------------------------------------------------
+Version: 4.2.0
+Date: 2026-05-29
+Added:
+  - L'immagine di sfondo viene ora inserita 2 volte nel PSD: un layer "background" (in fondo) e un layer "clean" (sopra, identico). In questo modo è subito possibile usare il layer "clean" per la pulizia senza toccare l'originale.
+  - I livelli di testo ora prendono come nome il testo che contengono (troncato a 20 caratteri) anziché un generico "Testo N".
+-------------------------------------------------------------------------------------------------
 Version: 4.1.0
 Date: 2026-05-24
 Changed:

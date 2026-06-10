@@ -1,3 +1,9 @@
+Version: 4.2.0
+Date: 2026-05-29
+Added:
+  - L'immagine di sfondo viene ora inserita 2 volte nel PSD: un layer "background" (in fondo) e un layer "clean" (sopra, identico). In questo modo è subito possibile usare il layer "clean" per la pulizia senza toccare l'originale.
+  - I livelli di testo ora prendono come nome il testo che contengono (troncato a 20 caratteri) anziché un generico "Testo N".
+-------------------------------------------------------------------------------------------------
 Version: 4.1.0
 Date: 2026-05-24
 Changed:

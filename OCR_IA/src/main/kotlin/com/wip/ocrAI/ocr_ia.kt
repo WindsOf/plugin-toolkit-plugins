@@ -57,7 +57,7 @@ data class OCRResult(
 @PluginInfo(
         id = "com.wip.ocr_ia",
         name = "OCR IA",
-        version = "2.3.2",
+        version = "2.3.5",
         description = "Advanced OCR plugin using Google AI (Gemma 4 31B/26B) via Koog"
 )
 class OCR_IA(val settings: OcrIASettings) {

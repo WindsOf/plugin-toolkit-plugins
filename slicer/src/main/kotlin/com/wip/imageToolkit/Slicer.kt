@@ -13,13 +13,23 @@ import javax.imageio.ImageIO
 import kotlin.math.abs
 import java.awt.image.BufferedImage
 
+import com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi
+import javax.imageio.spi.IIORegistry
+
 @PluginInfo(
     id = "com.wip.slicer",
     name = "Slicer",
-    version = "1.1.0",
+    version = "1.1.4",
     description = "A plugin that provides vertical images sliding capabilities for manhwa."
 )
 class Slicer {
+    init {
+        try {
+            IIORegistry.getDefaultInstance().registerServiceProvider(WebPImageReaderSpi())
+        } catch (e: Exception) {
+            // Ignore
+        }
+    }
     @Capability(
         name = "slicer",
         description = "Slices a list of images"
@@ -56,7 +66,7 @@ class Slicer {
         if (sortedImages.isEmpty()) return "No valid images found"
 
         // Combine images into one large buffer conceptually to handle merging small ones
-        val firstImage = SystemFileSystem.source(sortedImages[0]).buffered().asInputStream().use { ImageIO.read(it) }
+        val firstImage = ImageIO.read(java.io.File(sortedImages[0].toString()))
         val width = firstImage.width
         val fullBitmap = mutableListOf<BufferedImage>()
 
@@ -108,7 +118,7 @@ class Slicer {
         val progressIncrement = 0.9f / sortedImages.size
         val validRows = mutableListOf<Int>()
         sortedImages.forEachIndexed { index, imagePath ->
-            val img = SystemFileSystem.source(imagePath).buffered().asInputStream().use { ImageIO.read(it) }
+            val img = ImageIO.read(java.io.File(imagePath.toString()))
             for (i in 0 until img.height) {
                 validRows.add(if (analyzeSingleRowVariance(img, i) <= cutTolerance) 1 else 0)
             }
@@ -136,11 +146,15 @@ class Slicer {
     }
 
     private fun analyzeSingleRowVariance(bufferedImage: BufferedImage, y: Int): Int {
+        val width = bufferedImage.width
+        if (width <= 1) return 0
+        val row = IntArray(width)
+        bufferedImage.getRGB(0, y, width, 1, row, 0, width)
+        
         var maxDiff = 0
-        for (x in 0 until bufferedImage.width - 1) {
-            if (x >= bufferedImage.width - 1) break
-            val pixel1 = bufferedImage.getRGB(x, y)
-            val pixel2 = bufferedImage.getRGB(x + 1, y)
+        for (x in 0 until width - 1) {
+            val pixel1 = row[x]
+            val pixel2 = row[x + 1]
 
             val rDiff = abs((pixel1 shr 16 and 0xFF) - (pixel2 shr 16 and 0xFF))
             val gDiff = abs((pixel1 shr 8 and 0xFF) - (pixel2 shr 8 and 0xFF))
@@ -159,7 +173,7 @@ class Slicer {
     ): List<Boolean> {
         val rowVarianceList = mutableListOf<Int>()
         sortedImages.forEach { imagePath ->
-            val bufferedImage = SystemFileSystem.source(imagePath).buffered().asInputStream().use { ImageIO.read(it) }
+            val bufferedImage = ImageIO.read(java.io.File(imagePath.toString()))
             fullBitmap.add(bufferedImage)
             for (y in 0 until bufferedImage.height) {
                 rowVarianceList.add(analyzeSingleRowVariance(bufferedImage, y))
