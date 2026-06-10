@@ -22,6 +22,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.plugin.api)
     implementation(libs.kpsd)
+    implementation(libs.twelvemonkeys.webp)
     ksp(libs.plugin.api)
 
     testImplementation(libs.kotlin.test)

@@ -27,7 +27,8 @@ turbine = "1.2.1"
 buildkonfig = "0.19.0"
 koog = "0.8.0"
 openpdf = "3.0.5"
-kpsd = "1.0.0"
+kpsd = "1.1.0"
+twelvemonkeys = "3.10.1"
 
 
 
@@ -94,6 +95,7 @@ slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
 # Github authentication
 plugin-api = { module = "org.wip.plugintoolkit:plugin-api", version.ref = "plugin-toolkit" }
 kpsd = { module = "com.wip:kpsd", version.ref = "kpsd" }
+twelvemonkeys-webp = { module = "com.twelvemonkeys.imageio:imageio-webp", version.ref = "twelvemonkeys" }
 # JitPack
 # plugin-api = { module = "com.github.Wip-Sama:plugin-toolkit", version.ref = "plugin-toolkit" }
 
