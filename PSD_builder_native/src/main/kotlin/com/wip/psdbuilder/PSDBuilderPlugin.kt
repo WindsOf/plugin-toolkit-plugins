@@ -20,6 +20,10 @@ import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.annotations.Capability
 import org.wip.plugintoolkit.api.annotations.CapabilityParam
 import org.wip.plugintoolkit.api.annotations.PluginInfo
+import org.wip.plugintoolkit.api.annotations.PluginSetup
+import org.wip.plugintoolkit.api.annotations.PluginUpdate
+import org.wip.plugintoolkit.api.annotations.PluginValidate
+import org.wip.plugintoolkit.api.annotations.CapabilityOutput
 import java.io.File
 import javax.imageio.ImageIO
 import javax.imageio.spi.IIORegistry
@@ -65,10 +69,20 @@ data class ExtractedText(
     val fontSize: Float? = null
 )
 
+@Serializable
+data class PSDBuildResult(
+    @CapabilityOutput(
+        name = "generated psd",
+        description = "Path to the generated PSD file",
+        semanticTypes = ["sys/file"]
+    )
+    val psdPath: String
+)
+
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "PSD Builder Native",
-    version = "4.4.2",
+    version = "4.4.3",
     description = "A plugin that builds layered PSD files natively in Kotlin."
 )
 class PSDBuilderPlugin {
@@ -80,6 +94,24 @@ class PSDBuilderPlugin {
         }
     }
 
+    @PluginSetup
+    suspend fun setup(context: PluginContext): Result<Unit> {
+        context.logger.info("PSDBuilderPlugin setup complete.")
+        return Result.success(Unit)
+    }
+
+    @PluginUpdate
+    suspend fun update(context: PluginContext): Result<Unit> {
+        context.logger.info("PSDBuilderPlugin update complete.")
+        return Result.success(Unit)
+    }
+
+    @PluginValidate
+    suspend fun validate(context: PluginContext): Result<Unit> {
+        context.logger.info("PSDBuilderPlugin validation passed.")
+        return Result.success(Unit)
+    }
+
     @Capability(
         name = "Build PSD from Image and Texts",
         description = "Generates a layered PSD natively in Kotlin from an image, texts and bounding boxes"
@@ -88,9 +120,13 @@ class PSDBuilderPlugin {
         @CapabilityParam(description = "Path to the base image (JPG, PNG, WebP)") imagePath: String,
         @CapabilityParam(description = "List of text strings to render") texts: List<String>,
         @CapabilityParam(
-            description = "List of bounding boxes for each text [xmin, ymin, xmax, ymax]",
+            description = "List of bounding boxes for each balloon (ymin, xmin, ymax, xmax)",
             semanticTypes = ["wom/bounding-box"]
-        ) bb: List<List<Double>>,
+        ) balloonBoxes: List<List<Double>>,
+        @CapabilityParam(
+            description = "List of bounding boxes for each text (ymin, xmin, ymax, xmax)",
+            semanticTypes = ["wom/bounding-box"]
+        ) textBoxes: List<List<Double>>? = null,
         @CapabilityParam(description = "Font size in pixels", defaultValue = "24") fontSize: Int? = 24,
         @CapabilityParam(
             description = "Typeface for the text",
@@ -108,10 +144,13 @@ class PSDBuilderPlugin {
             description = "Keep intermediate JSON and temp image files for debugging",
             defaultValue = "false"
         ) leaveIntermediateFiles: Boolean? = false,
-        @CapabilityParam(description = "Rotations in degrees (optional)") rotations: List<Double>? = null,
+        @CapabilityParam(description = "Rotations/Angles in degrees") textAngles: List<Double>? = null,
+        @CapabilityParam(description = "Text Colors") textColors: List<String>? = null,
+        @CapabilityParam(description = "Has Border") hasBorder: List<Boolean>? = null,
+        @CapabilityParam(description = "Border Colors") borderColors: List<String>? = null,
         @CapabilityParam(description = "Shapes of the balloons") shapes: List<String>? = null,
         context: PluginContext
-    ): String {
+    ): PSDBuildResult {
         val logger = context.logger
         logger.info("Starting buildPsdFromInputs for $imagePath")
 
@@ -134,13 +173,16 @@ class PSDBuilderPlugin {
         val psd = buildPsdObject(
             imagePath = imagePath,
             texts = texts,
-            bb = bb,
+            balloonBoxes = balloonBoxes,
+            textBoxes = textBoxes,
             fontSizes = fontSizes,
             fontNames = fontNames,
             borderSizes = borderSizes,
-            colors = colors,
             context = context,
-            rotations = rotations,
+            textAngles = textAngles,
+            textColors = textColors,
+            hasBorder = hasBorder,
+            borderColors = borderColors,
             shapes = shapes
         )
         val psdBytes = withContext(Dispatchers.Default) {
@@ -148,9 +190,10 @@ class PSDBuilderPlugin {
         }
         withContext(Dispatchers.IO) {
             File(outputPsdPath).writeBytes(psdBytes)
+            logger.info("PSD Generation Complete: $outputPsdPath")
         }
 
-        return outputPsdPath
+        return PSDBuildResult(outputPsdPath)
     }
 
     @Capability(
@@ -164,9 +207,13 @@ class PSDBuilderPlugin {
         ) inputFolder: String,
         @CapabilityParam(description = "List of text strings to render across all pages") texts: List<String>,
         @CapabilityParam(
-            description = "List of bounding boxes for each text [xmin, ymin, xmax, ymax]",
+            description = "List of bounding boxes for each balloon (ymin, xmin, ymax, xmax)",
             semanticTypes = ["wom/bounding-box"]
-        ) bb: List<List<Double>>,
+        ) balloonBoxes: List<List<Double>>,
+        @CapabilityParam(
+            description = "List of bounding boxes for each text (ymin, xmin, ymax, xmax)",
+            semanticTypes = ["wom/bounding-box"]
+        ) textBoxes: List<List<Double>>? = null,
         @CapabilityParam(description = "List of image filenames corresponding to each text") pageNames: List<String>,
         @CapabilityParam(
             description = "Directory to save generated PSDs (leave empty for 'output_psds' in input folder)",
@@ -185,10 +232,13 @@ class PSDBuilderPlugin {
             description = "Keep intermediate JSON and temp image files for debugging",
             defaultValue = "false"
         ) leaveIntermediateFiles: Boolean? = false,
-        @CapabilityParam(description = "Rotations in degrees (optional)") rotations: List<Double>? = null,
+        @CapabilityParam(description = "Rotations/Angles in degrees") textAngles: List<Double>? = null,
+        @CapabilityParam(description = "Text Colors") textColors: List<String>? = null,
+        @CapabilityParam(description = "Has Border") hasBorder: List<Boolean>? = null,
+        @CapabilityParam(description = "Border Colors") borderColors: List<String>? = null,
         @CapabilityParam(description = "Shapes of the balloons") shapes: List<String>? = null,
         context: PluginContext
-    ): String {
+    ): PSDBuildResult {
         val logger = context.logger
         logger.info("Starting buildPsdForChapter for $inputFolder")
         val progressReporter = context.progress
@@ -204,15 +254,18 @@ class PSDBuilderPlugin {
             File(outputDir).apply { mkdirs() }
         }
 
-        val maxTexts = maxOf(texts.size, pageNames.size, bb.size)
-        if (maxTexts != texts.size || maxTexts != bb.size || maxTexts != pageNames.size) {
-            logger.warn("Mismatch in Add Text to Chapter inputs: texts (${texts.size}), bb (${bb.size}), pageNames (${pageNames.size}). Missing bounds will be defaulted.")
+        val maxTexts = maxOf(texts.size, pageNames.size, balloonBoxes.size)
+        if (maxTexts != texts.size || maxTexts != balloonBoxes.size || maxTexts != pageNames.size) {
+            logger.warn("Mismatch in Add Text to Chapter inputs: texts (${texts.size}), balloonBoxes (${balloonBoxes.size}), pageNames (${pageNames.size}). Missing bounds will be defaulted.")
         }
-
         val safeTexts = List(maxTexts) { i -> if (i < texts.size) texts[i] else "" }
         val safePageNames = List(maxTexts) { i -> if (i < pageNames.size) pageNames[i] else "" }
-        val safeBb = List(maxTexts) { i -> if (i < bb.size) bb[i] else emptyList() }
-        val safeRotations = rotations?.let { rList -> List(maxTexts) { i -> if (i < rList.size) rList[i] else 0.0 } }
+        val safeBalloonBoxes = List(maxTexts) { i -> if (i < balloonBoxes.size) balloonBoxes[i] else emptyList() }
+        val safeTextBoxes = textBoxes?.let { tList -> List(maxTexts) { i -> if (i < tList.size) tList[i] else emptyList() } }
+        val safeTextAngles = textAngles?.let { rList -> List(maxTexts) { i -> if (i < rList.size) rList[i] else 0.0 } }
+        val safeTextColors = textColors?.let { cList -> List(maxTexts) { i -> if (i < cList.size) cList[i] else "" } }
+        val safeHasBorder = hasBorder?.let { bList -> List(maxTexts) { i -> if (i < bList.size) bList[i] else false } }
+        val safeBorderColors = borderColors?.let { cList -> List(maxTexts) { i -> if (i < cList.size) cList[i] else "" } }
 
         val groupedData = (0 until maxTexts).groupBy { safePageNames[it] }
 
@@ -236,10 +289,13 @@ class PSDBuilderPlugin {
 
                         val indices = groupedData[pageName] ?: emptyList()
                         val pageTexts = indices.map { safeTexts[it] }
-                        val pageBb = indices.map { safeBb[it] }
-                        val pageRotations = safeRotations?.let { rList -> indices.map { rList[it] } }
+                        val pageBalloonBoxes = indices.map { safeBalloonBoxes[it] }
+                        val pageTextBoxes = safeTextBoxes?.let { tList -> indices.map { tList[it] } }
+                        val pageTextAngles = safeTextAngles?.let { rList -> indices.map { rList[it] } }
+                        val pageTextColors = safeTextColors?.let { cList -> indices.map { cList[it] } }
+                        val pageHasBorder = safeHasBorder?.let { bList -> indices.map { bList[it] } }
+                        val pageBorderColors = safeBorderColors?.let { cList -> indices.map { cList[it] } }
                         val pageShapes = shapes?.let { sList -> indices.map { sList[it] } }
-                        val pageColors = List(pageTexts.size) { PsdColor(0, 0, 0, 255) }
 
                         val psdFontString = when (fontName) {
                             PsdFont.ARIAL -> "ArialMT"
@@ -253,14 +309,17 @@ class PSDBuilderPlugin {
                         val psd = buildPsdObject(
                             imagePath = imageFile.absolutePath,
                             texts = pageTexts,
-                            bb = pageBb,
+                            balloonBoxes = pageBalloonBoxes,
+                            textBoxes = pageTextBoxes,
                             fontSizes = fontSizes,
                             fontNames = fontNames,
                             borderSizes = borderSizes,
-                            colors = pageColors,
                             context = context,
-                            rotations = pageRotations,
-                            shapes = pageShapes
+                            textAngles = pageTextAngles,
+                            shapes = pageShapes,
+                            textColors = pageTextColors,
+                            hasBorder = pageHasBorder,
+                            borderColors = pageBorderColors
                         )
                         val psdBytes = withContext(Dispatchers.Default) {
                             com.wip.kpsd.KPsd.write(psd, compress = false)
@@ -274,9 +333,10 @@ class PSDBuilderPlugin {
                     }
                 }
             }.awaitAll()
+            logger.info("All $totalPages PSDs generated successfully.")
         }
 
-        return outDir.absolutePath
+        return PSDBuildResult(outDir.absolutePath)
     }
 
     @Capability(
@@ -287,7 +347,7 @@ class PSDBuilderPlugin {
         @CapabilityParam(description = "Path to JSON file") jsonPath: String,
         @CapabilityParam(description = "Output PSD path") outputPsdPath: String,
         context: PluginContext
-    ): String {
+    ): PSDBuildResult {
         val jsonFile = File(jsonPath)
         if (!jsonFile.exists()) {
             throw IllegalArgumentException("JSON file not found: $jsonPath")
@@ -299,9 +359,12 @@ class PSDBuilderPlugin {
         val baseImage = withContext(Dispatchers.IO) { ImageIO.read(File(payload.backgroundImage)) }
         val width = baseImage.width.toDouble()
         val height = baseImage.height.toDouble()
-        val bb = payload.texts.map { listOf(it.left / width, it.top / height, it.right / width, it.bottom / height) }
-        val rotations = payload.texts.map { it.rotation }
+        val balloonBoxes = payload.texts.map { listOf(it.top / height, it.left / width, it.bottom / height, it.right / width) }
+        val textAngles = payload.texts.map { it.rotation }
         val colors = payload.texts.map { it.color }
+        val textColors = colors.map { 
+            if (it != null) String.format("#%02x%02x%02x", it.r, it.g, it.b) else null
+        }
         val fontSizes = payload.texts.map { it.fontSize }
         val fontNames = payload.texts.map { it.fontName }
         val borderSizes = payload.texts.map { it.strokeSize }
@@ -309,13 +372,13 @@ class PSDBuilderPlugin {
         val psd = buildPsdObject(
             imagePath = payload.backgroundImage,
             texts = texts,
-            bb = bb,
+            balloonBoxes = balloonBoxes,
             fontSizes = fontSizes,
             fontNames = fontNames,
             borderSizes = borderSizes,
-            colors = colors,
             context = context,
-            rotations = rotations
+            textAngles = textAngles,
+            textColors = textColors
         )
         val psdBytes = withContext(Dispatchers.Default) {
             com.wip.kpsd.KPsd.write(psd, compress = false)
@@ -323,7 +386,7 @@ class PSDBuilderPlugin {
         withContext(Dispatchers.IO) {
             File(outputPsdPath).writeBytes(psdBytes)
         }
-        return outputPsdPath
+        return PSDBuildResult(outputPsdPath)
     }
 
     private fun normalizeBoundingBox(box: List<Double>): List<Double> {
@@ -338,14 +401,17 @@ class PSDBuilderPlugin {
     suspend fun buildPsdObject(
         imagePath: String,
         texts: List<String>,
-        bb: List<List<Double>>,
+        balloonBoxes: List<List<Double>>,
+        textBoxes: List<List<Double>>? = null,
         fontSizes: List<Int?>? = null,
         fontNames: List<String?>? = null,
         borderSizes: List<Int?>? = null,
-        colors: List<PsdColor?>? = null,
         context: PluginContext,
-        rotations: List<Double?>? = null,
-        shapes: List<String?>? = null
+        textAngles: List<Double?>? = null,
+        shapes: List<String?>? = null,
+        textColors: List<String?>? = null,
+        hasBorder: List<Boolean?>? = null,
+        borderColors: List<String?>? = null
     ): Psd {
         val inputFile = File(imagePath)
         val baseImage = withContext(Dispatchers.IO) { ImageIO.read(inputFile) }
@@ -394,26 +460,80 @@ class PSDBuilderPlugin {
             // Group all text layers inside "Testi" folder
             group(name = "Testi") {
                 for ((index, text) in texts.withIndex()) {
-                    val box = if (index < bb.size) bb[index] else emptyList()
-                    val safeBox = normalizeBoundingBox(box)
-                    val tLeft = (safeBox[0] * width).toInt()
-                    val tTop = (safeBox[1] * height).toInt()
-                    val tRight = (safeBox[2] * width).toInt()
-                    val tBottom = (safeBox[3] * height).toInt()
+                    val balloonBox = if (index < balloonBoxes.size) balloonBoxes[index] else emptyList()
+                    val textBox = textBoxes?.getOrNull(index) ?: emptyList()
+                    val safeBalloonBox = normalizeBoundingBox(balloonBox)
+                    
+                    // The inputs are ymin, xmin, ymax, xmax
+                    val bTop = (safeBalloonBox[0] * height).toInt()
+                    val bLeft = (safeBalloonBox[1] * width).toInt()
+                    val bBottom = (safeBalloonBox[2] * height).toInt()
+                    val bRight = (safeBalloonBox[3] * width).toInt()
 
-                    val boxWidth = tRight - tLeft
-                    val boxHeight = tBottom - tTop
+                    val tTop: Int
+                    val tLeft: Int
+                    val tBottom: Int
+                    val tRight: Int
+                    
+                    if (textBox.size >= 4) {
+                        tTop = (textBox[0] * height).toInt()
+                        tLeft = (textBox[1] * width).toInt()
+                        tBottom = (textBox[2] * height).toInt()
+                        tRight = (textBox[3] * width).toInt()
+                    } else {
+                        tTop = bTop
+                        tLeft = bLeft
+                        tBottom = bBottom
+                        tRight = bRight
+                    }
+
+                    val cx = (tLeft + tRight) / 2.0
+                    val cy = (tTop + tBottom) / 2.0
+
+                    var bw = (bRight - bLeft).toDouble()
+                    var bh = (bBottom - bTop).toDouble()
+
+                    val tw = (tRight - tLeft).toDouble()
+                    val th = (tBottom - tTop).toDouble()
+
+                    if (bw >= 2 * tw || bh >= 2 * th) {
+                        bw = tw * 1.25
+                        bh = th * 1.25
+                    }
+
+                    val ibLeft = (cx - bw / 2).toInt()
+                    val ibTop = (cy - bh / 2).toInt()
+                    val ibRight = (cx + bw / 2).toInt()
+                    val ibBottom = (cy + bh / 2).toInt()
+
+                    val boxWidth = ibRight - ibLeft
+                    val boxHeight = ibBottom - ibTop
+
                     val initialFontSize = fontSizes?.getOrNull(index) ?: 24
                     val fNameInput = fontNames?.getOrNull(index) ?: "AnimeAce2.0BB"
                     val fName = if (fNameInput == "ArialMT" || fNameInput == "Arial") "ArialMT" else "AnimeAce2.0BB"
 
                     val borderSize = borderSizes?.getOrNull(index) ?: 3
-                    val hasStroke = borderSize > 0
-                    val rot = rotations?.getOrNull(index) ?: 0.0
+                    val hasStroke = hasBorder?.getOrNull(index) ?: (borderSize > 0)
+                    val hexBorderColor = borderColors?.getOrNull(index)
+                    val parsedBorderColor = if (hexBorderColor != null && hexBorderColor.length >= 7) {
+                        java.awt.Color.decode(hexBorderColor.take(7))
+                    } else {
+                        java.awt.Color(0, 0, 0)
+                    }
+                    
+                    val rot = textAngles?.getOrNull(index) ?: 0.0
                     val theta = Math.toRadians(rot)
                     val cos = cos(theta)
                     val sin = sin(theta)
-                    val textColor = colors?.getOrNull(index) ?: PsdColor(255, 255, 255, 255)
+                    
+                    val hexColor = textColors?.getOrNull(index)
+                    val textColor = if (hexColor != null && hexColor.length >= 7) {
+                        val c = java.awt.Color.decode(hexColor.take(7))
+                        PsdColor(c.red, c.green, c.blue, 255)
+                    } else {
+                        PsdColor(0, 0, 0, 255)
+                    }
 
                     val shape = shapes?.getOrNull(index) ?: "oval"
 
@@ -421,13 +541,13 @@ class PSDBuilderPlugin {
                     val textName = if (text.length > 20) text.substring(0, 20) else text.ifEmpty { "Testo $index" }
 
                     textLayer(name = textName, textValue = text) {
-                        top = tTop
-                        left = tLeft
-                        bottom = tBottom
-                        right = tRight
+                        top = ibTop
+                        left = ibLeft
+                        bottom = ibBottom
+                        right = ibRight
                         shapeType = TextShapeType.BOX
                         boxBounds = floatArrayOf(0f, 0f, boxWidth.toFloat(), boxHeight.toFloat())
-                        transform(cos, sin, -sin, cos, tLeft.toDouble(), tTop.toDouble())
+                        transform(cos, sin, -sin, cos, ibLeft.toDouble(), ibTop.toDouble())
 
                         val bPadding = minOf(boxWidth, boxHeight) * 0.05f
                         boundaryShape = if (shape.equals("rectangular", ignoreCase = true)) {
@@ -454,7 +574,7 @@ class PSDBuilderPlugin {
                             effects {
                                 stroke {
                                     size = com.wip.kpsd.UnitsValue(Units.PIXELS, borderSize.toFloat())
-                                    rgb(0, 0, 0)
+                                    rgb(parsedBorderColor.red, parsedBorderColor.green, parsedBorderColor.blue)
                                 }
                             }
                         }

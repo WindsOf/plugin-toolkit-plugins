@@ -34,3 +34,25 @@ tasks.test {
     useJUnit()
 }
 
+tasks.withType<ProcessResources> {
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+}
+
+tasks.jar {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    // Include all dependencies in the JAR except those provided by the host toolkit
+    from(configurations.runtimeClasspath.get().filter { file ->
+        val path = file.path
+        !path.contains("plugin-api") &&
+        !path.contains("kotlin-stdlib") &&
+        !path.contains("kotlinx-coroutines") &&
+        !path.contains("kotlinx-serialization") &&
+        !path.contains("koin-core") &&
+        !path.contains("slf4j")
+    }.map { if (it.isDirectory) it else zipTree(it) })
+
+    exclude("**/.venv/**")
+    exclude("**/.env")
+}
+

@@ -81,6 +81,83 @@
                 }
             ],
             "isPausable": true
+        },
+        {
+            "name": "Image Processor with Scaling",
+            "description": "Process a folder of images using BetterIMG CLI with scaling",
+            "parameters": {
+                "folder": {
+                    "description": "Folder to process",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "width": {
+                    "defaultValue": "x1",
+                    "description": "Output width multiplier",
+                    "type": {
+                        "type": "enum",
+                        "className": "com.wip.betterimg.Widths",
+                        "options": [
+                            "x1",
+                            "x2",
+                            "x4",
+                            "x8"
+                        ]
+                    }
+                },
+                "grain": {
+                    "defaultValue": 5,
+                    "description": "Grain level for processing",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "INT"
+                    }
+                },
+                "outputFormat": {
+                    "defaultValue": "WEBP",
+                    "description": "Output image format",
+                    "type": {
+                        "type": "enum",
+                        "className": "com.wip.betterimg.OutputFormat",
+                        "options": [
+                            "PNG",
+                            "WEBP"
+                        ]
+                    }
+                },
+                "outFolder": {
+                    "defaultValue": null,
+                    "description": "Output folder (leave null to auto-create)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "resumeState": {
+                    "description": "",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "ANY"
+                    }
+                }
+            },
+            "returnType": {
+                "type": "primitive",
+                "primitiveType": "STRING"
+            },
+            "outputs": [
+                {
+                    "name": "result",
+                    "description": "",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                }
+            ],
+            "isPausable": true
         }
     ],
     "changelog": {
@@ -93,10 +170,21 @@
                 }
             },
             {
+                "version": "2.0.4",
+                "date": "2026-05-23",
+                "categories": {
+                    "Added": [
+                        "Added Width multiplier capability"
+                    ]
+                }
+            },
+            {
                 "version": "2.0.3",
                 "date": "2026-05-20",
                 "categories": {
-                    "Added": []
+                    "Added": [
+                        "Support for toolkit 1.5.1"
+                    ]
                 }
             },
             {

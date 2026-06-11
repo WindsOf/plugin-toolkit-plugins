@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder.native",
         "name": "PSD Builder Native",
-        "version": "3.0.1",
+        "version": "4.4.3",
         "description": "A plugin that builds layered PSD files natively in Kotlin."
     },
     "requirements": {
@@ -16,14 +16,14 @@
             "description": "Generates a layered PSD natively in Kotlin from an image, texts and bounding boxes",
             "parameters": {
                 "imagePath": {
-                    "description": "Path to image",
+                    "description": "Path to the base image (JPG, PNG, WebP)",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
                     }
                 },
                 "texts": {
-                    "description": "Texts to add",
+                    "description": "List of text strings to render",
                     "type": {
                         "type": "array",
                         "items": {
@@ -32,8 +32,28 @@
                         }
                     }
                 },
-                "bb": {
-                    "description": "Bounding boxes to add, (xmin, ymin, xmax, ymax)",
+                "balloonBoxes": {
+                    "description": "List of bounding boxes for each balloon (ymin, xmin, ymax, xmax)",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "primitive",
+                                "primitiveType": "DOUBLE"
+                            }
+                        }
+                    },
+                    "semanticTypes": [
+                        {
+                            "namespace": "wom",
+                            "name": "bounding-box",
+                            "variant": null
+                        }
+                    ]
+                },
+                "textBoxes": {
+                    "description": "List of bounding boxes for each text (ymin, xmin, ymax, xmax)",
                     "type": {
                         "type": "array",
                         "items": {
@@ -54,23 +74,27 @@
                 },
                 "fontSize": {
                     "defaultValue": 24,
-                    "description": "Font size (optional)",
+                    "description": "Font size in pixels",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "INT"
                     }
                 },
                 "fontName": {
-                    "defaultValue": "Anime Ace 2.0 BB",
-                    "description": "Font name (optional)",
+                    "defaultValue": "ANIME_ACE_2_0_BB",
+                    "description": "Typeface for the text",
                     "type": {
-                        "type": "primitive",
-                        "primitiveType": "STRING"
+                        "type": "enum",
+                        "className": "com.wip.psdbuilder.PsdFont",
+                        "options": [
+                            "ANIME_ACE_2_0_BB",
+                            "ARIAL"
+                        ]
                     }
                 },
                 "borderSize": {
                     "defaultValue": 3,
-                    "description": "Border thickness (0 for none)",
+                    "description": "Thickness of the text stroke/border (0 to disable)",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "INT"
@@ -78,25 +102,97 @@
                 },
                 "outputDir": {
                     "defaultValue": "",
-                    "description": "Output directory (optional)",
+                    "description": "Directory to save generated PSD (leave empty to use image folder)",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
+                    }
+                },
+                "leaveIntermediateFiles": {
+                    "defaultValue": false,
+                    "description": "Keep intermediate JSON and temp image files for debugging",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "BOOLEAN"
+                    }
+                },
+                "textAngles": {
+                    "description": "Rotations/Angles in degrees",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "DOUBLE"
+                        }
+                    }
+                },
+                "textColors": {
+                    "description": "Text Colors",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
+                    }
+                },
+                "hasBorder": {
+                    "description": "Has Border",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "BOOLEAN"
+                        }
+                    }
+                },
+                "borderColors": {
+                    "description": "Border Colors",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
+                    }
+                },
+                "shapes": {
+                    "description": "Shapes of the balloons",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
                     }
                 }
             },
             "returnType": {
-                "type": "primitive",
-                "primitiveType": "STRING"
+                "type": "object",
+                "className": "com.wip.psdbuilder.PSDBuildResult"
             },
+            "semanticTypes": [
+                {
+                    "namespace": "sys",
+                    "name": "file",
+                    "variant": null
+                }
+            ],
             "outputs": [
                 {
-                    "name": "result",
-                    "description": "",
+                    "name": "generated psd",
+                    "description": "Path to the generated PSD file",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
-                    }
+                    },
+                    "semanticTypes": [
+                        {
+                            "namespace": "sys",
+                            "name": "file",
+                            "variant": null
+                        }
+                    ]
                 }
             ]
         },
@@ -105,7 +201,7 @@
             "description": "Generates layered PSDs natively for a folder of images concurrently",
             "parameters": {
                 "inputFolder": {
-                    "description": "Path to folder of images",
+                    "description": "Path to folder containing chapter images",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
@@ -119,7 +215,7 @@
                     ]
                 },
                 "texts": {
-                    "description": "Texts to add",
+                    "description": "List of text strings to render across all pages",
                     "type": {
                         "type": "array",
                         "items": {
@@ -128,8 +224,28 @@
                         }
                     }
                 },
-                "bb": {
-                    "description": "Bounding boxes to add, (xmin, ymin, xmax, ymax)",
+                "balloonBoxes": {
+                    "description": "List of bounding boxes for each balloon (ymin, xmin, ymax, xmax)",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "primitive",
+                                "primitiveType": "DOUBLE"
+                            }
+                        }
+                    },
+                    "semanticTypes": [
+                        {
+                            "namespace": "wom",
+                            "name": "bounding-box",
+                            "variant": null
+                        }
+                    ]
+                },
+                "textBoxes": {
+                    "description": "List of bounding boxes for each text (ymin, xmin, ymax, xmax)",
                     "type": {
                         "type": "array",
                         "items": {
@@ -149,7 +265,7 @@
                     ]
                 },
                 "pageNames": {
-                    "description": "Page names corresponding to each text",
+                    "description": "List of image filenames corresponding to each text",
                     "type": {
                         "type": "array",
                         "items": {
@@ -160,7 +276,7 @@
                 },
                 "outputDir": {
                     "defaultValue": "",
-                    "description": "Output directory",
+                    "description": "Directory to save generated PSDs (leave empty for 'output_psds' in input folder)",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
@@ -168,41 +284,117 @@
                 },
                 "fontSize": {
                     "defaultValue": 24,
-                    "description": "Font size (optional)",
+                    "description": "Font size in pixels",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "INT"
                     }
                 },
                 "fontName": {
-                    "defaultValue": "Anime Ace 2.0 BB",
-                    "description": "Font name (optional)",
+                    "defaultValue": "ANIME_ACE_2_0_BB",
+                    "description": "Typeface for the text",
                     "type": {
-                        "type": "primitive",
-                        "primitiveType": "STRING"
+                        "type": "enum",
+                        "className": "com.wip.psdbuilder.PsdFont",
+                        "options": [
+                            "ANIME_ACE_2_0_BB",
+                            "ARIAL"
+                        ]
                     }
                 },
                 "borderSize": {
                     "defaultValue": 3,
-                    "description": "Border thickness (0 for none)",
+                    "description": "Thickness of the text stroke/border (0 to disable)",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "INT"
                     }
+                },
+                "leaveIntermediateFiles": {
+                    "defaultValue": false,
+                    "description": "Keep intermediate JSON and temp image files for debugging",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "BOOLEAN"
+                    }
+                },
+                "textAngles": {
+                    "description": "Rotations/Angles in degrees",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "DOUBLE"
+                        }
+                    }
+                },
+                "textColors": {
+                    "description": "Text Colors",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
+                    }
+                },
+                "hasBorder": {
+                    "description": "Has Border",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "BOOLEAN"
+                        }
+                    }
+                },
+                "borderColors": {
+                    "description": "Border Colors",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
+                    }
+                },
+                "shapes": {
+                    "description": "Shapes of the balloons",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
+                    }
                 }
             },
             "returnType": {
-                "type": "primitive",
-                "primitiveType": "STRING"
+                "type": "object",
+                "className": "com.wip.psdbuilder.PSDBuildResult"
             },
+            "semanticTypes": [
+                {
+                    "namespace": "sys",
+                    "name": "file",
+                    "variant": null
+                }
+            ],
             "outputs": [
                 {
-                    "name": "result",
-                    "description": "",
+                    "name": "generated psd",
+                    "description": "Path to the generated PSD file",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
-                    }
+                    },
+                    "semanticTypes": [
+                        {
+                            "namespace": "sys",
+                            "name": "file",
+                            "variant": null
+                        }
+                    ]
                 }
             ]
         },
@@ -226,16 +418,63 @@
                 }
             },
             "returnType": {
-                "type": "primitive",
-                "primitiveType": "STRING"
+                "type": "object",
+                "className": "com.wip.psdbuilder.PSDBuildResult"
+            },
+            "semanticTypes": [
+                {
+                    "namespace": "sys",
+                    "name": "file",
+                    "variant": null
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "generated psd",
+                    "description": "Path to the generated PSD file",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    },
+                    "semanticTypes": [
+                        {
+                            "namespace": "sys",
+                            "name": "file",
+                            "variant": null
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Extract Text Layers from PSD",
+            "description": "Reads a PSD file and returns a list of text layers with their text, position, and font info.",
+            "parameters": {
+                "psdPath": {
+                    "description": "Path to PSD file",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                }
+            },
+            "returnType": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "className": "com.wip.psdbuilder.ExtractedText"
+                }
             },
             "outputs": [
                 {
                     "name": "result",
                     "description": "",
                     "type": {
-                        "type": "primitive",
-                        "primitiveType": "STRING"
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "className": "com.wip.psdbuilder.ExtractedText"
+                        }
                     }
                 }
             ]
@@ -335,5 +574,7 @@
                 }
             }
         ]
-    }
+    },
+    "hasUpdateHandler": true,
+    "hasSetupHandler": true
 }
