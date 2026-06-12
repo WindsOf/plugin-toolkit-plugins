@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.slicer",
         "name": "Slicer",
-        "version": "1.1.4",
+        "version": "1.1.5",
         "description": "A plugin that provides vertical images sliding capabilities for manhwa."
     },
     "requirements": {

@@ -82,7 +82,7 @@ data class PSDBuildResult(
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "PSD Builder Native",
-    version = "4.4.3",
+    version = "4.4.4",
     description = "A plugin that builds layered PSD files natively in Kotlin."
 )
 class PSDBuilderPlugin {

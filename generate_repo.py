@@ -86,7 +86,7 @@ def run_command(command, cwd=None):
         command, cwd=cwd, shell=True, capture_output=True, text=True, env=env
     )
     if result.returncode != 0:
-        print(f"Error: \n{result.stderr}")
+        print(f"Error: {result.stdout}\n{result.stderr}")
         return False
     return True
 

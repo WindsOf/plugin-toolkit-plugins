@@ -8,72 +8,72 @@
     {
       "name": "BetterIMG",
       "pkg": "com.wip.betterimg",
-      "version": "2.0.4",
+      "version": "2.0.5",
       "fileName": "betterimg.jar",
       "description": "A plugin that processes images using the BetterIMG CLI tool.",
       "targetAppVersion": "1.0.0",
-      "hash": "0ffa645dc56edc3308fd526c62e6e064bfa67a6d66b9980f2462058450db7d88",
-      "signature": "ZgHjiEsv9qwKe4NRh/hlirdmo8BTGOI06JQHRz5/n6PA3e1lxYMTWHIQIPr2GUsCnkg4jbPQeE2Gj3LiXyzoaNa0NUkhehlrIF6auej5H+CFFB2n0eZOGc8MQ8sQPnYZzi8wiju5/a0q1IycHTBhobLyRHJUXmMLMEDEAy0Pcq4muxpKSc3eUYrZU4xYO9RR9r1rY+Hy+enCnr6GXHqV/Xgay0YJUyu+ahlInDJhFYlafgiQUirBro/aYxWq9A7Ji8V4gMecLh4E2sQz6SM/dKI0IRSg5tzYwL86CmhvdoLBVyr70R4YMhnFEaEkNZrA+dIXvRDG2bYJaSpFM8KaxA=="
+      "hash": "67a91c2db7348242329ca72b8809a8b2ee117665c533bf605e25ded8d88039dc",
+      "signature": "s3QmhwrdLJ3w17mei76P/JdgvWj+TxHa/qTQrO/ndkynk5tXSDuzYYL3vFCbeDCQh4pjdtLjwyvOXMP+JbAhHUX/1L3eJuewZjJefPnwqoSUScWylrZCDrDjWG5Yq3n/A007izt5L+vKkSrL/PsTp18pf/HMixrDR0hf0SOreioDfHEF02Knz44LTReNErbpd1tbj/GVazqqSMg+YtHVjIYP23T56d2Lbk+lOmg7Z9zjBkQ5vv0mXKXazZNIt6myPxKolsLg/kMU62c2FBEsocDHdhntfA8cUGrPsEr11grvtQGOBnrqP+q/wLJiJLFig3o7pvGfr6kBZuzF3qmpIA=="
     },
     {
       "name": "Image Toolkit",
       "pkg": "com.wip.imageToolkit",
-      "version": "1.1.1",
+      "version": "1.1.2",
       "fileName": "imageToolkit.jar",
       "description": "A plugin that provides toolkit to work with images.",
       "targetAppVersion": "1.0.0",
-      "hash": "c0b3301416176ad6c1343112bc5cb04044f1a7b6d5ff95b4e7f2aee140324e74",
-      "signature": "sYMVYDsENP+QngB+OQkdl8u0jG0sDUlQKZEMZYH9QI0w8iAxl/b1y+ACgPcpsqoFhlgLJf2fM7Lxnmt5HasVL67pcmLsfIE1u4UW4/o7/vtWcXETN2L+42KIRPaReNEOEQ/qiGt1pnGRuECh0VeTviCTqIKTeV5Rz7nI67bn79nTNbIvhLwMyEOrYVlwwqbEoX9gW0hkN9SAWeIVQzKq4JxTOdKAWHTNz4H6GMOLqqsrzSh4QqNAvlFMlKIqOS6AqFManhTUfGmSAcGloQGdsYeEf9FPDW6TJT8tY6+U265u6qBh2H00G63twCNXEiEpR2mDZSDpI4Lvw/McxoARCA=="
+      "hash": "e435f900c21f7bc90076820e1b688cb077dbd2113a099a13043aa8ed0d3890ad",
+      "signature": "oqLTg39cnAoecWKLknw7XpMSkc8u2Bu3Ym6jJjDd1wtD6K9BYHujGi6uePx8hmB3ww9tiq4/NxzyvapTNACMITr7NzIVf8bmzTrFYa4BYiCcziGDyeSuB3aRSYrWGwz77mbsDDSoFebjeVkDOb3FU6/VYu0p7rP2H9VlmFUH06P5x+1Jm2cpacQC8eLymEVxylpCHO7n791EggRa864wW/S1+ZXkkpGK4VrpsEtSq9JOTLtl4FFoC7k+L/yvPh+aRgpZKea91Hfd2VttofdlpIbeYd1x4DO6hTK8t30mVeOv9JpN7boWyrL5ag5+Ynb9KV3kdnMpk28Ad/V5HYnLfQ=="
     },
     {
       "name": "Manhwa Translator AI",
       "pkg": "com.wip.manhwa_translator_ai",
-      "version": "1.3.3",
+      "version": "1.3.4",
       "fileName": "manhwaTranslatorAI.jar",
       "description": "Translate text from Manhwa/Manga into Italian using Google AI via Koog",
       "targetAppVersion": "1.0.0",
-      "hash": "d29c498ac07c3145afdb803890e97c17e97b915f44d40b62a875204885326347",
-      "signature": "jqSG52PM+bv0BzrYrrwZtaP9zKdobNGQDPK5itab9ltnbaReaJCNMmD83hVkDyAhkpJE870vbFW/cvyWAXjIeiF0jkYGh6e/hxiBkVHvPLDLKYsg0P+q15nvZGPj1kowYxzVxJzmZQGZcQTF4j1itVxLFSTiNbMQ840MfQDM09/HmobBaFrnMknMcm3h2rmGWbZ0gScIjmMwFupbjY3k+2OYtRw9tNqErfbWfswmRE3XrD2FrdYqca16V4ejEKQxCGosqeHlm56YrIarytcPQBifpqzFDPRoGbPgcHjs1VfezT06cKSEKBtaRAcpyw9PPYDnbc3tv5tWA5JGx49VBg=="
+      "hash": "7977e5dcdb762533e9296ba72f0b617ffcd6d49a07bec50dd47779f183dd9272",
+      "signature": "Wng4oabTnGbeD/VTiO4tw8jVac8FikJdsMvEjA+4xgdHy81RqX3dUoMPHPUENzmyoCIfDiAgowgJg+VVNVhzKTven/qmD3Aqi+5eOqzCHbcfh/MSuJ/m/vBMnLOCYsCJCCSrZUnvgSgKrgX/pTAbP6NUhaAVs5lx2OVYkFOgHfieVM5csWFy7wrNNNplggWC/3ws2iOMlBpmlQx72gXwcnHSQRmqDEQ1DAjArT/MjbKk3mQ6tkqQRgQDQiVl7GjLRO4tDWdHh8Jw75IOYR4PSq5tg3eBArQmu/7KO5oHVAvWoOlII5qqyweFnu8VuBSmX1WZu0GDvuko6gvHnDHtgA=="
     },
     {
       "name": "OCR IA",
       "pkg": "com.wip.ocr_ia",
-      "version": "2.4.1",
+      "version": "2.4.2",
       "fileName": "OCR_IA.jar",
       "description": "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog",
       "targetAppVersion": "1.0.0",
-      "hash": "aa1998675adb20517cdce8d180d4e79d0b8cf2a418462bb0d84dfbc252a4e3bc",
-      "signature": "bhMYa3glwGwjyPcHCoBPamjspV3QxHYIpPoxXxVOL+XsvZBErv75MKA2Xkqbs2ZAKwB5ntsfmErrWoZkDLoUNYCtSIpYYjxUEQIiGBdCmlYDTnkzRRqxSECjuslxuqeynxwR/gu24EgXysX4ZPSSl8UZYQXPEHJp40RJ4MEUQF66OtpWNzC4P5bU4LocIIMiejQxcSs8BeffQC4v+cBv4Jg0KUkRNRBGwxkmIhks9NXNww7k+xFGhSn7hlzoEn3S+4XBP8xlosdF/g4vk+IRDF8emTsrwtwbEdaKCkUZGbpQJ5tDtajOpsClM3Z0gxbKGOwWXizgf/KTQgRt239EWw=="
+      "hash": "9cc1979a4153fc4700a0334d188451751d170a74e9e5f473e3e3129d44544004",
+      "signature": "WzbWye1S2ftCdAT8bj4KsUhRx3GcN8dCp+QxmqRTk2Tquptbboc5RwzZFK/rXL24MUEOOBqS8Lu7bASWZihydzoSnueLuz2HAVBitb5th9AA2WBjH/1WYm2M0brX28S0KzeSW2b8xsGGE1onRKH2rawGR5mcQCFdcIU7DmR+NKgVb4llrxwsTLlgncLf7lrFYI/+VLURJSVZuKmFJlcU8lnVvqdfFGh+meZiFx/5vNzqDsS219YvfWrP3LYlKTMIiPfL0eSL5u085xlkh4yyWx6ZN9aHppq/ijV7taqx5A865rLK/vX4XAvM7b3aMoX3ng7363FCmRLzvZBS69X67A=="
     },
     {
       "name": "PSD Builder",
       "pkg": "com.wip.psdbuilder",
-      "version": "4.4.2",
+      "version": "4.4.3",
       "fileName": "PSD_builder.jar",
       "description": "A plugin that builds layered PSD files using PSD_builder.exe.",
       "targetAppVersion": "1.0.0",
-      "hash": "c612470f3098c5594c5ba4cbade8d9e28bf404c1563fc3e340cbce57f43271c3",
-      "signature": "GDofpqxakEfDCKni/2w0ETfXCEjQXPGg4xZMSHxGZftsxsSe0iUO7Lf/vROI/5oi7DA7pLbLt+xPLPqu4NX819tTaJ38HVWUgGxm43luadRqViWaj5x1cmWO0h87jGHAPXKjU6+Vjak/zuGeiu00CN1JGgcYjJi4tNlPt6MMRt482jgardI9lrD4I+L1zSSCCbG52h22AKd/9iOJziq0/q7yM0SNDqHckQPKtRK2W4uzi1pyEG6MtttkBX0hjq9wWWinuKXkd3SymTnr3CBSLWN+fSVOLGYmkCLKoZcDD12UjayoVEkCJtYvLKaDfw7aFNzwJiX1SwpIDR0cRMTbYw=="
+      "hash": "7cfbb6598894dcc829758f09a5543ac957baa12179669a6fca864ee030c23721",
+      "signature": "FqueyuuP0NjcDxykNwyau5WLEYCCxjsBwopxNb1Ynve8oZqYxeELjaAQw00/6EqBYALXU37vrsunfJAWMFDdmFz5wshyFS9LZYcR4zorfVTGZcVlJRAgdmatwT2Ze7syLEAwtlkE2jf07sdv8nm1Hxpcv9ca5M5LVN1P7uiGXCCy22N/8I62lZ82j6t6Te7nMggVCkkkp+SBB7mRiMbba8lwfr/vRbq5e6ATpEgeZ/csgeISHsoPRLinKTZpa8N9wtlzg811q26+AmKKn8ax9oS84CZG57UiPPoMLnszRsk2Dc7olgi5tklm3EqJurmYZmxv2QvO4JFVwO5K5wA9qA=="
     },
     {
       "name": "PSD Builder Native",
       "pkg": "com.wip.psdbuilder.native",
-      "version": "4.4.3",
+      "version": "4.4.4",
       "fileName": "PSD_builder_native.jar",
       "description": "A plugin that builds layered PSD files natively in Kotlin.",
       "targetAppVersion": "1.0.0",
-      "hash": "b40d79ac84f9d4bc720695024242cb447b7b9dd71a21cb39baa237623853a58d",
-      "signature": "JG+pi+TqGuuEVp+vUuqQc+6EZgS9NeU9/lQKT+/o232ftQYfo9ooP+5pZ9FOeEL+PBkgD+gqapH1kaO2XD9aNdaPgpZKzTzxuwhCigBvBF4RDoSqHccCAf4lJW7u7rduI51Q289qV64Wa3q6JdaJPwxXnGSd+HuLRvZXh5v+jbqJsLt0w4kRuccmYPl0yyDaPireQq55GPr+r4M/Hh1hG6Qq0j++g4/0ZduJjfzw2kmzS0IOTVDT+42lSWziELhNdQtadf0O8bJZP7+TTKgGLgm5nRmk5Ty85IXfQL/Sp4vPIOAcsvuzv27/JlZKHxHQfEbxYSed2xi1i4Ejtn0jbQ=="
+      "hash": "100bbdce0f12f71f6b76ec3a353b389d70e06bf75d28687e621a0a8fb93afd7d",
+      "signature": "Y9VDhglRj4VFU0U4696/XMqz4OBu46B0G4iWD0+wNZ5SjDdWYjAlLKn2jNbDkPpEQTCRyqgd5LJkYD6mNfGul/ntdpZDcLdtwTjhCmZtUNqOEtRWf71eL1iHxw3+EoEioFw64+V/p5MYlvv9995yLZ9mv/9A5CpnpKcLzQFYVXwo2xi1TWeOfFjCpENNb+csnY43amzLWA6LpAuuu7Xjp2eJUye5Tz+hC8knR9amvkGHW38kf0FIJv1FG6ZwUT2aZWf9tlMYqJpPNRZg+Td1rRWQ7QY4KfIvLlWnSb/7kyKDjeRkJgQmG5qwaVU4sqaS38QYKo/A0+WDUzH+FjB6wQ=="
     },
     {
       "name": "Slicer",
       "pkg": "com.wip.slicer",
-      "version": "1.1.4",
+      "version": "1.1.5",
       "fileName": "slicer.jar",
       "description": "A plugin that provides vertical images sliding capabilities for manhwa.",
       "targetAppVersion": "1.0.0",
-      "hash": "c32ac8291e3e154e77c0a2cfcacd5edb4ab7e844508c17d1ca219dfd3bdebe58",
-      "signature": "mrWkZNRQnTSEZtUTA79tIHhetTe3zpOaOGdlimp40jE3l8nvFmstnOkv8SwgPjI3D2u1bz/vbgxwXc5J0/s/I65I2DlltkNfXTM3H0UJi2M2g6aM/DWAwkBkEsMLhR7bo4MpJPBlsrmCeesCH0yI20g7U1z2xhQOfs6LtLIrLI1qYg4Dc5TRmfeiEw+zbOe5iePW7TgK6cHJsuOaaecYekDvlBUJA1xTRD4x2f5eqUgP8XyYIu65KaLF+8rXdJpu4oLYaMtsLGuDXuk7nuKPuz0a/fudP+Jv8Rnn69m1r/zr+QtxYaas3VO2EDeBqb/mRWCve86uRbgLSnKblOKCjQ=="
+      "hash": "d2d162786db86e85e21c6b791642e3bf3eaeeeda57d5424ac7ca6f49871cc97e",
+      "signature": "nv26/weLdKFewroV6xKQQMR3sTtlrwc7JVsqRtdjN2ATEGbeDeexe/3YzhUXaLEC4kQQzJhHpXmhgp/dndWXW3f3vY/i0rtcI6Rq97jA9xU745bc5uSxTUT2mVfU/sl498Hvc1BN7yH/iAu7YvJIFHl8sXG7zlzcY6JHeFAoUDfb/9XWEeamLuflSMraPQsj8a0WfReqrM2p4P2Ho461s8bv320vDBY4NhFjgYsbpHw+inWsjRP3kForhV9S+wJie28KrQRyZJMaPt9458z96bPMD04hwEGHOqGFaexX+GdqA1K4OMmP8K0xO+aUlfbsSYoflllJsjTn24SWqxkz+A=="
     }
   ],
   "flows": [

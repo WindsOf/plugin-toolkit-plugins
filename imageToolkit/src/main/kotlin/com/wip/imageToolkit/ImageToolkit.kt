@@ -14,7 +14,7 @@ import java.awt.Color
 @PluginInfo(
     id = "com.wip.imageToolkit",
     name = "Image Toolkit",
-    version = "1.1.1",
+    version = "1.1.2",
     description = "A plugin that provides toolkit to work with images."
 )
 class ImageToolkit {

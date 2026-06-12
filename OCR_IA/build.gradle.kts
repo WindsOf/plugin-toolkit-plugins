@@ -50,5 +50,10 @@ tasks.jar {
 
     exclude("**/.venv/**")
     exclude("**/.env")
+    exclude("META-INF/*.RSA", "META-INF/*.SF", "META-INF/*.DSA")
+    exclude("META-INF/versions/**/module-info.class")
+    exclude("module-info.class")
+    exclude("META-INF/INDEX.LIST")
+    exclude("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*")
 }
 

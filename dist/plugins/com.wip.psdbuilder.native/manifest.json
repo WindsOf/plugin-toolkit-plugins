@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder.native",
         "name": "PSD Builder Native",
-        "version": "4.4.3",
+        "version": "4.4.4",
         "description": "A plugin that builds layered PSD files natively in Kotlin."
     },
     "requirements": {
@@ -169,7 +169,13 @@
             },
             "returnType": {
                 "type": "object",
-                "className": "com.wip.psdbuilder.PSDBuildResult"
+                "className": "com.wip.psdbuilder.PSDBuildResult",
+                "properties": {
+                    "psdPath": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                }
             },
             "semanticTypes": [
                 {
@@ -371,7 +377,13 @@
             },
             "returnType": {
                 "type": "object",
-                "className": "com.wip.psdbuilder.PSDBuildResult"
+                "className": "com.wip.psdbuilder.PSDBuildResult",
+                "properties": {
+                    "psdPath": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                }
             },
             "semanticTypes": [
                 {
@@ -419,7 +431,13 @@
             },
             "returnType": {
                 "type": "object",
-                "className": "com.wip.psdbuilder.PSDBuildResult"
+                "className": "com.wip.psdbuilder.PSDBuildResult",
+                "properties": {
+                    "psdPath": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                }
             },
             "semanticTypes": [
                 {
@@ -462,7 +480,37 @@
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "className": "com.wip.psdbuilder.ExtractedText"
+                    "className": "com.wip.psdbuilder.ExtractedText",
+                    "properties": {
+                        "text": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        },
+                        "left": {
+                            "type": "primitive",
+                            "primitiveType": "INT"
+                        },
+                        "top": {
+                            "type": "primitive",
+                            "primitiveType": "INT"
+                        },
+                        "right": {
+                            "type": "primitive",
+                            "primitiveType": "INT"
+                        },
+                        "bottom": {
+                            "type": "primitive",
+                            "primitiveType": "INT"
+                        },
+                        "fontName": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        },
+                        "fontSize": {
+                            "type": "primitive",
+                            "primitiveType": "DOUBLE"
+                        }
+                    }
                 }
             },
             "outputs": [
@@ -473,7 +521,37 @@
                         "type": "array",
                         "items": {
                             "type": "object",
-                            "className": "com.wip.psdbuilder.ExtractedText"
+                            "className": "com.wip.psdbuilder.ExtractedText",
+                            "properties": {
+                                "text": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                },
+                                "left": {
+                                    "type": "primitive",
+                                    "primitiveType": "INT"
+                                },
+                                "top": {
+                                    "type": "primitive",
+                                    "primitiveType": "INT"
+                                },
+                                "right": {
+                                    "type": "primitive",
+                                    "primitiveType": "INT"
+                                },
+                                "bottom": {
+                                    "type": "primitive",
+                                    "primitiveType": "INT"
+                                },
+                                "fontName": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                },
+                                "fontSize": {
+                                    "type": "primitive",
+                                    "primitiveType": "DOUBLE"
+                                }
+                            }
                         }
                     }
                 }
@@ -482,6 +560,16 @@
     ],
     "changelog": {
         "releases": [
+            {
+                "version": "4.4.4",
+                "date": "2026-06-12",
+                "categories": {
+                    "Added": [
+                        "Support for toolkit 1.6.0",
+                        "Text formatting"
+                    ]
+                }
+            },
             {
                 "version": "3.0.1",
                 "date": "2026-05-23",

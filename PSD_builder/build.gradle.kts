@@ -16,10 +16,6 @@ kotlin {
     }
 }
 
-val bundle by configurations.creating {
-    isCanBeResolved = true
-}
-
 dependencies {
     implementation(platform(libs.koin.bom))
     implementation(libs.koin.core)
@@ -28,7 +24,6 @@ dependencies {
     ksp(libs.plugin.api)
 
     implementation("com.twelvemonkeys.imageio:imageio-webp:3.10.1")
-    bundle("com.twelvemonkeys.imageio:imageio-webp:3.10.1")
 
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlin.test.junit)
@@ -39,10 +34,29 @@ tasks.test {
     useJUnit()
 }
 
-tasks.named<Jar>("jar") {
-    from({
-        configurations["bundle"].filter { it.name.endsWith("jar") }.map { zipTree(it) }
-    })
+tasks.withType<ProcessResources> {
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+}
+
+tasks.jar {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from(configurations.runtimeClasspath.get().filter { file ->
+        val path = file.path
+        !path.contains("plugin-api") &&
+        !path.contains("kotlin-stdlib") &&
+        !path.contains("kotlinx-coroutines") &&
+        !path.contains("kotlinx-serialization") &&
+        !path.contains("koin-core") &&
+        !path.contains("slf4j")
+    }.map { if (it.isDirectory) it else zipTree(it) })
+
+    exclude("**/.venv/**")
+    exclude("**/.env")
+    exclude("META-INF/*.RSA", "META-INF/*.SF", "META-INF/*.DSA")
+    exclude("META-INF/versions/**/module-info.class")
+    exclude("module-info.class")
+    exclude("META-INF/INDEX.LIST")
+    exclude("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*")
 }
 

@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.betterimg",
         "name": "BetterIMG",
-        "version": "2.0.4",
+        "version": "2.0.5",
         "description": "A plugin that processes images using the BetterIMG CLI tool."
     },
     "requirements": {
@@ -162,6 +162,15 @@
     ],
     "changelog": {
         "releases": [
+            {
+                "version": "2.0.5",
+                "date": "2026-06-12",
+                "categories": {
+                    "Added": [
+                        "Support for toolkit 1.6.0"
+                    ]
+                }
+            },
             {
                 "version": "2.0.4",
                 "date": "2026-05-23",

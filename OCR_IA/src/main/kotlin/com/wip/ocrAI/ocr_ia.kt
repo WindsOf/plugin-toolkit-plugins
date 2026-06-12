@@ -12,7 +12,7 @@ import org.wip.plugintoolkit.api.annotations.PluginValidate
 @PluginInfo(
     id = "com.wip.ocr_ia",
     name = "OCR IA",
-    version = "2.4.1",
+    version = "2.4.2",
     description = "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog"
 )
 class OCR_IA(val settings: OcrIASettings) {
