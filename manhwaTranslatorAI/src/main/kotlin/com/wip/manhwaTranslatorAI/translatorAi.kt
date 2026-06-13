@@ -27,13 +27,14 @@ data class TranslatorAISettings(
 enum class AIModel(val id: String) {
     GEMMA_26B("gemma-4-26b-a4b-it"),
     GEMMA_31B("gemma-4-31b-it"),
-    GEMINI_3_5_FLASH("gemini-3.5-flash")
+    GEMINI_3_5_FLASH("gemini-3.5-flash"),
+    GEMINI_3_1_FLASH_LITE("gemini-3.1-flash-lite")
 }
 
 @PluginInfo(
         id = "com.wip.manhwa_translator_ai",
         name = "Manhwa Translator AI",
-        version = "1.3.5",
+        version = "1.3.6",
         description = "Translate text from Manhwa/Manga into Italian using Google AI via Koog"
 )
 class TranslatorAI(val settings: TranslatorAISettings) {
@@ -71,6 +72,11 @@ class TranslatorAI(val settings: TranslatorAISettings) {
             )
             useContextImages: Boolean? = false,
             @CapabilityParam(
+                description = "Generate a global summary context from all chapter images using Gemini 3.1 Flash Lite",
+                defaultValue = "true"
+            )
+            generateChapterSummary: Boolean? = true,
+            @CapabilityParam(
                 description = "Save the translation result in a json",
                 defaultValue = "true"
             )
@@ -80,12 +86,13 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         val logger = context.logger
         val effectiveDict = dictionary ?: ""
         val effectiveContextImages = useContextImages ?: false
+        val effectiveSummary = generateChapterSummary ?: true
         logger.info("Manhwa Translator AI started. Model: ${model.id}")
-        logger.info("Input size: ${input.size} | Dictionary size: ${effectiveDict.length} | Context Images: $effectiveContextImages")
+        logger.info("Input size: ${input.size} | Dictionary size: ${effectiveDict.length} | Context Images: $effectiveContextImages | Global Summary: $effectiveSummary")
 
         return try {
             val service = KoogAITranslatorService(context)
-            val result = service.performTranslation(input, effectiveDict, settings.googleApiKey, settings.useStructuredOutput, model.id, pageNames, inputFolder, effectiveContextImages, save ?: true)
+            val result = service.performTranslation(input, effectiveDict, settings.googleApiKey, settings.useStructuredOutput, model.id, pageNames, inputFolder, effectiveContextImages, effectiveSummary, save ?: true)
             logger.info("Translation completed.")
             result
         } catch (e: Throwable) {

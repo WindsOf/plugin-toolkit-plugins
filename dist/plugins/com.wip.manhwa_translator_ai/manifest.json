@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.manhwa_translator_ai",
         "name": "Manhwa Translator AI",
-        "version": "1.3.5",
+        "version": "1.3.6",
         "description": "Translate text from Manhwa/Manga into Italian using Google AI via Koog"
     },
     "requirements": {
@@ -41,7 +41,8 @@
                         "options": [
                             "GEMMA_26B",
                             "GEMMA_31B",
-                            "GEMINI_3_5_FLASH"
+                            "GEMINI_3_5_FLASH",
+                            "GEMINI_3_1_FLASH_LITE"
                         ]
                     }
                 },
@@ -67,6 +68,14 @@
                 "useContextImages": {
                     "defaultValue": false,
                     "description": "Send images to AI for visual context (Requires Gemini 1.5/Gemma)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "BOOLEAN"
+                    }
+                },
+                "generateChapterSummary": {
+                    "defaultValue": true,
+                    "description": "Generate a global summary context from all chapter images using Gemini 3.1 Flash Lite",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "BOOLEAN"
@@ -124,6 +133,17 @@
     },
     "changelog": {
         "releases": [
+            {
+                "version": "1.3.6",
+                "date": "2026-06-13",
+                "categories": {
+                    "Added": [
+                        "Global chapter context generation using Gemini 3.1 Flash Lite.",
+                        "Image resizing and compression (50% scale, 60% quality JPEG) before summary generation to maintain all context while preventing timeouts and payload limit errors.",
+                        "Automatic cleanup of temporary processed images."
+                    ]
+                }
+            },
             {
                 "version": "1.3.5",
                 "date": "2026-06-13",
@@ -259,5 +279,6 @@
         ]
     },
     "hasUpdateHandler": true,
-    "hasSetupHandler": true
+    "hasSetupHandler": true,
+    "hasMigrations": true
 }

@@ -18,6 +18,13 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import java.io.File
+import java.awt.Graphics2D
+import java.awt.RenderingHints
+import java.awt.image.BufferedImage
+import javax.imageio.ImageIO
+import javax.imageio.IIOImage
+import javax.imageio.ImageWriteParam
+import javax.imageio.stream.FileImageOutputStream
 
 @Serializable
 data class TranslationResponse(
@@ -100,6 +107,7 @@ class KoogAITranslatorService(private val context: PluginContext) {
         pageNames: List<String>? = null,
         inputFolder: String? = null,
         useContextImages: Boolean = false,
+        generateChapterSummary: Boolean = true,
         save: Boolean = true
     ): List<String> {
         if (input.isEmpty()) return emptyList()
@@ -129,9 +137,58 @@ class KoogAITranslatorService(private val context: PluginContext) {
         if (useContextImages && !isContextModeValid) {
             logger.warn("Context Images enabled but missing/invalid inputs (pageNames or inputFolder mismatch). Falling back to text-only mode.")
         }
+        
+        var globalContext: String? = null
+        if (generateChapterSummary && !inputFolder.isNullOrBlank()) {
+            val imageExtensions = setOf("png", "jpg", "jpeg", "webp", "bmp")
+            val allImages = if (pageNames != null && pageNames.isNotEmpty()) {
+                pageNames.distinct().map { File(inputFolder, it) }.filter { it.exists() }
+            } else {
+                val folder = File(inputFolder)
+                if (folder.exists() && folder.isDirectory) {
+                    folder.listFiles { f -> f.isFile && f.extension.lowercase() in imageExtensions }
+                        ?.sortedBy { it.name }
+                        ?.toList() ?: emptyList()
+                } else {
+                    emptyList()
+                }
+            }
+
+            if (allImages.isNotEmpty()) {
+                logger.info("Preparing ${allImages.size} images for global context summary (resizing and compressing)...")
+                val tempDir = try {
+                    java.nio.file.Files.createTempDirectory("manhwa_summary_").toFile()
+                } catch (e: Exception) {
+                    null
+                }
+
+                try {
+                    val processedImages = allImages.mapIndexed { idx, img ->
+                        if (tempDir != null) {
+                            val targetFile = File(tempDir, "summary_page_${idx}.jpg")
+                            resizeAndCompressImage(img, targetFile)
+                        } else {
+                            img
+                        }
+                    }
+
+                    globalContext = generateChapterContext(processedImages, effectiveApiKey)
+                } finally {
+                    // Clean up temp directory
+                    if (tempDir != null) {
+                        try {
+                            tempDir.deleteRecursively()
+                            logger.info("Temporary directory for summary images deleted successfully.")
+                        } catch (e: Exception) {
+                            logger.warn("Failed to delete temp directory: ${e.message}")
+                        }
+                    }
+                }
+            }
+        }
 
         coroutineScope {
-            if (isContextModeValid && pageNames != null && inputFolder != null) {
+            if (isContextModeValid) {
                 // Image Context Mode
                 val entries = input.mapIndexed { index, text -> TextEntry(index, text, pageNames[index]) }
                 val groupedByPage = entries.groupBy { it.pageName }
@@ -169,7 +226,7 @@ class KoogAITranslatorService(private val context: PluginContext) {
                             val images = uniqueChunkPages.map { File(inputFolder, it) }.filter { it.exists() }
                             
                             val translations = translateChunkWithRetry(
-                                chunkTexts, images, dictionaryContent, effectiveApiKey, useStructuredOutput, modelId, index
+                                chunkTexts, images, dictionaryContent, effectiveApiKey, useStructuredOutput, modelId, index, globalContext
                             )
 
                             // Place translations in correct original indices
@@ -190,7 +247,7 @@ class KoogAITranslatorService(private val context: PluginContext) {
                         concurrentSemaphore.withPermit {
                             acquireRateLimit()
                             val translations = translateChunkWithRetry(
-                                chunk, null, dictionaryContent, effectiveApiKey, useStructuredOutput, modelId, index
+                                chunk, null, dictionaryContent, effectiveApiKey, useStructuredOutput, modelId, index, globalContext
                             )
                             val startIndex = index * 50
                             translations.forEachIndexed { i, translatedText ->
@@ -230,7 +287,8 @@ class KoogAITranslatorService(private val context: PluginContext) {
         apiKey: String,
         useStructuredOutput: Boolean,
         modelId: String,
-        chunkIndex: Int
+        chunkIndex: Int,
+        chapterContext: String?
     ): List<String> {
         val executor = simpleGoogleAIExecutor(apiKey)
         
@@ -267,10 +325,14 @@ class KoogAITranslatorService(private val context: PluginContext) {
         val imageContextRule = if (!images.isNullOrEmpty()) {
             "\nContext Images are provided. Use them to understand the scene, characters, and tone, but DO NOT transcribe them. Only translate the strings provided."
         } else ""
+        
+        val globalContextRule = if (!chapterContext.isNullOrBlank()) {
+            "\n\nGLOBAL CHAPTER CONTEXT:\n$chapterContext\n\nUse this context to maintain consistency in names, tone, and story events."
+        } else ""
 
         val promptInstructions = """
             You are a professional Manhwa/Manga translator. 
-            Translate the following list of strings into natural, expressive Italian.$imageContextRule
+            Translate the following list of strings into natural, expressive Italian.$imageContextRule$globalContextRule
             
             GUIDELINES:
             1. Maintain the exact same order as the input list.
@@ -365,5 +427,86 @@ class KoogAITranslatorService(private val context: PluginContext) {
         }
 
         return raw.trim()
+    }
+
+    private suspend fun generateChapterContext(images: List<File>, apiKey: String): String? {
+        logger.info("Generating global chapter context using gemini-3.1-flash-lite with ${images.size} images...")
+        return try {
+            retryWithBackoff {
+                val executor = simpleGoogleAIExecutor(apiKey)
+                val model = LLModel(
+                    provider = LLMProvider.Google,
+                    id = "gemini-3.1-flash-lite",
+                    capabilities = buildList {
+                        add(LLMCapability.Completion)
+                        add(LLMCapability.Vision.Image)
+                    },
+                    contextLength = 2000000,
+                )
+
+                val summaryPrompt = prompt(id = "chapter-summary") {
+                    user {
+                        images.forEach { img ->
+                            try {
+                                image(kotlinx.io.files.Path(img.absolutePath))
+                            } catch (e: Exception) {
+                                logger.warn("Could not attach image ${img.name} for summary: ${e.message}")
+                            }
+                        }
+                        text("You are an expert Manhwa/Manga translator. Read these images from the current chapter and write a concise but comprehensive summary in English of the story, main characters, and key elements present. This summary will be used as context for translating the dialogues.")
+                    }
+                }
+
+                val responses = executor.execute(summaryPrompt, model)
+                val summary = responses.joinToString("\n") { it.content }.trim()
+                
+                // Strip thinking blocks if present
+                val cleanedSummary = summary.replace(
+                    Regex("<(thought|thinking)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), ""
+                ).trim()
+
+                logger.info("Global chapter context generated successfully.")
+                cleanedSummary
+            }
+        } catch (e: Throwable) {
+            logger.warn("Failed to generate global chapter context: ${e.message}. Continuing without global context.")
+            null
+        }
+    }
+
+    private fun resizeAndCompressImage(original: File, target: File): File {
+        return try {
+            val image = ImageIO.read(original) ?: return original
+            val newWidth = image.width / 2
+            val newHeight = image.height / 2
+            if (newWidth <= 0 || newHeight <= 0) return original
+
+            val resized = BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_RGB)
+            val g: Graphics2D = resized.createGraphics()
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+            g.drawImage(image, 0, 0, newWidth, newHeight, null)
+            g.dispose()
+
+            val writers = ImageIO.getImageWritersByFormatName("jpg")
+            if (!writers.hasNext()) {
+                ImageIO.write(resized, "jpg", target)
+                return target
+            }
+            val writer = writers.next()
+            FileImageOutputStream(target).use { output ->
+                writer.output = output
+                val param = writer.defaultWriteParam
+                if (param.canWriteCompressed()) {
+                    param.compressionMode = ImageWriteParam.MODE_EXPLICIT
+                    param.compressionQuality = 0.6f
+                }
+                writer.write(null, IIOImage(resized, null, null), param)
+            }
+            writer.dispose()
+            target
+        } catch (e: Throwable) {
+            // Fallback to original
+            original
+        }
     }
 }

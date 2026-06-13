@@ -1,3 +1,10 @@
+Version: 1.3.6
+Date: 2026-06-13
+Added:
+  - Global chapter context generation using Gemini 3.1 Flash Lite.
+  - Image resizing and compression (50% scale, 60% quality JPEG) before summary generation to maintain all context while preventing timeouts and payload limit errors.
+  - Automatic cleanup of temporary processed images.
+-------------------------------------------------------------------------------------------------
 Version: 1.3.5
 Date: 2026-06-13
 Fixed:
