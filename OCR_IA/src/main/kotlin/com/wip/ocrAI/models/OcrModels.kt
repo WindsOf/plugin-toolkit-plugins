@@ -51,6 +51,7 @@ enum class AIModel(val id: String) {
     GEMMA_31B("gemma-4-31b-it"),
     GEMINI_1_5_PRO("gemini-1.5-pro"),
     GEMINI_2_5_PRO("gemini-2.5-pro"),
+    GEMINI_3_1_FLASH_LITE("gemini-3.1-flash-lite"),
     CLAUDE_3_5_SONNET("claude-3-5-sonnet-20241022"),
     GPT_4O("gpt-4o"),
     LM_STUDIO("lm-studio")

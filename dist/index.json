@@ -38,12 +38,12 @@
     {
       "name": "OCR IA",
       "pkg": "com.wip.ocr_ia",
-      "version": "2.4.3",
+      "version": "2.4.4",
       "fileName": "OCR_IA.jar",
       "description": "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog",
       "targetAppVersion": "1.0.0",
-      "hash": "0b17aa7f962bba7b0a973aaacbc0cdbcadbe37c6f640b908a62acb495476b748",
-      "signature": "qSfdtSBeAQ+DL1a53ghN+kZhqvE3XR+OMsj58eJCQHRZzezm31EPp70gqpC/WXLjCxV4Tr0XKgpbKvmDOBciv6gQYUdSDVzoAzq7feB363PFccUhQ8YN3Zdrr8MxKkawRK2ckIyIc+D6maRihq9YZDzfBdZZl/zkGXObKWRCv9vzy14EjqOKlGTEUjOf7lSO8BUMB5J84rfd3YiNjmUsh99ztO+zFwyY9u7Roq6a7Wu8flW8e5AiQ3NcoQ1YFBgW/1FvqAT4R/099F3Dwjzb3rpp8JNrp9nzpxSsk6U28/3iF9i/EA2isWxkpy2V01XWotFPc3PqLZjZbEBFSyxCJw=="
+      "hash": "f2ff8069cf80bead1f03e24afdedeb9a1a1768aab60b55f115320674cffb9be6",
+      "signature": "pgEtRVXIm+vGV8741urQHBRSkjXyqNVBrbdTbnpqDyfSShInbVhZib+LwrzkLVFh7bKGgwzLOWJUaKf3i0MCEtNnHcWo7NldLH5pUh8PcZf/HqXmIIfDAl+56NdNsWOX/Lfkcjw45q4bwKekJR8YaI30sXSKb2V4awvRqWxuEW9j6QugaZVl3R+jUw11JkM8hH/IngjB9zlKQQDijTwUycVQaGfzF7iUy6xEiWIai06NwX5FUmKCg4CZVrFxjHzKLW/lWbMKb1RM+tqFX0EDbyNs4qo0/tifHGHxlL/YVUnGd7BJMoLue8swGtgO6/QlWAbo3AnZwK/f+q7K1Rn2NQ=="
     },
     {
       "name": "PSD Builder",

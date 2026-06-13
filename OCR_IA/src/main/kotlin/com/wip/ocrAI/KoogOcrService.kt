@@ -107,7 +107,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
     }
 
     private fun getExecutor(model: AIModel) = when (model) {
-            AIModel.GEMMA_26B, AIModel.GEMMA_31B, AIModel.GEMINI_1_5_PRO, AIModel.GEMINI_2_5_PRO -> {
+            AIModel.GEMMA_26B, AIModel.GEMMA_31B, AIModel.GEMINI_1_5_PRO, AIModel.GEMINI_2_5_PRO, AIModel.GEMINI_3_1_FLASH_LITE -> {
                 val key = settings.googleApiKey.ifBlank { System.getenv("API_KEY") ?: "" }
                 if (key.isBlank()) throw IllegalArgumentException("Google API Key not found.")
                 simpleGoogleAIExecutor(key)
@@ -173,7 +173,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
 
     private fun getProvider(model: AIModel): LLMProvider {
         return when (model) {
-            AIModel.GEMMA_26B, AIModel.GEMMA_31B, AIModel.GEMINI_1_5_PRO, AIModel.GEMINI_2_5_PRO -> LLMProvider.Google
+            AIModel.GEMMA_26B, AIModel.GEMMA_31B, AIModel.GEMINI_1_5_PRO, AIModel.GEMINI_2_5_PRO, AIModel.GEMINI_3_1_FLASH_LITE -> LLMProvider.Google
             AIModel.CLAUDE_3_5_SONNET -> LLMProvider.Anthropic
             AIModel.GPT_4O, AIModel.LM_STUDIO -> LLMProvider.OpenAI
         }

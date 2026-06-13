@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.ocr_ia",
         "name": "OCR IA",
-        "version": "2.4.3",
+        "version": "2.4.4",
         "description": "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog"
     },
     "requirements": {
@@ -71,6 +71,7 @@
                             "GEMMA_31B",
                             "GEMINI_1_5_PRO",
                             "GEMINI_2_5_PRO",
+                            "GEMINI_3_1_FLASH_LITE",
                             "CLAUDE_3_5_SONNET",
                             "GPT_4O",
                             "LM_STUDIO"
@@ -250,6 +251,7 @@
                             "GEMMA_31B",
                             "GEMINI_1_5_PRO",
                             "GEMINI_2_5_PRO",
+                            "GEMINI_3_1_FLASH_LITE",
                             "CLAUDE_3_5_SONNET",
                             "GPT_4O",
                             "LM_STUDIO"
@@ -603,6 +605,15 @@
     },
     "changelog": {
         "releases": [
+            {
+                "version": "2.4.4",
+                "date": "2026-06-13",
+                "categories": {
+                    "Added": [
+                        "Support for Gemini 3.1 Flash Lite."
+                    ]
+                }
+            },
             {
                 "version": "2.4.3",
                 "date": "2026-06-13",
