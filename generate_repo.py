@@ -200,16 +200,17 @@ def find_assets(plugin_path):
     return assets
 
 
-def generate_repo(name, url, output_dir, clean=False):
+def generate_repo(name, url, output_dir, clean=False, target_plugin=None):
     root_path = Path(".").resolve()
     dist_path = root_path / output_dir
     plugins_dist_path = dist_path / "plugins"
     flows_dist_path = dist_path / "flows"
 
-    # Load previous index.json if it exists and clean is not requested
+    # Load previous index.json if it exists (always load if target_plugin is provided to preserve others)
     previous_plugins = {}
     previous_index_path = dist_path / "index.json"
-    if not clean and previous_index_path.exists():
+    should_load_index = not clean or target_plugin is not None
+    if should_load_index and previous_index_path.exists():
         try:
             with open(previous_index_path, "r", encoding="utf-8") as f:
                 previous_index = json.load(f)
@@ -247,7 +248,19 @@ def generate_repo(name, url, output_dir, clean=False):
         if info:
             pkg = info["id"]
             version = info["version"]
+            p_name = info.get("name", plugin_dir.name)
+        else:
+            p_name = plugin_dir.name
             
+        is_target = False
+        if target_plugin:
+            search_key = target_plugin.lower()
+            if plugin_dir.name.lower() == search_key or (pkg and pkg.lower() == search_key) or (p_name.lower() == search_key):
+                is_target = True
+
+        if target_plugin and not is_target:
+            should_build = False
+        elif not clean:
             if pkg in previous_plugins:
                 prev_p = previous_plugins[pkg]
                 if prev_p.get("version") == version:
@@ -257,26 +270,29 @@ def generate_repo(name, url, output_dir, clean=False):
                         manifest_path = plugins_dist_path / pkg / "manifest.json"
                         # Verify that the target JAR and manifest actually exist
                         if target_jar_path.exists() and manifest_path.exists():
-                            print(f"No version bump for {plugin_dir.name} ({pkg} v{version}). Reusing existing build.")
+                            if not target_plugin or is_target:
+                                print(f"No version bump for {plugin_dir.name} ({pkg} v{version}). Reusing existing build.")
                             should_build = False
 
         if not should_build:
             # Reuse the entry from previous plugins
-            prev_p = previous_plugins[pkg]
-            plugin_entry = {
-                "name": prev_p.get("name", plugin_dir.name),
-                "pkg": pkg,
-                "version": version,
-                "fileName": prev_p.get("fileName"),
-                "description": prev_p.get("description", ""),
-                "targetAppVersion": prev_p.get("targetAppVersion", "1.0.0")
-            }
-            if "hash" in prev_p:
-                plugin_entry["hash"] = prev_p["hash"]
-            if "signature" in prev_p:
-                plugin_entry["signature"] = prev_p["signature"]
-            repo_plugins.append(plugin_entry)
-            print(f"  -> Reused {plugin_entry['name']} v{version} ({pkg})")
+            if pkg and pkg in previous_plugins:
+                prev_p = previous_plugins[pkg]
+                plugin_entry = {
+                    "name": prev_p.get("name", p_name),
+                    "pkg": pkg,
+                    "version": version,
+                    "fileName": prev_p.get("fileName"),
+                    "description": prev_p.get("description", ""),
+                    "targetAppVersion": prev_p.get("targetAppVersion", "1.0.0")
+                }
+                if "hash" in prev_p:
+                    plugin_entry["hash"] = prev_p["hash"]
+                if "signature" in prev_p:
+                    plugin_entry["signature"] = prev_p["signature"]
+                repo_plugins.append(plugin_entry)
+                if not target_plugin or is_target:
+                    print(f"  -> Reused {plugin_entry['name']} v{version} ({pkg})")
             continue
 
         print(f"Building {plugin_dir.name}...")
@@ -470,11 +486,12 @@ def generate_repo(name, url, output_dir, clean=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate a static plugin repository.")
+    parser.add_argument("plugin", nargs="?", help="Name of the plugin directory or ID to build (optional)")
     parser.add_argument("--name", help="Repository name")
     parser.add_argument("--url", help="Base URL of the repository")
     parser.add_argument("--out", help="Output directory")
-    parser.add_argument("--clean", action="store_true", help="Force clean build (recompile all plugins)")
-    parser.add_argument("--force", action="store_true", help="Force regenerate everything (recompile all plugins)")
+    parser.add_argument("--clean", action="store_true", help="Force clean build (recompile target or all plugins)")
+    parser.add_argument("--force", action="store_true", help="Force regenerate (recompile target or all plugins)")
 
     args = parser.parse_args()
 
@@ -501,4 +518,4 @@ if __name__ == "__main__":
 
     clean_build = args.clean or args.force or False
 
-    generate_repo(config["name"], config["url"], config["out"], clean=clean_build)
+    generate_repo(config["name"], config["url"], config["out"], clean=clean_build, target_plugin=args.plugin)

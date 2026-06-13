@@ -1,3 +1,8 @@
+Version: 2.4.3
+Date: 2026-06-13
+Changes:
+  - saving thinking to json is now disabled by default
+-------------------------------------------------------------------------------------------------
 Version: 2.4.2
 Date: 2026-06-12
 Added:

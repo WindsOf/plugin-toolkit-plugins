@@ -41,21 +41,32 @@ data class PsdColor(val r: Int, val g: Int, val b: Int, val a: Int)
 @Serializable
 data class PsdText(
     val text: String,
-    val left: Int,
-    val top: Int,
-    val right: Int,
-    val bottom: Int,
+    val left: Int? = null,
+    val top: Int? = null,
+    val right: Int? = null,
+    val bottom: Int? = null,
     val fontName: String? = null,
     val fontSize: Int? = null,
     val color: PsdColor? = null,
     val strokeSize: Int? = null,
-    val rotation: Double? = null
+    val rotation: Double? = null,
+    val balloon_box_2d: List<Double>? = null,
+    val text_box_2d: List<Double>? = null,
+    val shape: String? = null,
+    val fontStyle: String? = null,
+    val fontFamily: String? = null,
+    val textAngle: Double? = null,
+    val isSparse: Boolean? = null,
+    val textColor: String? = null,
+    val hasBorder: Boolean? = null,
+    val borderColor: String? = null
 )
 
 @Serializable
 data class PsdPayload(
-    val backgroundImage: String,
-    val texts: List<PsdText>
+    val backgroundImage: String? = null,
+    val texts: List<PsdText> = emptyList(),
+    val balloons: List<PsdText> = emptyList()
 )
 
 @Serializable
@@ -79,16 +90,39 @@ data class PSDBuildResult(
     val psdPath: String
 )
 
+@Serializable
+data class ChapterPSDBuildResult(
+    @CapabilityOutput(
+        name = "generated psd folder",
+        description = "Path to the folder containing the generated PSD files",
+        semanticTypes = ["sys/directory"]
+    )
+    val psdFolder: String,
+    @CapabilityOutput(
+        name = "generated psds",
+        description = "List of paths to the generated PSD files"
+    )
+    val psdPaths: List<String>
+)
+
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "PSD Builder Native",
-    version = "4.4.4",
+    version = "4.4.5",
     description = "A plugin that builds layered PSD files natively in Kotlin."
 )
 class PSDBuilderPlugin {
     init {
         try {
-            IIORegistry.getDefaultInstance().registerServiceProvider(WebPImageReaderSpi())
+            val registry = IIORegistry.getDefaultInstance()
+            val existing = registry.getServiceProviders(javax.imageio.spi.ImageReaderSpi::class.java, true)
+            while (existing.hasNext()) {
+                val spi = existing.next()
+                if (spi.javaClass.name == "com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi") {
+                    registry.deregisterServiceProvider(spi)
+                }
+            }
+            registry.registerServiceProvider(WebPImageReaderSpi())
         } catch (e: Exception) {
             // Ignore
         }
@@ -238,7 +272,7 @@ class PSDBuilderPlugin {
         @CapabilityParam(description = "Border Colors") borderColors: List<String>? = null,
         @CapabilityParam(description = "Shapes of the balloons") shapes: List<String>? = null,
         context: PluginContext
-    ): PSDBuildResult {
+    ): ChapterPSDBuildResult {
         val logger = context.logger
         logger.info("Starting buildPsdForChapter for $inputFolder")
         val progressReporter = context.progress
@@ -279,8 +313,10 @@ class PSDBuilderPlugin {
 
         val semaphore = Semaphore(4)
 
+        val psdPaths = mutableListOf<String>()
+
         coroutineScope {
-            allImages.map { imageFile ->
+            val generatedPaths = allImages.map { imageFile ->
                 async {
                     semaphore.withPermit {
                         val pageName = imageFile.name
@@ -330,13 +366,17 @@ class PSDBuilderPlugin {
 
                         val completed = processedPages.incrementAndGet()
                         progressReporter.report(completed.toFloat() / totalPages.toFloat())
+                        
+                        outputPsdPath
                     }
                 }
             }.awaitAll()
+            
+            psdPaths.addAll(generatedPaths)
             logger.info("All $totalPages PSDs generated successfully.")
         }
 
-        return PSDBuildResult(outDir.absolutePath)
+        return ChapterPSDBuildResult(outDir.absolutePath, psdPaths)
     }
 
     @Capability(
@@ -346,6 +386,7 @@ class PSDBuilderPlugin {
     suspend fun buildPsdFromJson(
         @CapabilityParam(description = "Path to JSON file") jsonPath: String,
         @CapabilityParam(description = "Output PSD path") outputPsdPath: String,
+        @CapabilityParam(description = "Path to base image (optional, default looks in JSON)", defaultValue = "\"\"") baseImagePath: String? = "",
         context: PluginContext
     ): PSDBuildResult {
         val jsonFile = File(jsonPath)
@@ -353,32 +394,51 @@ class PSDBuilderPlugin {
             throw IllegalArgumentException("JSON file not found: $jsonPath")
         }
         val jsonContent = withContext(Dispatchers.IO) { jsonFile.readText() }
-        val payload = Json.decodeFromString<PsdPayload>(jsonContent)
+        val payload = Json { ignoreUnknownKeys = true }.decodeFromString<PsdPayload>(jsonContent)
 
-        val texts = payload.texts.map { it.text }
-        val baseImage = withContext(Dispatchers.IO) { ImageIO.read(File(payload.backgroundImage)) }
+        val imagePathToUse = if (!baseImagePath.isNullOrBlank()) baseImagePath else payload.backgroundImage
+        if (imagePathToUse.isNullOrBlank()) {
+            throw IllegalArgumentException("Background image path not provided in JSON or as parameter")
+        }
+
+        val baseImage = withContext(Dispatchers.IO) { ImageIO.read(File(imagePathToUse)) }
         val width = baseImage.width.toDouble()
         val height = baseImage.height.toDouble()
-        val balloonBoxes = payload.texts.map { listOf(it.top / height, it.left / width, it.bottom / height, it.right / width) }
-        val textAngles = payload.texts.map { it.rotation }
-        val colors = payload.texts.map { it.color }
-        val textColors = colors.map { 
-            if (it != null) String.format("#%02x%02x%02x", it.r, it.g, it.b) else null
+
+        val activeTexts = if (payload.balloons.isNotEmpty()) payload.balloons else payload.texts
+        val texts = activeTexts.map { it.text }
+        
+        val balloonBoxes = activeTexts.map { 
+            it.balloon_box_2d ?: if (it.top != null && it.left != null && it.bottom != null && it.right != null) {
+                listOf(it.top.toDouble() / height, it.left.toDouble() / width, it.bottom.toDouble() / height, it.right.toDouble() / width)
+            } else emptyList()
         }
-        val fontSizes = payload.texts.map { it.fontSize }
-        val fontNames = payload.texts.map { it.fontName }
-        val borderSizes = payload.texts.map { it.strokeSize }
+        val textBoxes = activeTexts.map { it.text_box_2d ?: emptyList() }
+        val textAngles = activeTexts.map { it.textAngle ?: it.rotation }
+        val textColors = activeTexts.map { 
+            it.textColor ?: if (it.color != null) String.format("#%02x%02x%02x", it.color.r, it.color.g, it.color.b) else null
+        }
+        val fontSizes = activeTexts.map { it.fontSize }
+        val fontNames = activeTexts.map { it.fontFamily ?: it.fontName }
+        val borderSizes = activeTexts.map { it.strokeSize }
+        val shapes = activeTexts.map { it.shape }
+        val hasBorderList = activeTexts.map { it.hasBorder ?: (it.strokeSize != null && it.strokeSize > 0) }
+        val borderColors = activeTexts.map { it.borderColor }
 
         val psd = buildPsdObject(
-            imagePath = payload.backgroundImage,
+            imagePath = imagePathToUse,
             texts = texts,
             balloonBoxes = balloonBoxes,
+            textBoxes = textBoxes,
             fontSizes = fontSizes,
             fontNames = fontNames,
             borderSizes = borderSizes,
             context = context,
             textAngles = textAngles,
-            textColors = textColors
+            shapes = shapes,
+            textColors = textColors,
+            hasBorder = hasBorderList,
+            borderColors = borderColors
         )
         val psdBytes = withContext(Dispatchers.Default) {
             com.wip.kpsd.KPsd.write(psd, compress = false)
@@ -390,12 +450,13 @@ class PSDBuilderPlugin {
     }
 
     private fun normalizeBoundingBox(box: List<Double>): List<Double> {
-        if (box.size >= 4) return box.take(4)
-        if (box.size == 3) {
+        val result = if (box.size >= 4) box.take(4)
+        else if (box.size == 3) {
             val w = kotlin.math.abs(box[2] - box[0])
-            return listOf(box[0], box[1], box[2], box[1] + w)
-        }
-        return listOf(0.4, 0.4, 0.6, 0.6)
+            listOf(box[0], box[1], box[2], box[1] + w)
+        } else listOf(0.4, 0.4, 0.6, 0.6)
+
+        return result
     }
 
     suspend fun buildPsdObject(
@@ -422,7 +483,7 @@ class PSDBuilderPlugin {
 
         val rgbData = IntArray(width * height)
         baseImage.getRGB(0, 0, width, height, rgbData, 0, width)
-        val bgBytes = ByteArray(width * height * 4)
+        val bgBytes = ByteArray(width * height * 4 + 64) // Pad with 64 extra bytes to prevent RLE lookahead crashes in KPsd
         for (i in 0 until width * height) {
             val argb = rgbData[i]
             val a = (argb shr 24) and 0xff
@@ -445,7 +506,8 @@ class PSDBuilderPlugin {
                 left = 0
                 bottom = height
                 right = width
-                imageData = bgPixelData
+                // Create defensive copies to avoid shared state mutations that lead to IndexOutOfBoundsException
+                imageData = PixelData(width, height, bgBytes.copyOf())
             }
 
             // Add the "Clean" layer above the "Background" layer
@@ -454,60 +516,26 @@ class PSDBuilderPlugin {
                 left = 0
                 bottom = height
                 right = width
-                imageData = bgPixelData
+                imageData = PixelData(width, height, bgBytes.copyOf())
             }
 
             // Group all text layers inside "Testi" folder
-            group(name = "Testi") {
-                for ((index, text) in texts.withIndex()) {
-                    val balloonBox = if (index < balloonBoxes.size) balloonBoxes[index] else emptyList()
+            if (texts.isNotEmpty()) {
+                group(name = "Testi") {
+                    for ((index, text) in texts.withIndex()) {
+                        val balloonBox = if (index < balloonBoxes.size) balloonBoxes[index] else emptyList()
                     val textBox = textBoxes?.getOrNull(index) ?: emptyList()
-                    val safeBalloonBox = normalizeBoundingBox(balloonBox)
-                    
+                    val actualBoxToUse = if (balloonBox.size >= 3) balloonBox else if (textBox.size >= 3) textBox else emptyList()
+                    val safeBox = normalizeBoundingBox(actualBoxToUse)
+
                     // The inputs are ymin, xmin, ymax, xmax
-                    val bTop = (safeBalloonBox[0] * height).toInt()
-                    val bLeft = (safeBalloonBox[1] * width).toInt()
-                    val bBottom = (safeBalloonBox[2] * height).toInt()
-                    val bRight = (safeBalloonBox[3] * width).toInt()
+                    val ibTop = if (safeBox[0] >= 0.0 && safeBox[0] <= 1.0 && safeBox[2] <= 1.0) (safeBox[0] * height).toInt() else safeBox[0].toInt()
+                    val ibLeft = if (safeBox[1] >= 0.0 && safeBox[1] <= 1.0 && safeBox[3] <= 1.0) (safeBox[1] * width).toInt() else safeBox[1].toInt()
+                    val ibBottom = if (safeBox[2] >= 0.0 && safeBox[2] <= 1.0 && safeBox[0] <= 1.0) (safeBox[2] * height).toInt() else safeBox[2].toInt()
+                    val ibRight = if (safeBox[3] >= 0.0 && safeBox[3] <= 1.0 && safeBox[1] <= 1.0) (safeBox[3] * width).toInt() else safeBox[3].toInt()
 
-                    val tTop: Int
-                    val tLeft: Int
-                    val tBottom: Int
-                    val tRight: Int
-                    
-                    if (textBox.size >= 4) {
-                        tTop = (textBox[0] * height).toInt()
-                        tLeft = (textBox[1] * width).toInt()
-                        tBottom = (textBox[2] * height).toInt()
-                        tRight = (textBox[3] * width).toInt()
-                    } else {
-                        tTop = bTop
-                        tLeft = bLeft
-                        tBottom = bBottom
-                        tRight = bRight
-                    }
-
-                    val cx = (tLeft + tRight) / 2.0
-                    val cy = (tTop + tBottom) / 2.0
-
-                    var bw = (bRight - bLeft).toDouble()
-                    var bh = (bBottom - bTop).toDouble()
-
-                    val tw = (tRight - tLeft).toDouble()
-                    val th = (tBottom - tTop).toDouble()
-
-                    if (bw >= 2 * tw || bh >= 2 * th) {
-                        bw = tw * 1.25
-                        bh = th * 1.25
-                    }
-
-                    val ibLeft = (cx - bw / 2).toInt()
-                    val ibTop = (cy - bh / 2).toInt()
-                    val ibRight = (cx + bw / 2).toInt()
-                    val ibBottom = (cy + bh / 2).toInt()
-
-                    val boxWidth = ibRight - ibLeft
-                    val boxHeight = ibBottom - ibTop
+                    val boxWidth = maxOf(1, ibRight - ibLeft)
+                    val boxHeight = maxOf(1, ibBottom - ibTop)
 
                     val initialFontSize = fontSizes?.getOrNull(index) ?: 24
                     val fNameInput = fontNames?.getOrNull(index) ?: "AnimeAce2.0BB"
@@ -555,7 +583,7 @@ class PSDBuilderPlugin {
                         } else {
                             com.wip.kpsd.EllipseBoundary(padding = bPadding)
                         }
-                        wordBreak = com.wip.kpsd.WordBreak.BREAK_WORD
+                        wordBreak = com.wip.kpsd.WordBreak.NONE
                         verticalAlignment = com.wip.kpsd.VerticalAlignment.CENTER
 
                         style {
@@ -582,6 +610,7 @@ class PSDBuilderPlugin {
                 }
             }
         }
+    }
     }
 
     private fun findTextLayers(layers: List<com.wip.kpsd.Layer>?): List<com.wip.kpsd.Layer> {

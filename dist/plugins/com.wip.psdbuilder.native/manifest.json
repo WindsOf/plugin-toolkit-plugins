@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder.native",
         "name": "PSD Builder Native",
-        "version": "4.4.4",
+        "version": "4.4.5",
         "description": "A plugin that builds layered PSD files natively in Kotlin."
     },
     "requirements": {
@@ -377,25 +377,25 @@
             },
             "returnType": {
                 "type": "object",
-                "className": "com.wip.psdbuilder.PSDBuildResult",
+                "className": "com.wip.psdbuilder.ChapterPSDBuildResult",
                 "properties": {
-                    "psdPath": {
+                    "psdFolder": {
                         "type": "primitive",
                         "primitiveType": "STRING"
+                    },
+                    "psdPaths": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
                     }
                 }
             },
-            "semanticTypes": [
-                {
-                    "namespace": "sys",
-                    "name": "file",
-                    "variant": null
-                }
-            ],
             "outputs": [
                 {
-                    "name": "generated psd",
-                    "description": "Path to the generated PSD file",
+                    "name": "generated psd folder",
+                    "description": "Path to the folder containing the generated PSD files",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
@@ -403,10 +403,21 @@
                     "semanticTypes": [
                         {
                             "namespace": "sys",
-                            "name": "file",
+                            "name": "directory",
                             "variant": null
                         }
                     ]
+                },
+                {
+                    "name": "generated psds",
+                    "description": "List of paths to the generated PSD files",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
+                    }
                 }
             ]
         },
@@ -423,6 +434,14 @@
                 },
                 "outputPsdPath": {
                     "description": "Output PSD path",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "baseImagePath": {
+                    "defaultValue": "",
+                    "description": "Path to base image (optional, default looks in JSON)",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "STRING"
@@ -560,6 +579,23 @@
     ],
     "changelog": {
         "releases": [
+            {
+                "version": "4.4.5",
+                "date": "2026-06-13",
+                "categories": {
+                    "Added": [
+                        "baloon size estimation function"
+                    ],
+                    "Changes": [
+                        "build from json for chapter and single image update to the new features formats",
+                        "follow shapes no longer breaks world"
+                    ],
+                    "Fixed": [
+                        "problem with expected normalized input",
+                        "build psd for chapters would build a single psd"
+                    ]
+                }
+            },
             {
                 "version": "4.4.4",
                 "date": "2026-06-12",

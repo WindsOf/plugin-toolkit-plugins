@@ -33,7 +33,7 @@ enum class AIModel(val id: String) {
 @PluginInfo(
         id = "com.wip.manhwa_translator_ai",
         name = "Manhwa Translator AI",
-        version = "1.3.4",
+        version = "1.3.5",
         description = "Translate text from Manhwa/Manga into Italian using Google AI via Koog"
 )
 class TranslatorAI(val settings: TranslatorAISettings) {
@@ -70,6 +70,11 @@ class TranslatorAI(val settings: TranslatorAISettings) {
                 defaultValue = "false"
             )
             useContextImages: Boolean? = false,
+            @CapabilityParam(
+                description = "Save the translation result in a json",
+                defaultValue = "true"
+            )
+            save: Boolean? = true,
             context: PluginContext
     ): List<String> {
         val logger = context.logger
@@ -80,7 +85,9 @@ class TranslatorAI(val settings: TranslatorAISettings) {
 
         return try {
             val service = KoogAITranslatorService(context)
-            service.performTranslation(input, effectiveDict, settings.googleApiKey, settings.useStructuredOutput, model.id, pageNames, inputFolder, effectiveContextImages)
+            val result = service.performTranslation(input, effectiveDict, settings.googleApiKey, settings.useStructuredOutput, model.id, pageNames, inputFolder, effectiveContextImages, save ?: true)
+            logger.info("Translation completed.")
+            result
         } catch (e: Throwable) {
             val msg = "Translation failed: ${e::class.simpleName}: ${e.message}"
             logger.error(msg)

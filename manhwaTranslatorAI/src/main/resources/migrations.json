@@ -1,0 +1,13 @@
+[
+  {
+    "fromVersion": "1.3.4",
+    "toVersion": "1.3.5",
+    "capabilityMigrations": [
+      {
+        "oldName": "translate",
+        "newName": "translate",
+        "isDropInReplacement": true
+      }
+    ]
+  }
+]

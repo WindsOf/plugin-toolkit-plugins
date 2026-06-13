@@ -1,3 +1,14 @@
+Version: 4.4.5
+Date: 2026-06-13
+Added:
+  - baloon size estimation function
+Changes:
+	- build from json for chapter and single image update to the new features formats	
+	- follow shapes no longer breaks world
+Fixed:
+  - problem with expected normalized input
+  - build psd for chapters would build a single psd
+-------------------------------------------------------------------------------------------------
 Version: 4.4.4
 Date: 2026-06-12
 Added:

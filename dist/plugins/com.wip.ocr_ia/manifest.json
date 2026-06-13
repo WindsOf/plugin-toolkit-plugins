@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.ocr_ia",
         "name": "OCR IA",
-        "version": "2.4.2",
+        "version": "2.4.3",
         "description": "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog"
     },
     "requirements": {
@@ -47,6 +47,14 @@
                 "useStructuredOutput": {
                     "defaultValue": false,
                     "description": "Whether to use native structured output (might not be supported by all models)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "BOOLEAN"
+                    }
+                },
+                "saveThinking": {
+                    "defaultValue": false,
+                    "description": "Whether to save the thinking inside the json",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "BOOLEAN"
@@ -218,6 +226,14 @@
                 "useStructuredOutput": {
                     "defaultValue": false,
                     "description": "Whether to use native structured output (might not be supported by all models)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "BOOLEAN"
+                    }
+                },
+                "saveThinking": {
+                    "defaultValue": false,
+                    "description": "Whether to save the thinking inside the json",
                     "type": {
                         "type": "primitive",
                         "primitiveType": "BOOLEAN"
@@ -536,13 +552,74 @@
             ]
         }
     ],
+    "settings": {
+        "googleApiKey": {
+            "description": "API Key for Google services",
+            "type": {
+                "type": "primitive",
+                "primitiveType": "STRING"
+            },
+            "required": true,
+            "secret": true
+        },
+        "anthropicApiKey": {
+            "description": "API Key for Anthropic services",
+            "type": {
+                "type": "primitive",
+                "primitiveType": "STRING"
+            },
+            "secret": true
+        },
+        "openAIApiKey": {
+            "description": "API Key for OpenAI services",
+            "type": {
+                "type": "primitive",
+                "primitiveType": "STRING"
+            },
+            "secret": true
+        },
+        "lmStudioUrl": {
+            "description": "URL for LM Studio (e.g. http://localhost:1234/v1)",
+            "type": {
+                "type": "primitive",
+                "primitiveType": "STRING"
+            }
+        },
+        "lmStudioApiKey": {
+            "description": "API Key for LM Studio",
+            "type": {
+                "type": "primitive",
+                "primitiveType": "STRING"
+            },
+            "secret": true
+        },
+        "lmStudioModelName": {
+            "description": "The specific model name to request from LM Studio",
+            "type": {
+                "type": "primitive",
+                "primitiveType": "STRING"
+            }
+        }
+    },
     "changelog": {
         "releases": [
+            {
+                "version": "2.4.3",
+                "date": "2026-06-13",
+                "categories": {
+                    "Changes": [
+                        "saving thinking to json is now disabled by default"
+                    ]
+                }
+            },
             {
                 "version": "2.4.2",
                 "date": "2026-06-12",
                 "categories": {
-                    "Added": []
+                    "Added": [
+                        "Support for toolkit 1.6.0",
+                        "Advancer ocr"
+                    ]
                 }
             },
             {

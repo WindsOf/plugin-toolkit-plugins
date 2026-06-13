@@ -99,12 +99,13 @@ class KoogAITranslatorService(private val context: PluginContext) {
         modelId: String,
         pageNames: List<String>? = null,
         inputFolder: String? = null,
-        useContextImages: Boolean = false
+        useContextImages: Boolean = false,
+        save: Boolean = true
     ): List<String> {
         if (input.isEmpty()) return emptyList()
 
         // ── API Key ────────────────────────────────────────────────────
-        val effectiveApiKey = apiKey.ifBlank { System.getenv("API_KEY") ?: "" }
+        val effectiveApiKey = apiKey.trim().ifBlank { System.getenv("API_KEY")?.trim() ?: "" }
 
         if (effectiveApiKey.isBlank()) {
             val msg = "API Key not found. Pass it via 'apiKey' parameter or set the API_KEY environment variable."
@@ -204,7 +205,22 @@ class KoogAITranslatorService(private val context: PluginContext) {
             }
         }
         
-        return results.map { it ?: "" }
+        val finalTranslations = results.map { it ?: "" }
+
+        if (save) {
+            try {
+                val outDir = if (inputFolder != null && inputFolder.isNotBlank()) File(inputFolder) else File(".")
+                if (!outDir.exists()) outDir.mkdirs()
+                val outFile = File(outDir, "translation_result.json")
+                val json = Json { prettyPrint = true }
+                outFile.writeText(json.encodeToString(TranslationResponse(finalTranslations)))
+                logger.info("Saved translation result to: ${outFile.absolutePath}")
+            } catch (e: Exception) {
+                logger.error("Failed to save translation result: ${e.message}")
+            }
+        }
+        
+        return finalTranslations
     }
 
     private suspend fun translateChunkWithRetry(

@@ -12,7 +12,7 @@ import org.wip.plugintoolkit.api.annotations.PluginValidate
 @PluginInfo(
     id = "com.wip.ocr_ia",
     name = "OCR IA",
-    version = "2.4.2",
+    version = "2.4.3",
     description = "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog"
 )
 class OCR_IA(val settings: OcrIASettings) {
@@ -33,6 +33,8 @@ class OCR_IA(val settings: OcrIASettings) {
         outputDir: String? = "",
         @CapabilityParam(description = "Whether to use native structured output (might not be supported by all models)", defaultValue = "false")
         useStructuredOutput: Boolean,
+        @CapabilityParam(description = "Whether to save the thinking inside the json", defaultValue = "false")
+        saveThinking: Boolean,
         @CapabilityParam(description = "The AI Model to use", defaultValue = "GEMMA_26B")
         model: AIModel,
         context: PluginContext
@@ -44,7 +46,7 @@ class OCR_IA(val settings: OcrIASettings) {
 
         return try {
             val service = KoogOcrService(context, settings)
-            val ocrResult = service.performOcr(input, save, effectiveOutputDir, useStructuredOutput, model)
+            val ocrResult = service.performOcr(input, save, effectiveOutputDir, useStructuredOutput, saveThinking, model)
             OCRResult(ocrResult.texts, ocrResult.bb, ocrResult.pageNumbers, ocrResult.pageNames, ocrResult.failedFiles)
         } catch (e: Throwable) {
             val msg = "OCR failed: ${e::class.simpleName}: ${e.message}"
@@ -72,6 +74,8 @@ class OCR_IA(val settings: OcrIASettings) {
         outputDir: String? = "",
         @CapabilityParam(description = "Whether to use native structured output (might not be supported by all models)", defaultValue = "false")
         useStructuredOutput: Boolean,
+        @CapabilityParam(description = "Whether to save the thinking inside the json", defaultValue = "false")
+        saveThinking: Boolean,
         @CapabilityParam(description = "The AI Model to use", defaultValue = "GEMMA_31B")
         model: AIModel,
         context: PluginContext
@@ -83,7 +87,7 @@ class OCR_IA(val settings: OcrIASettings) {
 
         return try {
             val service = KoogOcrService(context, settings)
-            val ocrResult = service.performAdvancedOcr(input, save, effectiveOutputDir, useStructuredOutput, model)
+            val ocrResult = service.performAdvancedOcr(input, save, effectiveOutputDir, useStructuredOutput, saveThinking, model)
             AdvancedOCRResult(
                 texts = ocrResult.texts,
                 balloonBoxes = ocrResult.balloonBoxes,

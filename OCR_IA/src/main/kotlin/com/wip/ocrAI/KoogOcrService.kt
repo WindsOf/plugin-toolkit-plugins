@@ -4,6 +4,15 @@ import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.executor.llms.all.simpleGoogleAIExecutor
 import ai.koog.prompt.executor.llms.all.simpleAnthropicExecutor
 import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
+import ai.koog.prompt.executor.clients.openai.OpenAILLMClient
+import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
+import ai.koog.prompt.executor.llms.SingleLLMPromptExecutor
+import ai.koog.prompt.dsl.Prompt
+import ai.koog.agents.core.tools.ToolDescriptor
+import ai.koog.prompt.message.Message
+import ai.koog.prompt.message.LLMChoice
+import ai.koog.prompt.streaming.StreamFrame
+import kotlinx.coroutines.flow.Flow
 import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
@@ -23,6 +32,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import javax.imageio.ImageIO
 
 class KoogOcrService(private val context: PluginContext, private val settings: OcrIASettings) {
     private val logger = context.logger
@@ -60,6 +72,40 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
         }
     }
 
+    private suspend fun getImageDimensions(file: File): Pair<Double, Double> = withContext(Dispatchers.IO) {
+        try {
+            ImageIO.createImageInputStream(file).use { iis ->
+                val readers = ImageIO.getImageReaders(iis)
+                if (readers.hasNext()) {
+                    val reader = readers.next()
+                    reader.input = iis
+                    val w = reader.getWidth(0).toDouble()
+                    val h = reader.getHeight(0).toDouble()
+                    reader.dispose()
+                    return@withContext w to h
+                }
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to read image dimensions for ${file.name}: ${e.message}")
+        }
+        1000.0 to 1000.0 // fallback
+    }
+
+    private fun scaleBoxToPixels(box: List<Double>, width: Double, height: Double): List<Double> {
+        if (box.size < 4) return box
+        // if the coordinates are larger than 2, they are likely on the 0-1000 scale
+        val is1000Scale = box.any { it > 2.0 }
+        val scale = if (is1000Scale) 1000.0 else 1.0
+        
+        // Assuming box is [ymin, xmin, ymax, xmax]
+        val ymin = (box[0] / scale) * height
+        val xmin = (box[1] / scale) * width
+        val ymax = (box[2] / scale) * height
+        val xmax = (box[3] / scale) * width
+        
+        return listOf(ymin, xmin, ymax, xmax)
+    }
+
     private fun getExecutor(model: AIModel) = when (model) {
             AIModel.GEMMA_26B, AIModel.GEMMA_31B, AIModel.GEMINI_1_5_PRO, AIModel.GEMINI_2_5_PRO -> {
                 val key = settings.googleApiKey.ifBlank { System.getenv("API_KEY") ?: "" }
@@ -79,7 +125,49 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
             }
             AIModel.LM_STUDIO -> {
                 val key = settings.lmStudioApiKey.ifBlank { "lm-studio" }
-                simpleOpenAIExecutor(apiToken = key)
+                val baseUrl = settings.lmStudioUrl.ifBlank { "http://localhost:1234/v1" }.removeSuffix("/v1").removeSuffix("/")
+                val customModelId = settings.lmStudioModelName.ifBlank { "default-model" }
+                
+                val wrapperClient = object : OpenAILLMClient(key, OpenAIClientSettings(baseUrl = baseUrl)) {
+                    private val fullCapabilities = ai.koog.prompt.executor.clients.openai.OpenAIModels.Chat.GPT4o.capabilities
+                    
+                    private fun injectCapabilities(model: LLModel): LLModel {
+                        return if (model.capabilities.isNullOrEmpty()) {
+                            LLModel(
+                                provider = model.provider,
+                                id = model.id,
+                                capabilities = fullCapabilities,
+                                contextLength = 128000,
+                                maxOutputTokens = 16384
+                            )
+                        } else model
+                    }
+
+                    override suspend fun execute(
+                        prompt: Prompt,
+                        model: LLModel,
+                        tools: List<ToolDescriptor>
+                    ): List<Message.Response> {
+                        return super.execute(prompt, injectCapabilities(model), tools)
+                    }
+
+                    override fun executeStreaming(
+                        prompt: Prompt,
+                        model: LLModel,
+                        tools: List<ToolDescriptor>
+                    ): Flow<StreamFrame> {
+                        return super.executeStreaming(prompt, injectCapabilities(model), tools)
+                    }
+
+                    override suspend fun executeMultipleChoices(
+                        prompt: Prompt,
+                        model: LLModel,
+                        tools: List<ToolDescriptor>
+                    ): List<LLMChoice> {
+                        return super.executeMultipleChoices(prompt, injectCapabilities(model), tools)
+                    }
+                }
+                SingleLLMPromptExecutor(wrapperClient)
             }
         }
 
@@ -123,6 +211,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
         save: Boolean,
         outputDir: String,
         useStructuredOutput: Boolean,
+        saveThinking: Boolean,
         aiModel: AIModel
     ): OcrServiceResult {
         val files = resolveFiles(input)
@@ -218,25 +307,29 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
                                 // Calling execute directly, relying on Koog's shared interface
                                 val responses = executor.execute(ocrPrompt, model)
                                 
-                                var rawText = ""
+                                var originalText = ""
                                 // Handling list of responses from Koog
                                 for (res in responses) {
                                     if (res != null) {
-                                        rawText += "${res.content}\n"
+                                        originalText += "${res.content}\n"
                                     }
                                 }
-                                rawText = rawText.trim()
-                                rawText = rawText.replace(Regex("<(thought|thinking)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), "").trim()
+                                originalText = originalText.trim()
+                                val rawText = originalText.replace(Regex("<(thought|thinking)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), "").trim()
 
                                 val jsonToParse = if (!useStructuredOutput) extractJsonFromText(rawText) else rawText
                                 val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<BalloonsResponse>(jsonToParse)
-                                Pair(parsed, rawText)
+                                val finalRawResponse = if (saveThinking) originalText else rawText
+                                Pair(parsed, finalRawResponse)
                             }
+
+                            val (imgWidth, imgHeight) = getImageDimensions(file)
 
                             resultsMutex.withLock {
                                 balloonsResponse.balloons.forEach { balloon ->
                                     allTexts.add(balloon.text)
-                                    allBoxes.add(listOf(balloon.xmin, balloon.ymin, balloon.xmax, balloon.ymax))
+                                    val originalBox = listOf(balloon.ymin, balloon.xmin, balloon.ymax, balloon.xmax)
+                                    allBoxes.add(scaleBoxToPixels(originalBox, imgWidth, imgHeight))
                                     allPageNumbers.add(index + 1)
                                     allPageNames.add(file.name)
                                 }
@@ -259,6 +352,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
         save: Boolean,
         outputDir: String,
         useStructuredOutput: Boolean,
+        saveThinking: Boolean,
         aiModel: AIModel
     ): AdvancedOcrServiceResult {
         val files = resolveFiles(input)
@@ -381,25 +475,28 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
 
                             val (balloonsResponse, rawResponse) = retryWithBackoff {
                                 val responses = executor.execute(ocrPrompt, model)
-                                var rawText = ""
+                                var originalText = ""
                                 for (res in responses) {
                                     if (res != null) {
-                                        rawText += "${res.content}\n"
+                                        originalText += "${res.content}\n"
                                     }
                                 }
-                                rawText = rawText.trim()
-                                rawText = rawText.replace(Regex("<(thought|thinking)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), "").trim()
+                                originalText = originalText.trim()
+                                val rawText = originalText.replace(Regex("<(thought|thinking)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), "").trim()
 
                                 val jsonToParse = if (!useStructuredOutput) extractJsonFromText(rawText) else rawText
                                 val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<AdvancedBalloonsResponse>(jsonToParse)
-                                Pair(parsed, rawText)
+                                val finalRawResponse = if (saveThinking) originalText else rawText
+                                Pair(parsed, finalRawResponse)
                             }
+
+                            val (imgWidth, imgHeight) = getImageDimensions(file)
 
                             resultsMutex.withLock {
                                 balloonsResponse.balloons.forEach { balloon ->
                                     allTexts.add(balloon.text)
-                                    allBalloonBoxes.add(balloon.balloon_box_2d)
-                                    allTextBoxes.add(balloon.text_box_2d)
+                                    allBalloonBoxes.add(scaleBoxToPixels(balloon.balloon_box_2d, imgWidth, imgHeight))
+                                    allTextBoxes.add(scaleBoxToPixels(balloon.text_box_2d, imgWidth, imgHeight))
                                     allShapes.add(balloon.shape)
                                     allFontStyles.add(balloon.fontStyle)
                                     allFontFamilies.add(balloon.fontFamily)
