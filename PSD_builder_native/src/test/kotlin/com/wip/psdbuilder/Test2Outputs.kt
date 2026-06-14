@@ -51,26 +51,40 @@ class Test2Outputs {
                 val bObj = b.jsonObject
                 texts.add(bObj["text"]?.jsonPrimitive?.content ?: "")
                 
-                val bBoxArr = bObj["balloon_box_2d"]?.jsonArray
-                if (bBoxArr != null) {
-                    val ymin = bBoxArr[0].jsonPrimitive.double / 1000.0
-                    val xmin = bBoxArr[1].jsonPrimitive.double / 1000.0
-                    val ymax = bBoxArr[2].jsonPrimitive.double / 1000.0
-                    val xmax = bBoxArr[3].jsonPrimitive.double / 1000.0
-                    balloonBoxes.add(listOf(ymin, xmin, ymax, xmax))
-                } else {
-                    balloonBoxes.add(emptyList())
-                }
+                val tBoxArrVal = bObj["text_box_2d"]?.jsonArray
+                if (tBoxArrVal != null) {
+                    var ymin = tBoxArrVal[0].jsonPrimitive.double / 1000.0 * imgHeight
+                    var xmin = tBoxArrVal[1].jsonPrimitive.double / 1000.0 * imgWidth
+                    var ymax = tBoxArrVal[2].jsonPrimitive.double / 1000.0 * imgHeight
+                    var xmax = tBoxArrVal[3].jsonPrimitive.double / 1000.0 * imgWidth
+                    
+                    // Hack to prevent PSDBuilderPlugin.toAbs from misinterpreting absolute pixels near 0 as normalized coordinates
+                    if (ymin in 0.0..1.0) ymin = 2.0
+                    if (xmin in 0.0..1.0) xmin = 2.0
+                    if (ymax in 0.0..1.0) ymax = 2.0
+                    if (xmax in 0.0..1.0) xmax = 2.0
 
-                val tBoxArr = bObj["text_box_2d"]?.jsonArray
-                if (tBoxArr != null) {
-                    val ymin = tBoxArr[0].jsonPrimitive.double / 1000.0
-                    val xmin = tBoxArr[1].jsonPrimitive.double / 1000.0
-                    val ymax = tBoxArr[2].jsonPrimitive.double / 1000.0
-                    val xmax = tBoxArr[3].jsonPrimitive.double / 1000.0
                     textBoxes.add(listOf(ymin, xmin, ymax, xmax))
                 } else {
                     textBoxes.add(emptyList())
+                }
+                
+                val bBoxArrVal = bObj["balloon_box_2d"]?.jsonArray
+                if (bBoxArrVal != null) {
+                    var ymin = bBoxArrVal[0].jsonPrimitive.double / 1000.0 * imgHeight
+                    var xmin = bBoxArrVal[1].jsonPrimitive.double / 1000.0 * imgWidth
+                    var ymax = bBoxArrVal[2].jsonPrimitive.double / 1000.0 * imgHeight
+                    var xmax = bBoxArrVal[3].jsonPrimitive.double / 1000.0 * imgWidth
+                    
+                    // Hack to prevent PSDBuilderPlugin.toAbs from misinterpreting absolute pixels near 0 as normalized coordinates
+                    if (ymin in 0.0..1.0) ymin = 2.0
+                    if (xmin in 0.0..1.0) xmin = 2.0
+                    if (ymax in 0.0..1.0) ymax = 2.0
+                    if (xmax in 0.0..1.0) xmax = 2.0
+
+                    balloonBoxes.add(listOf(ymin, xmin, ymax, xmax))
+                } else {
+                    balloonBoxes.add(emptyList())
                 }
                 val shape = bObj["shape"]?.jsonPrimitive?.content ?: "oval"
                 shapes.add(shape)

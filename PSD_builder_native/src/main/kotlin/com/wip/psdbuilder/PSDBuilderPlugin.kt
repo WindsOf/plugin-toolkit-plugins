@@ -544,7 +544,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                 val shape = shapes?.getOrNull(index) ?: "oval"
 
                 if (bw >= 2 * tw || bh >= 2 * th) {
-                    val fallbackMult = if (shape.equals("rectangular", ignoreCase = true)) 1.25 else 1.6
+                    val fallbackMult = 1.25
                     bw = tw * fallbackMult
                     bh = th * fallbackMult
                 }
