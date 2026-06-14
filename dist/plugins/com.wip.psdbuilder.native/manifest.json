@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder.native",
         "name": "PSD Builder Native",
-        "version": "4.4.5",
+        "version": "4.4.7",
         "description": "A plugin that builds layered PSD files natively in Kotlin."
     },
     "requirements": {
@@ -289,7 +289,7 @@
                     }
                 },
                 "fontSize": {
-                    "defaultValue": 24,
+                    "defaultValue": 60,
                     "description": "Font size in pixels",
                     "type": {
                         "type": "primitive",
@@ -577,8 +577,25 @@
             ]
         }
     ],
+    "settings": {
+        "debugMode": {
+            "defaultValue": false,
+            "description": "Enable debug mode to draw bounding boxes on the output image",
+            "type": {
+                "type": "primitive",
+                "primitiveType": "BOOLEAN"
+            }
+        }
+    },
     "changelog": {
         "releases": [
+            {
+                "version": "4.4.7",
+                "date": "2026-06-14",
+                "categories": {
+                    "Added": []
+                }
+            },
             {
                 "version": "4.4.5",
                 "date": "2026-06-13",

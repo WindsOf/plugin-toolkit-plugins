@@ -58,12 +58,12 @@
     {
       "name": "PSD Builder Native",
       "pkg": "com.wip.psdbuilder.native",
-      "version": "4.4.5",
+      "version": "4.4.7",
       "fileName": "PSD_builder_native.jar",
       "description": "A plugin that builds layered PSD files natively in Kotlin.",
       "targetAppVersion": "1.0.0",
-      "hash": "f22d494813fa132d7542ac8ec40fba781cdb4653879751573222b42abdbc4c9d",
-      "signature": "GeEWMdfv/wzvBUcP7ger9g7Eqr0XCX7VhyiJeWlz1vEbzcVHS+g6KdZsoLw6CS4yb3HK4yRHQrQ6PdH0LZjBM6o4cmmQwpe3tzs+g7PKwBxJWXAD8pS3mT4wgI4KSjEZ5lilcLs+Wpn3egHynEikMJ86ouwTMLpTpdnA4HpJBmFn2tmKSfNfl9ncnrVTklqjC8WZ73eqOgOQKKAPLTiJ6hutg3ldAyHygSQQHKm18u4g+n87mv5KGjRkKKVI3pa1FEE4ulYIeBZ/Hu0pHqCd8DAgiPR1ZbmL3X+qyTAA6gGTQjWT7IVvOMnr8CPA/vjswL1L0aNkfQ+KX0v6JJQfSw=="
+      "hash": "13d98216a7a90b906dd9f7767bc97f9744a3e84852a30aa8d0df56658abc628f",
+      "signature": "OqE9wooYVqrHlKRDzNCu7bqDcPCOr/ItJTUuUBXqG5y/BW1ksEl+HcDfvXurw7LE5QsslxkxPGCz9T0xqfE9EdTtGaxukK855K6zQclH3gxCR3WbMnSnrtybbvqt5/yiAy9vKI/2+AFMHlEvv1KhaT6g0P6B0+VskLlgKeyczUAemk2auis4Ms2bj8Jy6XVzQtox1dZi2TaS6EE1rrxvwDaMYq8WU0EBxTw4z+fULALwq55RMoR/nJn4xBMW6cWcm/Siw8QjEuRWhC4muxbfhH5gB8Pg3FP02OQTENPIith+xszH8ri6t0+BdIWCik+Fz8ozh2LRAlFUOaeqJ0QA7A=="
     },
     {
       "name": "Slicer",
@@ -90,16 +90,16 @@
       "fileName": "WOM_Flow.json",
       "version": "1.0.2",
       "description": "Flow per WOM senza miglioramento delle immagini",
-      "hash": "d28f6dbfb330439fe26841628d8a38dfe509fa00c6a810d8ff0dbc07504edcb9",
-      "signature": "Q88a1H8qGYRrpJBHFDLX7nNVoE58qRh2mxXai4sixPBh/lTNoFnbgkRgVNu0/YOr6iLmk6rpG6vPvoX7QuBOWWcUSgy5lsWE2bVj/daFH+PD/1rd6GMgQkWME36Aarl3amPEGXEgl+sXGPj7H4JeQPR7sylOqZJp2fbxkqIdmw4juX323mi4S1nwITzHpgu6EfeCwR0YKScnbZzqzusmNbAFUAeleZqrIaT+DboOFPnxZy7I7/XysiTy9zgWTN/MDvHBGlYLI+TXueC/8DZfkc48cCdKvTYgZS2M6lv+zC+aT9eb5ii6WDSIs9+hVY3T6NO+Fr/6A2WL8ZoXYm2FcQ=="
+      "hash": "ea196b7fcf799cebe196db3e85cbd58300ae82ddc38f9b64c8adc83aaeeed9a2",
+      "signature": "ajoyK55jBnSH0l/34WVV/4xfrdUoonxUDB3scXoIWe/tVZn9SpjXl97tqyTHae/TAK4hYeJQ9hheXTNbbqobtwPttY0/jsq8whLM4cGe4XiabNlr59dSCM3Dpm9h3DIwdUx6qVO7qNb/j6DyJcLM2cc6PFwK7VCm56DtgcWIUCNYhR5hKndmqESisAs9cC+hr6OPQb/zNnkCkGMBI0yB9wWluil4b4k8mzmwQA5Kok/IAQSls/hjhBN+PontgUpvi+GK/uLI4syzHuNEHuCAjngniYj8bddsU4wuc6qM1akH0txG3T4U51hC0yfRS1ALTV68mh9XNW4MiFfIDcVDqQ=="
     },
     {
       "name": "WOM Flow con BetterIMG",
       "fileName": "WOM_Flow_con_BetterIMG.json",
       "version": "1.0.2",
       "description": "Flow per WOM con il miglioramento di immagini",
-      "hash": "02eaca1cb6b49ca072c74effbc0fd426161cde78a46454057e15e780a9290117",
-      "signature": "W1PpjAaHnuOhHFsxO6cO6eWpsoNXDUa4ubmQNmZnoreNANGVUYOJWZiiy28TNzOyFuUEq/CIFPtokK4EiLPYptKHhkE+NS4r3P+i8Fq3tuYyKt2TjhNNNb3FjfFJuKftAGrKWASNxAzSgONUicifuEXKRyaTOurfwd4DUwEeqsJyxe6HoBNFpgfeZpgcIeRSGjADF2M/4RFEf0zjq9uclAw8qMCgZtI5N6jI7MkPdYMc/Nj2NJ/v8VcDduX5etT6lSnNx4cRt46n2YMSgoA1VS7vm/JxoACsmcraAGHi2AVjTEt6eaGDXFstYPtMS2tsafuBhQjgxWnXU2PKqxyq0A=="
+      "hash": "991e5b95d5f2d11a88db83932d06da29e9e4bf375073455267700a98d9eb9388",
+      "signature": "ZpTtS1NgtDePf8ngShxeXQholSqMz7nkOIOQ3k8QPE6r8OUJaqT/fU+PBgVMXaSLtoc6MzpX2sNH/pessh6J8DLL3+NrgbueQiKLLgnGXAb7M2vcSuFRAsby2LVsvLvC+EJgjxFUaIKL3GtOWq6TtP5FF2KCr093q6Co7hEgD+n5LEcGPI/k1FdbzvR5qwBxlz3eZcoiR/mbT1yyk+zFevjWA2NpsCXkddZ9+RxH2hjrJfvf1Na3yVpe0H+hcFgENyaVi9kSOJZ7f3or12oJhAGbWTgIyxOJIENWaubKM1zebTmP7IUWMBj+KwFdyeY7utVw98k91Xl/l54ZU368Iw=="
     }
   ],
   "signPublicKey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtBeECp5qqAsmv+6EqOOrniZet5dSiuaTQqhnNwp2Ij/LxPn6NaHTRegIvKDmbVKZhnVz2nWkAvRNPjieJG+anZPks1RtMIGSnQndA+XbrU6JzDGo8PiQhkPdr+2604NHrTnY0SRgBtSHwOKFcDUOFOyE1ZbDTgXvii5NnfFlvALwrpRj2NsqZwdnX5oAcd4boAHLGU9Z4yWocYHP29/6ACshtgI0ysJNTsDIFnccScr/O+0vXZyHcr3vrC6esogarc/1qRxRQbH0QKwTliqUWb/ax4z0bZxc3X76iF4A88wpKWxCSLlM9jX7uq14PgWTPBi9XpUvasAVh6qzDpoThQIDAQAB",
