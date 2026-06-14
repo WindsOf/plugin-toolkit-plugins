@@ -1,0 +1,180 @@
+The user wants me to analyze a comic panel and extract information about text areas (speech bubbles/captions).
+
+1.  **Identify all text areas:**
+    *   Top speech bubble: "ON THE SURFACE, THEIR SPECIALIZATION MIGHT BE SEEN AS A WEAKNESS."
+    *   Middle speech bubble: "BUT FROM WHAT GENERAL ARTHUR FOUND..."
+    *   Bottom speech bubble: "...THEIR METHOD OF AWAKENING AND TRAINING IN MAGIC SEEMS A LOT MORE ADVANCED THAN OURS."
+
+2.  **Extract properties for each text area:**
+
+    *   **Bubble 1 (Top):**
+        *   `balloon_box_2d`: [166, 223, 304, 837]
+        *   `text_box_2d`: [187, 277, 281, 776]
+        *   `shape`: 'oval'
+        *   `fontStyle`: 'normal'
+        *   `fontFamily`: 'sans-serif'
+        *   `textAngle`: 0.0
+        *   `isSparse`: false
+        *   `textColor`: 'black'
+        *   `hasBorder`: false
+        *   `borderColor`: ""
+        *   `text`: "ON THE SURFACE, THEIR SPECIALIZATION MIGHT BE SEEN AS A WEAKNESS."
+
+    *   **Bubble 2 (Middle):**
+        *   `balloon_box_2d`: [556, 85, 664, 588]
+        *   `text_box_2d`: [589, 138, 647, 557]
+        *   `shape`: 'oval'
+        *   `fontStyle`: 'normal'
+        *   `fontFamily`: 'sans-serif'
+        *   `textAngle`: 0.0
+        *   `isSparse`: false
+        *   `textColor`: 'black'
+        *   `hasBorder`: false
+        *   `borderColor`: ""
+        *   `text`: "BUT FROM WHAT GENERAL ARTHUR FOUND..."
+
+    *   **Bubble 3 (Bottom):**
+        *   `balloon_box_2d`: [660, 212, 792, 918]
+        *   `text_box_2d`: [668, 273, 763, 858]
+        *   `shape`: 'oval'
+        *   `fontStyle`: 'normal'
+        *   `fontFamily`: 'sans-serif'
+        *   `textAngle`: 0.0
+        *   `isSparse`: false
+        *   `textColor`: 'black'
+        *   `hasBorder`: false
+        *   `borderColor`: ""
+        *   `text`: "...THEIR METHOD OF AWAKENING AND TRAINING IN MAGIC SEEMS A LOT MORE ADVANCED THAN OURS."
+
+3.  **Refine coordinates (1000x1000 scale):**
+    *   Image height is very long, but the prompt says "based on a 1000x1000 dimension image". This usually means I should treat the whole provided image as a 1000x1000 canvas.
+    *   Wait, the image is very tall. Let's re-examine. The prompt says "Express coordinates as EXACT ABSOLUTE PIXELS based on a 1000x1000 dimension image (width: 1000px, height: 1000px)". This is a bit ambiguous when the input image is not 1:1 aspect ratio. Usually, this means normalizing the coordinates to 0-1000 for both width and height.
+
+    *   Let's re-estimate based on the full image being 1000x1000.
+    *   Top bubble:
+        *   `balloon_box_2d`: [166, 223, 304, 837]
+        *   `text_box_2d`: [187, 277, 281, 776]
+    *   Middle bubble:
+        *   `balloon_box_2d`: [556, 85, 664, 588]
+        *   `text_box_2d`: [589, 138, 647, 557]
+    *   Bottom bubble:
+        *   `balloon_box_2d`: [660, 212, 792, 918]
+        *   `text_box_2d`: [668, 273, 763, 858]
+
+4.  **Final JSON assembly:**
+    *   `balloons` is an array of 3 objects.
+    *   Check all required fields.
+
+*Bubble 1:*
+- balloon_box_2d: [166, 223, 304, 837]
+- text_box_2d: [187, 277, 281, 776]
+- shape: 'oval'
+- fontStyle: 'normal'
+- fontFamily: 'sans-serif'
+- textAngle: 0.0
+- isSparse: false
+- textColor: 'black'
+- hasBorder: false
+- borderColor: ''
+- text: 'ON THE SURFACE, THEIR SPECIALIZATION MIGHT BE SEEN AS A WEAKNESS.'
+
+*Bubble 2:*
+- balloon_box_2d: [556, 85, 664, 588]
+- text_box_2d: [589, 138, 647, 557]
+- shape: 'oval'
+- fontStyle: 'normal'
+- fontFamily: 'sans-serif'
+- textAngle: 0.0
+- isSparse: false
+- textColor: 'black'
+- hasBorder: false
+- borderColor: ''
+- text: 'BUT FROM WHAT GENERAL ARTHUR FOUND...'
+
+*Bubble 3:*
+- balloon_box_2d: [660, 212, 792, 918]
+- text_box_2d: [668, 273, 763, 858]
+- shape: 'oval'
+- fontStyle: 'normal'
+- fontFamily: 'sans-serif'
+- textAngle: 0.0
+- isSparse: false
+- textColor: 'black'
+- hasBorder: false
+- borderColor: ''
+- text: '...THEIR METHOD OF AWAKENING AND TRAINING IN MAGIC SEEMS A LOT MORE ADVANCED THAN OURS.'
+```json
+{
+  "balloons": [
+    {
+      "balloon_box_2d": [
+        166,
+        223,
+        304,
+        837
+      ],
+      "text_box_2d": [
+        187,
+        277,
+        281,
+        776
+      ],
+      "shape": "oval",
+      "fontStyle": "normal",
+      "fontFamily": "sans-serif",
+      "textAngle": 0.0,
+      "isSparse": false,
+      "textColor": "black",
+      "hasBorder": false,
+      "borderColor": "",
+      "text": "ON THE SURFACE, THEIR SPECIALIZATION MIGHT BE SEEN AS A WEAKNESS."
+    },
+    {
+      "balloon_box_2d": [
+        556,
+        85,
+        664,
+        588
+      ],
+      "text_box_2d": [
+        589,
+        138,
+        647,
+        557
+      ],
+      "shape": "oval",
+      "fontStyle": "normal",
+      "fontFamily": "sans-serif",
+      "textAngle": 0.0,
+      "isSparse": false,
+      "textColor": "black",
+      "hasBorder": false,
+      "borderColor": "",
+      "text": "BUT FROM WHAT GENERAL ARTHUR FOUND..."
+    },
+    {
+      "balloon_box_2d": [
+        660,
+        212,
+        792,
+        918
+      ],
+      "text_box_2d": [
+        668,
+        273,
+        763,
+        858
+      ],
+      "shape": "oval",
+      "fontStyle": "normal",
+      "fontFamily": "sans-serif",
+      "textAngle": 0.0,
+      "isSparse": false,
+      "textColor": "black",
+      "hasBorder": false,
+      "borderColor": "",
+      "text": "...THEIR METHOD OF AWAKENING AND TRAINING IN MAGIC SEEMS A LOT MORE ADVANCED THAN OURS."
+    }
+  ]
+}
+```

@@ -24,6 +24,7 @@ import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
 import org.wip.plugintoolkit.api.annotations.CapabilityOutput
+import org.wip.plugintoolkit.api.annotations.PluginSetting
 import java.io.File
 import javax.imageio.ImageIO
 import javax.imageio.spi.IIORegistry
@@ -105,13 +106,21 @@ data class ChapterPSDBuildResult(
     val psdPaths: List<String>
 )
 
+data class PSDBuilderSettings(
+    @PluginSetting(
+        description = "Enable debug mode to draw bounding boxes on the output image",
+        defaultValue = "false"
+    )
+    val debugMode: Boolean = false
+)
+
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "PSD Builder Native",
-    version = "4.4.5",
+    version = "4.4.6",
     description = "A plugin that builds layered PSD files natively in Kotlin."
 )
-class PSDBuilderPlugin {
+class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) {
     init {
         try {
             val registry = IIORegistry.getDefaultInstance()
@@ -200,7 +209,7 @@ class PSDBuilderPlugin {
         }
 
         val colors = List(texts.size) { PsdColor(0, 0, 0, 255) }
-        val fontSizes = List(texts.size) { fontSize ?: 24 }
+        val fontSizes = List(texts.size) { fontSize ?: 60 }
         val fontNames = List(texts.size) { psdFontString }
         val borderSizes = List(texts.size) { borderSize ?: 3 }
 
@@ -253,7 +262,7 @@ class PSDBuilderPlugin {
             description = "Directory to save generated PSDs (leave empty for 'output_psds' in input folder)",
             defaultValue = "\"\""
         ) outputDir: String? = "",
-        @CapabilityParam(description = "Font size in pixels", defaultValue = "24") fontSize: Int? = 24,
+        @CapabilityParam(description = "Font size in pixels", defaultValue = "60") fontSize: Int? = 60,
         @CapabilityParam(
             description = "Typeface for the text",
             defaultValue = "\"ANIME_ACE_2_0_BB\""
@@ -338,7 +347,7 @@ class PSDBuilderPlugin {
                             else -> "AnimeAce2.0BB"
                         }
 
-                        val fontSizes = List(pageTexts.size) { fontSize ?: 24 }
+                        val fontSizes = List(pageTexts.size) { fontSize ?: 60 }
                         val fontNames = List(pageTexts.size) { psdFontString }
                         val borderSizes = List(pageTexts.size) { borderSize ?: 3 }
 
@@ -459,6 +468,12 @@ class PSDBuilderPlugin {
         return result
     }
 
+    data class BoxData(
+        val ibx0: Double, val iby0: Double, val ibx1: Double, val iby1: Double,
+        val cx: Double, val cy: Double,
+        val bBox: DoubleArray, val tBox: DoubleArray
+    )
+
     suspend fun buildPsdObject(
         imagePath: String,
         texts: List<String>,
@@ -472,7 +487,8 @@ class PSDBuilderPlugin {
         shapes: List<String?>? = null,
         textColors: List<String?>? = null,
         hasBorder: List<Boolean?>? = null,
-        borderColors: List<String?>? = null
+        borderColors: List<String?>? = null,
+        customBoundaries: List<com.wip.kpsd.TextBoundary>? = null
     ): Psd {
         val inputFile = File(imagePath)
         val baseImage = withContext(Dispatchers.IO) { ImageIO.read(inputFile) }
@@ -480,6 +496,139 @@ class PSDBuilderPlugin {
 
         val width = baseImage.width
         val height = baseImage.height
+
+        val boxDataList = mutableListOf<BoxData>()
+        for ((index, text) in texts.withIndex()) {
+            val balloonBox = if (index < balloonBoxes.size) balloonBoxes[index] else emptyList()
+            val textBox = textBoxes?.getOrNull(index) ?: emptyList()
+
+            fun toAbs(b: List<Double>): DoubleArray {
+                if (b.size < 4) return doubleArrayOf()
+                val ymin = if (b[0] in 0.0..1.0 && b[2] in 0.0..1.0) b[0] * height else b[0]
+                val xmin = if (b[1] in 0.0..1.0 && b[3] in 0.0..1.0) b[1] * width else b[1]
+                val ymax = if (b[2] in 0.0..1.0 && b[0] in 0.0..1.0) b[2] * height else b[2]
+                val xmax = if (b[3] in 0.0..1.0 && b[1] in 0.0..1.0) b[3] * width else b[3]
+                return doubleArrayOf(ymin, xmin, ymax, xmax)
+            }
+            
+            val bBox = toAbs(balloonBox)
+            val tBox = toAbs(textBox)
+
+            val ibx0: Double
+            val iby0: Double
+            val ibx1: Double
+            val iby1: Double
+            val cx: Double
+            val cy: Double
+
+            if (tBox.size >= 4 && bBox.size >= 4) {
+                val t_ymin = tBox[0]
+                val t_xmin = tBox[1]
+                val t_ymax = tBox[2]
+                val t_xmax = tBox[3]
+
+                val b_ymin = bBox[0]
+                val b_xmin = bBox[1]
+                val b_ymax = bBox[2]
+                val b_xmax = bBox[3]
+
+                cx = (t_xmin + t_xmax) / 2.0
+                cy = (t_ymin + t_ymax) / 2.0
+
+                var bw = b_xmax - b_xmin
+                var bh = b_ymax - b_ymin
+
+                val tw = t_xmax - t_xmin
+                val th = t_ymax - t_ymin
+
+                val shape = shapes?.getOrNull(index) ?: "oval"
+
+                if (bw >= 2 * tw || bh >= 2 * th) {
+                    val fallbackMult = if (shape.equals("rectangular", ignoreCase = true)) 1.25 else 1.6
+                    bw = tw * fallbackMult
+                    bh = th * fallbackMult
+                }
+
+                // Interpolates inside logic: restrict the orange box so it never exceeds the purple box
+                // We use simple intersection to keep it as large as possible while staying inside.
+                // This means the text might be shifted slightly off cy if it hits the edge, which is intended
+                // to prevent it from squashing into a tiny font.
+                var calc_ibx0 = maxOf(cx - bw / 2.0, b_xmin)
+                var calc_ibx1 = minOf(cx + bw / 2.0, b_xmax)
+                var calc_iby0 = maxOf(cy - bh / 2.0, b_ymin)
+                var calc_iby1 = minOf(cy + bh / 2.0, b_ymax)
+
+                // Failsafe in case text center is completely outside the balloon (shouldn't happen but just in case)
+                if (calc_ibx0 >= calc_ibx1) { calc_ibx0 = b_xmin; calc_ibx1 = b_xmax }
+                if (calc_iby0 >= calc_iby1) { calc_iby0 = b_ymin; calc_iby1 = b_ymax }
+
+                ibx0 = calc_ibx0
+                ibx1 = calc_ibx1
+                iby0 = calc_iby0
+                iby1 = calc_iby1
+            } else if (bBox.size >= 4) {
+                ibx0 = bBox[1]; iby0 = bBox[0]; ibx1 = bBox[3]; iby1 = bBox[2]
+                cx = (ibx0 + ibx1) / 2.0; cy = (iby0 + iby1) / 2.0
+            } else if (tBox.size >= 4) {
+                ibx0 = tBox[1]; iby0 = tBox[0]; ibx1 = tBox[3]; iby1 = tBox[2]
+                cx = (ibx0 + ibx1) / 2.0; cy = (iby0 + iby1) / 2.0
+            } else {
+                ibx0 = 0.4 * width; iby0 = 0.4 * height; ibx1 = 0.6 * width; iby1 = 0.6 * height
+                cx = (ibx0 + ibx1) / 2.0; cy = (iby0 + iby1) / 2.0
+            }
+
+            boxDataList.add(BoxData(ibx0, iby0, ibx1, iby1, cx, cy, bBox, tBox))
+        }
+
+        var debugPixelData: PixelData? = null
+        if (settings.debugMode) {
+            val debugImg = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+            val g2d = debugImg.createGraphics()
+            for ((index, box) in boxDataList.withIndex()) {
+                if (box.bBox.size >= 4) {
+                    g2d.color = java.awt.Color.MAGENTA
+                    g2d.stroke = java.awt.BasicStroke(2f)
+                    g2d.drawRect(box.bBox[1].toInt(), box.bBox[0].toInt(), (box.bBox[3]-box.bBox[1]).toInt(), (box.bBox[2]-box.bBox[0]).toInt())
+                }
+                if (box.tBox.size >= 4) {
+                    g2d.color = java.awt.Color.GREEN
+                    g2d.stroke = java.awt.BasicStroke(3f)
+                    g2d.drawRect(box.tBox[1].toInt(), box.tBox[0].toInt(), (box.tBox[3]-box.tBox[1]).toInt(), (box.tBox[2]-box.tBox[0]).toInt())
+                    g2d.color = java.awt.Color.RED
+                    g2d.drawLine((box.cx - 10).toInt(), box.cy.toInt(), (box.cx + 10).toInt(), box.cy.toInt())
+                    g2d.drawLine(box.cx.toInt(), (box.cy - 10).toInt(), box.cx.toInt(), (box.cy + 10).toInt())
+                }
+                g2d.color = java.awt.Color.ORANGE
+                g2d.stroke = java.awt.BasicStroke(4f)
+                g2d.drawRect(box.ibx0.toInt(), box.iby0.toInt(), (box.ibx1-box.ibx0).toInt(), (box.iby1-box.iby0).toInt())
+                
+                g2d.color = java.awt.Color.BLUE
+                val shape = shapes?.getOrNull(index) ?: "oval"
+                if (shape.equals("rectangular", ignoreCase = true)) {
+                    g2d.drawRect(box.ibx0.toInt(), box.iby0.toInt(), (box.ibx1 - box.ibx0).toInt(), (box.iby1 - box.iby0).toInt())
+                } else {
+                    g2d.drawOval(box.bBox[1].toInt(), box.bBox[0].toInt(), (box.bBox[3] - box.bBox[1]).toInt(), (box.bBox[2] - box.bBox[0]).toInt())
+                }
+            }
+            g2d.dispose()
+
+            val debugRgbData = IntArray(width * height)
+            debugImg.getRGB(0, 0, width, height, debugRgbData, 0, width)
+            val debugBytes = ByteArray(width * height * 4 + 64)
+            for (i in 0 until width * height) {
+                val argb = debugRgbData[i]
+                val a = (argb shr 24) and 0xff
+                val r = (argb shr 16) and 0xff
+                val g = (argb shr 8) and 0xff
+                val b = argb and 0xff
+                val base = i * 4
+                debugBytes[base] = r.toByte()
+                debugBytes[base + 1] = g.toByte()
+                debugBytes[base + 2] = b.toByte()
+                debugBytes[base + 3] = a.toByte()
+            }
+            debugPixelData = PixelData(width, height, debugBytes)
+        }
 
         val rgbData = IntArray(width * height)
         baseImage.getRGB(0, 0, width, height, rgbData, 0, width)
@@ -519,25 +668,31 @@ class PSDBuilderPlugin {
                 imageData = PixelData(width, height, bgBytes.copyOf())
             }
 
+            if (debugPixelData != null) {
+                layer(name = "Debug Boxes") {
+                    top = 0
+                    left = 0
+                    bottom = height
+                    right = width
+                    imageData = debugPixelData
+                }
+            }
+
             // Group all text layers inside "Testi" folder
             if (texts.isNotEmpty()) {
                 group(name = "Testi") {
                     for ((index, text) in texts.withIndex()) {
-                        val balloonBox = if (index < balloonBoxes.size) balloonBoxes[index] else emptyList()
-                    val textBox = textBoxes?.getOrNull(index) ?: emptyList()
-                    val actualBoxToUse = if (balloonBox.size >= 3) balloonBox else if (textBox.size >= 3) textBox else emptyList()
-                    val safeBox = normalizeBoundingBox(actualBoxToUse)
+                        val box = boxDataList[index]
 
-                    // The inputs are ymin, xmin, ymax, xmax
-                    val ibTop = if (safeBox[0] >= 0.0 && safeBox[0] <= 1.0 && safeBox[2] <= 1.0) (safeBox[0] * height).toInt() else safeBox[0].toInt()
-                    val ibLeft = if (safeBox[1] >= 0.0 && safeBox[1] <= 1.0 && safeBox[3] <= 1.0) (safeBox[1] * width).toInt() else safeBox[1].toInt()
-                    val ibBottom = if (safeBox[2] >= 0.0 && safeBox[2] <= 1.0 && safeBox[0] <= 1.0) (safeBox[2] * height).toInt() else safeBox[2].toInt()
-                    val ibRight = if (safeBox[3] >= 0.0 && safeBox[3] <= 1.0 && safeBox[1] <= 1.0) (safeBox[3] * width).toInt() else safeBox[3].toInt()
+                        val ibTop = box.iby0.toInt()
+                        val ibLeft = box.ibx0.toInt()
+                        val ibBottom = box.iby1.toInt()
+                        val ibRight = box.ibx1.toInt()
 
-                    val boxWidth = maxOf(1, ibRight - ibLeft)
-                    val boxHeight = maxOf(1, ibBottom - ibTop)
+                        val boxWidth = maxOf(1, ibRight - ibLeft)
+                        val boxHeight = maxOf(1, ibBottom - ibTop)
 
-                    val initialFontSize = fontSizes?.getOrNull(index) ?: 24
+                    val initialFontSize = fontSizes?.getOrNull(index) ?: 60
                     val fNameInput = fontNames?.getOrNull(index) ?: "AnimeAce2.0BB"
                     val fName = if (fNameInput == "ArialMT" || fNameInput == "Arial") "ArialMT" else "AnimeAce2.0BB"
 
@@ -578,11 +733,16 @@ class PSDBuilderPlugin {
                         transform(cos, sin, -sin, cos, ibLeft.toDouble(), ibTop.toDouble())
 
                         val bPadding = minOf(boxWidth, boxHeight) * 0.05f
-                        boundaryShape = if (shape.equals("rectangular", ignoreCase = true)) {
-                            com.wip.kpsd.RectangleBoundary(padding = bPadding)
-                        } else {
-                            com.wip.kpsd.EllipseBoundary(padding = bPadding)
+                        var boundaryShape = customBoundaries?.getOrNull(index)
+                        if (boundaryShape == null) {
+                            boundaryShape = if (shape.equals("rectangular", ignoreCase = true)) {
+                                com.wip.kpsd.RectangleBoundary(padding = bPadding)
+                            } else {
+                                com.wip.kpsd.EllipseBoundary(padding = bPadding)
+                            }
                         }
+                        this.boundaryShape = boundaryShape
+                        
                         wordBreak = com.wip.kpsd.WordBreak.NONE
                         verticalAlignment = com.wip.kpsd.VerticalAlignment.CENTER
 
