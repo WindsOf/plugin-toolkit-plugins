@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.ocr_ia",
         "name": "OCR IA",
-        "version": "2.4.4",
+        "version": "2.4.5",
         "description": "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog"
     },
     "requirements": {
@@ -125,67 +125,50 @@
             },
             "outputs": [
                 {
-                    "name": "extracted text",
-                    "description": "a list of strings representing the extracted text",
+                    "name": "result",
+                    "description": "",
                     "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "primitive",
-                            "primitiveType": "STRING"
-                        }
-                    }
-                },
-                {
-                    "name": "bounding box",
-                    "description": "(xmin, ymin, xmax, ymax), a list of lists of doubles representing the bounding box coordinates for each extracted text",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "array",
-                            "items": {
-                                "type": "primitive",
-                                "primitiveType": "DOUBLE"
+                        "type": "object",
+                        "className": "com.wip.ocrAI.models.OCRResult",
+                        "properties": {
+                            "texts": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "bb": {
+                                "type": "array",
+                                "items": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "primitive",
+                                        "primitiveType": "DOUBLE"
+                                    }
+                                }
+                            },
+                            "pageNumbers": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "INT"
+                                }
+                            },
+                            "pageNames": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "failedFiles": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
                             }
-                        }
-                    },
-                    "semanticTypes": [
-                        {
-                            "namespace": "wom",
-                            "name": "bounding-box",
-                            "variant": null
-                        }
-                    ]
-                },
-                {
-                    "name": "page number",
-                    "description": "a list of integers representing the page number (1-indexed) for each extracted text",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "primitive",
-                            "primitiveType": "INT"
-                        }
-                    }
-                },
-                {
-                    "name": "page name",
-                    "description": "a list of strings representing the filename/page name for each extracted text",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "primitive",
-                            "primitiveType": "STRING"
-                        }
-                    }
-                },
-                {
-                    "name": "failed files",
-                    "description": "a list of strings representing the filenames that failed to process",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "primitive",
-                            "primitiveType": "STRING"
                         }
                     }
                 }
@@ -371,183 +354,116 @@
             },
             "outputs": [
                 {
-                    "name": "extracted text",
-                    "description": "a list of strings representing the extracted text",
+                    "name": "result",
+                    "description": "",
                     "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "primitive",
-                            "primitiveType": "STRING"
-                        }
-                    }
-                },
-                {
-                    "name": "balloon bounding box",
-                    "description": "(ymin, xmin, ymax, xmax), bounding box coordinates of the speech balloon",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "array",
-                            "items": {
-                                "type": "primitive",
-                                "primitiveType": "DOUBLE"
+                        "type": "object",
+                        "className": "com.wip.ocrAI.models.AdvancedOCRResult",
+                        "properties": {
+                            "texts": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "balloonBoxes": {
+                                "type": "array",
+                                "items": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "primitive",
+                                        "primitiveType": "DOUBLE"
+                                    }
+                                }
+                            },
+                            "textBoxes": {
+                                "type": "array",
+                                "items": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "primitive",
+                                        "primitiveType": "DOUBLE"
+                                    }
+                                }
+                            },
+                            "shapes": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "fontStyles": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "fontFamilies": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "textAngles": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "DOUBLE"
+                                }
+                            },
+                            "isSparse": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "BOOLEAN"
+                                }
+                            },
+                            "textColors": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "hasBorder": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "BOOLEAN"
+                                }
+                            },
+                            "borderColors": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "pageNumbers": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "INT"
+                                }
+                            },
+                            "pageNames": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "failedFiles": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
                             }
-                        }
-                    },
-                    "semanticTypes": [
-                        {
-                            "namespace": "wom",
-                            "name": "bounding-box",
-                            "variant": null
-                        }
-                    ]
-                },
-                {
-                    "name": "text bounding box",
-                    "description": "(ymin, xmin, ymax, xmax), bounding box coordinates tightly wrapping the text",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "array",
-                            "items": {
-                                "type": "primitive",
-                                "primitiveType": "DOUBLE"
-                            }
-                        }
-                    },
-                    "semanticTypes": [
-                        {
-                            "namespace": "wom",
-                            "name": "bounding-box",
-                            "variant": null
-                        }
-                    ]
-                },
-                {
-                    "name": "balloon shapes",
-                    "description": "shape of the speech balloon. Valid values are strictly: 'oval' or 'rectangular'",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "primitive",
-                            "primitiveType": "STRING"
-                        }
-                    },
-                    "semanticTypes": [
-                        {
-                            "namespace": "wom",
-                            "name": "shape",
-                            "variant": null
-                        }
-                    ]
-                },
-                {
-                    "name": "font styles",
-                    "description": "style of the text font. Valid values are strictly: 'normal', 'italic', 'bold', 'bold-italic'",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "primitive",
-                            "primitiveType": "STRING"
-                        }
-                    }
-                },
-                {
-                    "name": "font families",
-                    "description": "general classification of the font, e.g., 'sans-serif', 'serif', 'handwritten', 'screaming'",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "primitive",
-                            "primitiveType": "STRING"
-                        }
-                    }
-                },
-                {
-                    "name": "text angles",
-                    "description": "rotation angle of the text in degrees",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "primitive",
-                            "primitiveType": "DOUBLE"
-                        }
-                    }
-                },
-                {
-                    "name": "is sparse",
-                    "description": "whether the text is sparsely distributed inside the bounding box",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "primitive",
-                            "primitiveType": "BOOLEAN"
-                        }
-                    }
-                },
-                {
-                    "name": "text colors",
-                    "description": "color of the text",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "primitive",
-                            "primitiveType": "STRING"
-                        }
-                    }
-                },
-                {
-                    "name": "has border",
-                    "description": "whether the text has an outline/stroke",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "primitive",
-                            "primitiveType": "BOOLEAN"
-                        }
-                    }
-                },
-                {
-                    "name": "border colors",
-                    "description": "color of the text outline/stroke if present",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "primitive",
-                            "primitiveType": "STRING"
-                        }
-                    }
-                },
-                {
-                    "name": "page number",
-                    "description": "a list of integers representing the page number (1-indexed) for each extracted text",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "primitive",
-                            "primitiveType": "INT"
-                        }
-                    }
-                },
-                {
-                    "name": "page name",
-                    "description": "a list of strings representing the filename/page name for each extracted text",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "primitive",
-                            "primitiveType": "STRING"
-                        }
-                    }
-                },
-                {
-                    "name": "failed files",
-                    "description": "a list of strings representing the filenames that failed to process",
-                    "type": {
-                        "type": "array",
-                        "items": {
-                            "type": "primitive",
-                            "primitiveType": "STRING"
                         }
                     }
                 }
@@ -605,6 +521,13 @@
     },
     "changelog": {
         "releases": [
+            {
+                "version": "2.4.5",
+                "date": "2026-06-19",
+                "categories": {
+                    "Added": []
+                }
+            },
             {
                 "version": "2.4.4",
                 "date": "2026-06-13",

@@ -38,12 +38,12 @@
     {
       "name": "OCR IA",
       "pkg": "com.wip.ocr_ia",
-      "version": "2.4.4",
+      "version": "2.4.5",
       "fileName": "OCR_IA.jar",
       "description": "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog",
       "targetAppVersion": "1.0.0",
-      "hash": "f2ff8069cf80bead1f03e24afdedeb9a1a1768aab60b55f115320674cffb9be6",
-      "signature": "pgEtRVXIm+vGV8741urQHBRSkjXyqNVBrbdTbnpqDyfSShInbVhZib+LwrzkLVFh7bKGgwzLOWJUaKf3i0MCEtNnHcWo7NldLH5pUh8PcZf/HqXmIIfDAl+56NdNsWOX/Lfkcjw45q4bwKekJR8YaI30sXSKb2V4awvRqWxuEW9j6QugaZVl3R+jUw11JkM8hH/IngjB9zlKQQDijTwUycVQaGfzF7iUy6xEiWIai06NwX5FUmKCg4CZVrFxjHzKLW/lWbMKb1RM+tqFX0EDbyNs4qo0/tifHGHxlL/YVUnGd7BJMoLue8swGtgO6/QlWAbo3AnZwK/f+q7K1Rn2NQ=="
+      "hash": "183df377b17a6e85b23d9b3d085faa2638e40c50b52d039d8bd158919f17de0f",
+      "signature": "dXl4w89R3MgHFR0opdZRlvLTOM4sI4QJ/P3idHR+K/s3raLvjvzMEEfBTaBakmS0eSIctJD5LiP0ssrZf3QNqTJxNz/bRSeu9Sg4WweEa34dewbBilZb17Ie0ZPylabCZ3HY9snLd9Qtdk9LeK9HTwjxh0OLqeQenfmOoY6kBGyJ6zFv+nahfF74LInFvWckKZAPTIZ58xj83rOro2i3EFegX/RVXc5S0O5/sWZQJeuF837JZUTCcSpAyCE1LlrT6Hb+1rXeQkxVvcWFfOuABHqdJQN1g8ZxlYHmlBqs1u2Fa4FpJJCcPE+8aKWh9uAgls/WReoEgr3EobAePAwuoQ=="
     },
     {
       "name": "PSD Builder",
@@ -58,12 +58,12 @@
     {
       "name": "PSD Builder Native",
       "pkg": "com.wip.psdbuilder.native",
-      "version": "4.4.8",
+      "version": "4.4.9",
       "fileName": "PSD_builder_native.jar",
       "description": "A plugin that builds layered PSD files natively in Kotlin.",
       "targetAppVersion": "1.0.0",
-      "hash": "d6f239224d9df163bec014ae6ae3d009b749382ad3e2e37cb8b3f12e50febb3e",
-      "signature": "dgimQy/fMjDHLOXlgc0kfxCNIqXerzIS3H7p146S6pDUmanIGFeaQlhzV4SplyiYp1hVjGEQrYb9SCZJHBJzaTOVNqQvKJxDZ8eEWK1purhaXCYlSKpTtBn7Z1rUVmpUt3tTtselumUPIPzswbPdDUZuldDKzb1LhI3zbfNuHDVhXv8n0Nau6MkkjiAlGqn63s8+1rs3C/jTMLc9rUK/EsqBl7Ldoi7qRnraBe02g387Z9EpAeFx1/NT17/d/b0JFgO5B3f2AibdzLMdDOVMm0tGLKapPMJFglD2zmfR5DnRVhAwKyrD4B0K2Mi1Zmsa6ar6y1not3D6UQuWFgZUuA=="
+      "hash": "c67f81c345a25bf0e221c084ada183f8ce17d68e99df6c59223c22100011f072",
+      "signature": "RPH/VZ64pLgLiEZGjJRqXhTwQEjQCeeo3KacNAZWw8v0rfCUpWYlANyJoQxBFpozEeXuWXmpGkatWiEXwByKyUT/ZBdr3mDyQ7zpWya302qgwlr0fJADAmiplT246smlhvoiunrSupeDCMQNYKg0vcTuXNVU2k7iLlCYASiYoJZMupyzzat10VuV/tw+hdZ8vI4Unsj7ZWIebZ6F4vDjQ7dHFCRB0/TMD8ZB84BuDybIajIdeA63F8UrSftV/6xaChOLISy/l9YnMQ6fCCvKCGnd26VB5Z3GkTJeX6IjoSwGx9Ja+5+vByDmD7so5do6QuvrD/94ZrPyxX1bJVJ6uA=="
     },
     {
       "name": "Slicer",

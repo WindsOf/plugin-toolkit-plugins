@@ -24,10 +24,12 @@ dependencies {
     implementation(libs.kpsd)
     implementation(libs.twelvemonkeys.webp)
     ksp(libs.plugin.api)
+    implementation(project(":common-models"))
 
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlin.test.junit)
     testImplementation(libs.mockk)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
 }
 
 tasks.test {
@@ -39,6 +41,7 @@ tasks.withType<ProcessResources> {
 }
 
 tasks.jar {
+    dependsOn(configurations.runtimeClasspath)
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
     // Include all dependencies in the JAR except those provided by the host toolkit

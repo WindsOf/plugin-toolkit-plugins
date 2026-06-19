@@ -2,6 +2,8 @@ package com.wip.psdbuilder
 
 import com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi
 import com.wip.kpsd.Justification
+import com.wip.kpsd.KPsd
+import com.wip.kpsd.Layer
 import com.wip.kpsd.PixelData
 import com.wip.kpsd.Psd
 import com.wip.kpsd.TextShapeType
@@ -25,6 +27,8 @@ import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
 import org.wip.plugintoolkit.api.annotations.CapabilityOutput
 import org.wip.plugintoolkit.api.annotations.PluginSetting
+import com.wip.ocrAI.models.AdvancedOCRResult
+import com.wip.ocrAI.models.OCRResult
 import java.io.File
 import javax.imageio.ImageIO
 import javax.imageio.spi.IIORegistry
@@ -117,7 +121,7 @@ data class PSDBuilderSettings(
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "PSD Builder Native",
-    version = "4.4.8",
+    version = "4.4.9",
     description = "A plugin that builds layered PSD files natively in Kotlin."
 )
 class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) {
@@ -132,7 +136,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                 }
             }
             registry.registerServiceProvider(WebPImageReaderSpi())
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             // Ignore
         }
     }
@@ -229,7 +233,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             shapes = shapes
         )
         val psdBytes = withContext(Dispatchers.Default) {
-            com.wip.kpsd.KPsd.write(psd, compress = false)
+            KPsd.write(psd, compress = false)
         }
         withContext(Dispatchers.IO) {
             File(outputPsdPath).writeBytes(psdBytes)
@@ -237,6 +241,66 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         }
 
         return PSDBuildResult(outputPsdPath)
+    }
+
+    @Capability(
+        name = "Build PSD from Image and Advanced OCR Data",
+        description = "Generates a layered PSD natively from an image and advanced OCR data"
+    )
+    suspend fun buildPsdFromAdvancedOcrData(
+        @CapabilityParam(description = "Path to the base image") imagePath: String,
+        @CapabilityParam(description = "Advanced OCR Result") ocrData: AdvancedOCRResult,
+        @CapabilityParam(description = "Font size in pixels", defaultValue = "24") fontSize: Int? = 24,
+        @CapabilityParam(description = "Typeface for the text", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
+        @CapabilityParam(description = "Thickness of the text stroke/border (0 to disable)", defaultValue = "3") borderSize: Int? = 3,
+        @CapabilityParam(description = "Directory to save generated PSD (leave empty to use image folder)", defaultValue = "\"\"") outputDir: String? = "",
+        @CapabilityParam(description = "Keep intermediate JSON and temp image files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
+        context: PluginContext
+    ): PSDBuildResult {
+        return buildPsdFromInputs(
+            imagePath = imagePath,
+            texts = ocrData.texts,
+            balloonBoxes = ocrData.balloonBoxes,
+            textBoxes = ocrData.textBoxes,
+            fontSize = fontSize,
+            fontName = fontName,
+            borderSize = borderSize,
+            outputDir = outputDir,
+            leaveIntermediateFiles = leaveIntermediateFiles,
+            textAngles = ocrData.textAngles,
+            textColors = ocrData.textColors,
+            hasBorder = ocrData.hasBorder,
+            borderColors = ocrData.borderColors,
+            shapes = ocrData.shapes,
+            context = context
+        )
+    }
+
+    @Capability(
+        name = "Build PSD from Image and OCR Data",
+        description = "Generates a layered PSD natively from an image and basic OCR data"
+    )
+    suspend fun buildPsdFromOcrData(
+        @CapabilityParam(description = "Path to the base image") imagePath: String,
+        @CapabilityParam(description = "OCR Result") ocrData: OCRResult,
+        @CapabilityParam(description = "Font size in pixels", defaultValue = "24") fontSize: Int? = 24,
+        @CapabilityParam(description = "Typeface for the text", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
+        @CapabilityParam(description = "Thickness of the text stroke/border (0 to disable)", defaultValue = "3") borderSize: Int? = 3,
+        @CapabilityParam(description = "Directory to save generated PSD (leave empty to use image folder)", defaultValue = "\"\"") outputDir: String? = "",
+        @CapabilityParam(description = "Keep intermediate JSON and temp image files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
+        context: PluginContext
+    ): PSDBuildResult {
+        return buildPsdFromInputs(
+            imagePath = imagePath,
+            texts = ocrData.texts,
+            balloonBoxes = ocrData.bb,
+            fontSize = fontSize,
+            fontName = fontName,
+            borderSize = borderSize,
+            outputDir = outputDir,
+            leaveIntermediateFiles = leaveIntermediateFiles,
+            context = context
+        )
     }
 
     @Capability(
@@ -367,7 +431,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                             borderColors = pageBorderColors
                         )
                         val psdBytes = withContext(Dispatchers.Default) {
-                            com.wip.kpsd.KPsd.write(psd, compress = false)
+                            KPsd.write(psd, compress = false)
                         }
                         withContext(Dispatchers.IO) {
                             File(outputPsdPath).writeBytes(psdBytes)
@@ -375,18 +439,82 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
                         val completed = processedPages.incrementAndGet()
                         progressReporter.report(completed.toFloat() / totalPages.toFloat())
-                        
+
                         outputPsdPath
                     }
                 }
             }.awaitAll()
-            
+
             psdPaths.addAll(generatedPaths)
             logger.info("All $totalPages PSDs generated successfully.")
         }
 
         return ChapterPSDBuildResult(outDir.absolutePath, psdPaths)
     }
+
+    @Capability(
+        name = "Build PSD for Chapter from Advanced OCR Data",
+        description = "Generates layered PSDs natively for a folder of images concurrently using advanced OCR data"
+    )
+    suspend fun buildPsdForChapterFromAdvancedOcrData(
+        @CapabilityParam(description = "Path to folder containing chapter images", semanticTypes = ["sys/directory"]) inputFolder: String,
+        @CapabilityParam(description = "Advanced OCR Result") ocrData: AdvancedOCRResult,
+        @CapabilityParam(description = "Directory to save generated PSDs", defaultValue = "\"\"") outputDir: String? = "",
+        @CapabilityParam(description = "Font size in pixels", defaultValue = "60") fontSize: Int? = 60,
+        @CapabilityParam(description = "Typeface for the text", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
+        @CapabilityParam(description = "Thickness of the text stroke/border (0 to disable)", defaultValue = "3") borderSize: Int? = 3,
+        @CapabilityParam(description = "Keep intermediate JSON and temp image files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
+        context: PluginContext
+    ): ChapterPSDBuildResult {
+        return buildPsdForChapter(
+            inputFolder = inputFolder,
+            texts = ocrData.texts,
+            balloonBoxes = ocrData.balloonBoxes,
+            textBoxes = ocrData.textBoxes,
+            pageNames = ocrData.pageNames,
+            outputDir = outputDir,
+            fontSize = fontSize,
+            fontName = fontName,
+            borderSize = borderSize,
+            leaveIntermediateFiles = leaveIntermediateFiles,
+            textAngles = ocrData.textAngles,
+            textColors = ocrData.textColors,
+            hasBorder = ocrData.hasBorder,
+            borderColors = ocrData.borderColors,
+            shapes = ocrData.shapes,
+            context = context
+        )
+    }
+
+    @Capability(
+        name = "Build PSD for Chapter from OCR Data",
+        description = "Generates layered PSDs natively for a folder of images concurrently using basic OCR data"
+    )
+    suspend fun buildPsdForChapterFromOcrData(
+        @CapabilityParam(description = "Path to folder containing chapter images", semanticTypes = ["sys/directory"]) inputFolder: String,
+        @CapabilityParam(description = "OCR Result") ocrData: OCRResult,
+        @CapabilityParam(description = "Directory to save generated PSDs", defaultValue = "\"\"") outputDir: String? = "",
+        @CapabilityParam(description = "Font size in pixels", defaultValue = "60") fontSize: Int? = 60,
+        @CapabilityParam(description = "Typeface for the text", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
+        @CapabilityParam(description = "Thickness of the text stroke/border (0 to disable)", defaultValue = "3") borderSize: Int? = 3,
+        @CapabilityParam(description = "Keep intermediate JSON and temp image files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
+        context: PluginContext
+    ): ChapterPSDBuildResult {
+        return buildPsdForChapter(
+            inputFolder = inputFolder,
+            texts = ocrData.texts,
+            balloonBoxes = ocrData.bb,
+            pageNames = ocrData.pageNames,
+            outputDir = outputDir,
+            fontSize = fontSize,
+            fontName = fontName,
+            borderSize = borderSize,
+            leaveIntermediateFiles = leaveIntermediateFiles,
+            context = context
+        )
+    }
+
+    val json = Json { ignoreUnknownKeys = true }
 
     @Capability(
         name = "Build PSD from JSON",
@@ -403,7 +531,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             throw IllegalArgumentException("JSON file not found: $jsonPath")
         }
         val jsonContent = withContext(Dispatchers.IO) { jsonFile.readText() }
-        val payload = Json { ignoreUnknownKeys = true }.decodeFromString<PsdPayload>(jsonContent)
+        val payload = json.decodeFromString<PsdPayload>(jsonContent)
 
         val imagePathToUse = if (!baseImagePath.isNullOrBlank()) baseImagePath else payload.backgroundImage
         if (imagePathToUse.isNullOrBlank()) {
@@ -414,10 +542,10 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         val width = baseImage.width.toDouble()
         val height = baseImage.height.toDouble()
 
-        val activeTexts = if (payload.balloons.isNotEmpty()) payload.balloons else payload.texts
+        val activeTexts = payload.balloons.ifEmpty { payload.texts }
         val texts = activeTexts.map { it.text }
-        
-        val balloonBoxes = activeTexts.map { 
+
+        val balloonBoxes = activeTexts.map {
             val box = it.balloon_box_2d
             if (box != null && box.size >= 4) {
                 // Convert 0-1000 coordinates to 0.0-1.0 normalized coordinates
@@ -430,7 +558,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                 listOf(it.top.toDouble() / height, it.left.toDouble() / width, it.bottom.toDouble() / height, it.right.toDouble() / width)
             } else emptyList()
         }
-        val textBoxes = activeTexts.map { 
+        val textBoxes = activeTexts.map {
             val box = it.text_box_2d
             if (box != null && box.size >= 4) {
                 val b0 = if (box[0] > 1.0) box[0] / 1000.0 else box[0]
@@ -441,7 +569,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             } else emptyList()
         }
         val textAngles = activeTexts.map { it.textAngle ?: it.rotation }
-        val textColors = activeTexts.map { 
+        val textColors = activeTexts.map {
             it.textColor ?: if (it.color != null) String.format("#%02x%02x%02x", it.color.r, it.color.g, it.color.b) else null
         }
         val fontSizes = activeTexts.map { it.fontSize }
@@ -467,7 +595,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             borderColors = borderColors
         )
         val psdBytes = withContext(Dispatchers.Default) {
-            com.wip.kpsd.KPsd.write(psd, compress = false)
+            KPsd.write(psd, compress = false)
         }
         withContext(Dispatchers.IO) {
             File(outputPsdPath).writeBytes(psdBytes)
@@ -488,8 +616,39 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
     data class BoxData(
         val ibx0: Double, val iby0: Double, val ibx1: Double, val iby1: Double,
         val cx: Double, val cy: Double,
-        val bBox: DoubleArray, val tBox: DoubleArray
-    )
+        val bBox: DoubleArray,
+        val tBox: DoubleArray
+    ) {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (javaClass != other?.javaClass) return false
+
+            other as BoxData
+
+            if (ibx0 != other.ibx0) return false
+            if (iby0 != other.iby0) return false
+            if (ibx1 != other.ibx1) return false
+            if (iby1 != other.iby1) return false
+            if (cx != other.cx) return false
+            if (cy != other.cy) return false
+            if (!bBox.contentEquals(other.bBox)) return false
+            if (!tBox.contentEquals(other.tBox)) return false
+
+            return true
+        }
+
+        override fun hashCode(): Int {
+            var result = ibx0.hashCode()
+            result = 31 * result + iby0.hashCode()
+            result = 31 * result + ibx1.hashCode()
+            result = 31 * result + iby1.hashCode()
+            result = 31 * result + cx.hashCode()
+            result = 31 * result + cy.hashCode()
+            result = 31 * result + bBox.contentHashCode()
+            result = 31 * result + tBox.contentHashCode()
+            return result
+        }
+    }
 
     suspend fun buildPsdObject(
         imagePath: String,
@@ -527,7 +686,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                 val xmax = if (b[3] in 0.0..1.0 && b[1] in 0.0..1.0) b[3] * width else b[3]
                 return doubleArrayOf(ymin, xmin, ymax, xmax)
             }
-            
+
             val bBox = toAbs(balloonBox)
             val tBox = toAbs(textBox)
 
@@ -616,7 +775,12 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                 if (box.bBox.size >= 4) {
                     g2d.color = java.awt.Color.MAGENTA
                     g2d.stroke = java.awt.BasicStroke(2f)
-                    g2d.drawRect(box.bBox[1].toInt(), box.bBox[0].toInt(), (box.bBox[3]-box.bBox[1]).toInt(), (box.bBox[2]-box.bBox[0]).toInt())
+                    g2d.drawRect(
+                        box.bBox[1].toInt(),
+                        box.bBox[0].toInt(),
+                        (box.bBox[3]-box.bBox[1]).toInt(),
+                        (box.bBox[2]-box.bBox[0]).toInt()
+                    )
                 }
                 if (box.tBox.size >= 4) {
                     g2d.color = java.awt.Color.GREEN
@@ -629,7 +793,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                 g2d.color = java.awt.Color.ORANGE
                 g2d.stroke = java.awt.BasicStroke(4f)
                 g2d.drawRect(box.ibx0.toInt(), box.iby0.toInt(), (box.ibx1-box.ibx0).toInt(), (box.iby1-box.iby0).toInt())
-                
+
                 g2d.color = java.awt.Color.BLUE
                 val shape = shapes?.getOrNull(index) ?: "oval"
                 if (shape.equals("rectangular", ignoreCase = true)) {
@@ -645,11 +809,13 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             g2dFile.drawImage(baseImage, 0, 0, null)
             g2dFile.drawImage(debugImg, 0, 0, null)
             g2dFile.dispose()
-            
-            val outDir = java.io.File("build/tmp")
+
+            val outDir = File("build/tmp")
             if (!outDir.exists()) outDir.mkdirs()
-            val baseName = java.io.File(imagePath).nameWithoutExtension
-            javax.imageio.ImageIO.write(debugImgFile, "png", java.io.File(outDir, "${baseName}_psd_builder.png"))
+            val baseName = File(imagePath).nameWithoutExtension
+            withContext(Dispatchers.IO) {
+                ImageIO.write(debugImgFile, "png", File(outDir, "${baseName}_psd_builder.png"))
+            }
 
             val debugRgbData = IntArray(width * height)
             debugImg.getRGB(0, 0, width, height, debugRgbData, 0, width)
@@ -743,12 +909,12 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                     } else {
                         java.awt.Color(0, 0, 0)
                     }
-                    
+
                     val rot = textAngles?.getOrNull(index) ?: 0.0
                     val theta = Math.toRadians(rot)
                     val cos = cos(theta)
                     val sin = sin(theta)
-                    
+
                     val hexColor = textColors?.getOrNull(index)
                     val textColor = if (hexColor != null && hexColor.length >= 7) {
                         val c = java.awt.Color.decode(hexColor.take(7))
@@ -781,7 +947,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                             }
                         }
                         this.boundaryShape = boundaryShape
-                        
+
                         wordBreak = com.wip.kpsd.WordBreak.NONE
                         verticalAlignment = com.wip.kpsd.VerticalAlignment.CENTER
 
@@ -812,9 +978,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
     }
     }
 
-    private fun findTextLayers(layers: List<com.wip.kpsd.Layer>?): List<com.wip.kpsd.Layer> {
+    private fun findTextLayers(layers: List<Layer>?): List<Layer> {
         if (layers == null) return emptyList()
-        val result = mutableListOf<com.wip.kpsd.Layer>()
+        val result = mutableListOf<Layer>()
         for (l in layers) {
             if (l.text != null) {
                 result.add(l)
@@ -839,7 +1005,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             throw IllegalArgumentException("PSD file not found: $psdPath")
         }
         val bytes = withContext(Dispatchers.IO) { file.readBytes() }
-        val psd = withContext(Dispatchers.Default) { com.wip.kpsd.KPsd.read(bytes) }
+        val psd = withContext(Dispatchers.Default) { KPsd.read(bytes) }
 
         val textLayers = findTextLayers(psd.children)
         return textLayers.map { l ->

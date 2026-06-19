@@ -25,6 +25,7 @@ dependencies {
     ksp(libs.plugin.api)
     implementation(libs.koog.agents)
     implementation(libs.koog.google)
+    implementation(project(":common-models"))
 }
 
 tasks.withType<ProcessResources> {
@@ -34,6 +35,7 @@ tasks.withType<ProcessResources> {
 }
 
 tasks.jar {
+    dependsOn(configurations.runtimeClasspath)
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
     // Include all dependencies in the JAR except those provided by the host toolkit

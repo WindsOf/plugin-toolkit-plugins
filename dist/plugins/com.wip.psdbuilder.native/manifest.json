@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder.native",
         "name": "PSD Builder Native",
-        "version": "4.4.8",
+        "version": "4.4.9",
         "description": "A plugin that builds layered PSD files natively in Kotlin."
     },
     "requirements": {
@@ -164,6 +164,348 @@
                             "type": "primitive",
                             "primitiveType": "STRING"
                         }
+                    }
+                }
+            },
+            "returnType": {
+                "type": "object",
+                "className": "com.wip.psdbuilder.PSDBuildResult",
+                "properties": {
+                    "psdPath": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                }
+            },
+            "semanticTypes": [
+                {
+                    "namespace": "sys",
+                    "name": "file",
+                    "variant": null
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "generated psd",
+                    "description": "Path to the generated PSD file",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    },
+                    "semanticTypes": [
+                        {
+                            "namespace": "sys",
+                            "name": "file",
+                            "variant": null
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Build PSD from Image and Advanced OCR Data",
+            "description": "Generates a layered PSD natively from an image and advanced OCR data",
+            "parameters": {
+                "imagePath": {
+                    "description": "Path to the base image",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "ocrData": {
+                    "description": "Advanced OCR Result",
+                    "type": {
+                        "type": "object",
+                        "className": "com.wip.ocrAI.models.AdvancedOCRResult",
+                        "properties": {
+                            "texts": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "balloonBoxes": {
+                                "type": "array",
+                                "items": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "primitive",
+                                        "primitiveType": "DOUBLE"
+                                    }
+                                }
+                            },
+                            "textBoxes": {
+                                "type": "array",
+                                "items": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "primitive",
+                                        "primitiveType": "DOUBLE"
+                                    }
+                                }
+                            },
+                            "shapes": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "fontStyles": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "fontFamilies": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "textAngles": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "DOUBLE"
+                                }
+                            },
+                            "isSparse": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "BOOLEAN"
+                                }
+                            },
+                            "textColors": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "hasBorder": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "BOOLEAN"
+                                }
+                            },
+                            "borderColors": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "pageNumbers": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "INT"
+                                }
+                            },
+                            "pageNames": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "failedFiles": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            }
+                        }
+                    }
+                },
+                "fontSize": {
+                    "defaultValue": 24,
+                    "description": "Font size in pixels",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "INT"
+                    }
+                },
+                "fontName": {
+                    "defaultValue": "ANIME_ACE_2_0_BB",
+                    "description": "Typeface for the text",
+                    "type": {
+                        "type": "enum",
+                        "className": "com.wip.psdbuilder.PsdFont",
+                        "options": [
+                            "ANIME_ACE_2_0_BB",
+                            "ARIAL"
+                        ]
+                    }
+                },
+                "borderSize": {
+                    "defaultValue": 3,
+                    "description": "Thickness of the text stroke/border (0 to disable)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "INT"
+                    }
+                },
+                "outputDir": {
+                    "defaultValue": "",
+                    "description": "Directory to save generated PSD (leave empty to use image folder)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "leaveIntermediateFiles": {
+                    "defaultValue": false,
+                    "description": "Keep intermediate JSON and temp image files for debugging",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "BOOLEAN"
+                    }
+                }
+            },
+            "returnType": {
+                "type": "object",
+                "className": "com.wip.psdbuilder.PSDBuildResult",
+                "properties": {
+                    "psdPath": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                }
+            },
+            "semanticTypes": [
+                {
+                    "namespace": "sys",
+                    "name": "file",
+                    "variant": null
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "generated psd",
+                    "description": "Path to the generated PSD file",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    },
+                    "semanticTypes": [
+                        {
+                            "namespace": "sys",
+                            "name": "file",
+                            "variant": null
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Build PSD from Image and OCR Data",
+            "description": "Generates a layered PSD natively from an image and basic OCR data",
+            "parameters": {
+                "imagePath": {
+                    "description": "Path to the base image",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "ocrData": {
+                    "description": "OCR Result",
+                    "type": {
+                        "type": "object",
+                        "className": "com.wip.ocrAI.models.OCRResult",
+                        "properties": {
+                            "texts": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "bb": {
+                                "type": "array",
+                                "items": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "primitive",
+                                        "primitiveType": "DOUBLE"
+                                    }
+                                }
+                            },
+                            "pageNumbers": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "INT"
+                                }
+                            },
+                            "pageNames": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "failedFiles": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            }
+                        }
+                    }
+                },
+                "fontSize": {
+                    "defaultValue": 24,
+                    "description": "Font size in pixels",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "INT"
+                    }
+                },
+                "fontName": {
+                    "defaultValue": "ANIME_ACE_2_0_BB",
+                    "description": "Typeface for the text",
+                    "type": {
+                        "type": "enum",
+                        "className": "com.wip.psdbuilder.PsdFont",
+                        "options": [
+                            "ANIME_ACE_2_0_BB",
+                            "ARIAL"
+                        ]
+                    }
+                },
+                "borderSize": {
+                    "defaultValue": 3,
+                    "description": "Thickness of the text stroke/border (0 to disable)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "INT"
+                    }
+                },
+                "outputDir": {
+                    "defaultValue": "",
+                    "description": "Directory to save generated PSD (leave empty to use image folder)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "leaveIntermediateFiles": {
+                    "defaultValue": false,
+                    "description": "Keep intermediate JSON and temp image files for debugging",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "BOOLEAN"
                     }
                 }
             },
@@ -422,6 +764,384 @@
             ]
         },
         {
+            "name": "Build PSD for Chapter from Advanced OCR Data",
+            "description": "Generates layered PSDs natively for a folder of images concurrently using advanced OCR data",
+            "parameters": {
+                "inputFolder": {
+                    "description": "Path to folder containing chapter images",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    },
+                    "semanticTypes": [
+                        {
+                            "namespace": "sys",
+                            "name": "directory",
+                            "variant": null
+                        }
+                    ]
+                },
+                "ocrData": {
+                    "description": "Advanced OCR Result",
+                    "type": {
+                        "type": "object",
+                        "className": "com.wip.ocrAI.models.AdvancedOCRResult",
+                        "properties": {
+                            "texts": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "balloonBoxes": {
+                                "type": "array",
+                                "items": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "primitive",
+                                        "primitiveType": "DOUBLE"
+                                    }
+                                }
+                            },
+                            "textBoxes": {
+                                "type": "array",
+                                "items": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "primitive",
+                                        "primitiveType": "DOUBLE"
+                                    }
+                                }
+                            },
+                            "shapes": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "fontStyles": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "fontFamilies": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "textAngles": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "DOUBLE"
+                                }
+                            },
+                            "isSparse": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "BOOLEAN"
+                                }
+                            },
+                            "textColors": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "hasBorder": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "BOOLEAN"
+                                }
+                            },
+                            "borderColors": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "pageNumbers": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "INT"
+                                }
+                            },
+                            "pageNames": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "failedFiles": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            }
+                        }
+                    }
+                },
+                "outputDir": {
+                    "defaultValue": "",
+                    "description": "Directory to save generated PSDs",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "fontSize": {
+                    "defaultValue": 60,
+                    "description": "Font size in pixels",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "INT"
+                    }
+                },
+                "fontName": {
+                    "defaultValue": "ANIME_ACE_2_0_BB",
+                    "description": "Typeface for the text",
+                    "type": {
+                        "type": "enum",
+                        "className": "com.wip.psdbuilder.PsdFont",
+                        "options": [
+                            "ANIME_ACE_2_0_BB",
+                            "ARIAL"
+                        ]
+                    }
+                },
+                "borderSize": {
+                    "defaultValue": 3,
+                    "description": "Thickness of the text stroke/border (0 to disable)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "INT"
+                    }
+                },
+                "leaveIntermediateFiles": {
+                    "defaultValue": false,
+                    "description": "Keep intermediate JSON and temp image files for debugging",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "BOOLEAN"
+                    }
+                }
+            },
+            "returnType": {
+                "type": "object",
+                "className": "com.wip.psdbuilder.ChapterPSDBuildResult",
+                "properties": {
+                    "psdFolder": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    },
+                    "psdPaths": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
+                    }
+                }
+            },
+            "outputs": [
+                {
+                    "name": "generated psd folder",
+                    "description": "Path to the folder containing the generated PSD files",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    },
+                    "semanticTypes": [
+                        {
+                            "namespace": "sys",
+                            "name": "directory",
+                            "variant": null
+                        }
+                    ]
+                },
+                {
+                    "name": "generated psds",
+                    "description": "List of paths to the generated PSD files",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Build PSD for Chapter from OCR Data",
+            "description": "Generates layered PSDs natively for a folder of images concurrently using basic OCR data",
+            "parameters": {
+                "inputFolder": {
+                    "description": "Path to folder containing chapter images",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    },
+                    "semanticTypes": [
+                        {
+                            "namespace": "sys",
+                            "name": "directory",
+                            "variant": null
+                        }
+                    ]
+                },
+                "ocrData": {
+                    "description": "OCR Result",
+                    "type": {
+                        "type": "object",
+                        "className": "com.wip.ocrAI.models.OCRResult",
+                        "properties": {
+                            "texts": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "bb": {
+                                "type": "array",
+                                "items": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "primitive",
+                                        "primitiveType": "DOUBLE"
+                                    }
+                                }
+                            },
+                            "pageNumbers": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "INT"
+                                }
+                            },
+                            "pageNames": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            },
+                            "failedFiles": {
+                                "type": "array",
+                                "items": {
+                                    "type": "primitive",
+                                    "primitiveType": "STRING"
+                                }
+                            }
+                        }
+                    }
+                },
+                "outputDir": {
+                    "defaultValue": "",
+                    "description": "Directory to save generated PSDs",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    }
+                },
+                "fontSize": {
+                    "defaultValue": 60,
+                    "description": "Font size in pixels",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "INT"
+                    }
+                },
+                "fontName": {
+                    "defaultValue": "ANIME_ACE_2_0_BB",
+                    "description": "Typeface for the text",
+                    "type": {
+                        "type": "enum",
+                        "className": "com.wip.psdbuilder.PsdFont",
+                        "options": [
+                            "ANIME_ACE_2_0_BB",
+                            "ARIAL"
+                        ]
+                    }
+                },
+                "borderSize": {
+                    "defaultValue": 3,
+                    "description": "Thickness of the text stroke/border (0 to disable)",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "INT"
+                    }
+                },
+                "leaveIntermediateFiles": {
+                    "defaultValue": false,
+                    "description": "Keep intermediate JSON and temp image files for debugging",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "BOOLEAN"
+                    }
+                }
+            },
+            "returnType": {
+                "type": "object",
+                "className": "com.wip.psdbuilder.ChapterPSDBuildResult",
+                "properties": {
+                    "psdFolder": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    },
+                    "psdPaths": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
+                    }
+                }
+            },
+            "outputs": [
+                {
+                    "name": "generated psd folder",
+                    "description": "Path to the folder containing the generated PSD files",
+                    "type": {
+                        "type": "primitive",
+                        "primitiveType": "STRING"
+                    },
+                    "semanticTypes": [
+                        {
+                            "namespace": "sys",
+                            "name": "directory",
+                            "variant": null
+                        }
+                    ]
+                },
+                {
+                    "name": "generated psds",
+                    "description": "List of paths to the generated PSD files",
+                    "type": {
+                        "type": "array",
+                        "items": {
+                            "type": "primitive",
+                            "primitiveType": "STRING"
+                        }
+                    }
+                }
+            ]
+        },
+        {
             "name": "Build PSD from JSON",
             "description": "Generates a layered PSD natively from a given JSON file",
             "parameters": {
@@ -589,6 +1309,13 @@
     },
     "changelog": {
         "releases": [
+            {
+                "version": "4.4.9",
+                "date": "2026-06-19",
+                "categories": {
+                    "Added": []
+                }
+            },
             {
                 "version": "4.4.8",
                 "date": "2026-06-19",
