@@ -3,7 +3,7 @@
     "plugin": {
         "id": "com.wip.psdbuilder.native",
         "name": "PSD Builder Native",
-        "version": "4.4.7",
+        "version": "4.4.8",
         "description": "A plugin that builds layered PSD files natively in Kotlin."
     },
     "requirements": {
@@ -590,10 +590,21 @@
     "changelog": {
         "releases": [
             {
+                "version": "4.4.8",
+                "date": "2026-06-19",
+                "categories": {
+                    "Changes": [
+                        "minor changes to the centering algorythm to be more accurate"
+                    ]
+                }
+            },
+            {
                 "version": "4.4.7",
                 "date": "2026-06-14",
                 "categories": {
-                    "Added": []
+                    "Changes": [
+                        "minor changes to the centering algorythm to be more accurate"
+                    ]
                 }
             },
             {

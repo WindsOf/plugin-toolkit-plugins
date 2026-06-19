@@ -117,7 +117,7 @@ data class PSDBuilderSettings(
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "PSD Builder Native",
-    version = "4.4.6",
+    version = "4.4.8",
     description = "A plugin that builds layered PSD files natively in Kotlin."
 )
 class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) {
@@ -418,11 +418,28 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         val texts = activeTexts.map { it.text }
         
         val balloonBoxes = activeTexts.map { 
-            it.balloon_box_2d ?: if (it.top != null && it.left != null && it.bottom != null && it.right != null) {
+            val box = it.balloon_box_2d
+            if (box != null && box.size >= 4) {
+                // Convert 0-1000 coordinates to 0.0-1.0 normalized coordinates
+                val b0 = if (box[0] > 1.0) box[0] / 1000.0 else box[0]
+                val b1 = if (box[1] > 1.0) box[1] / 1000.0 else box[1]
+                val b2 = if (box[2] > 1.0) box[2] / 1000.0 else box[2]
+                val b3 = if (box[3] > 1.0) box[3] / 1000.0 else box[3]
+                listOf(b0, b1, b2, b3)
+            } else if (it.top != null && it.left != null && it.bottom != null && it.right != null) {
                 listOf(it.top.toDouble() / height, it.left.toDouble() / width, it.bottom.toDouble() / height, it.right.toDouble() / width)
             } else emptyList()
         }
-        val textBoxes = activeTexts.map { it.text_box_2d ?: emptyList() }
+        val textBoxes = activeTexts.map { 
+            val box = it.text_box_2d
+            if (box != null && box.size >= 4) {
+                val b0 = if (box[0] > 1.0) box[0] / 1000.0 else box[0]
+                val b1 = if (box[1] > 1.0) box[1] / 1000.0 else box[1]
+                val b2 = if (box[2] > 1.0) box[2] / 1000.0 else box[2]
+                val b3 = if (box[3] > 1.0) box[3] / 1000.0 else box[3]
+                listOf(b0, b1, b2, b3)
+            } else emptyList()
+        }
         val textAngles = activeTexts.map { it.textAngle ?: it.rotation }
         val textColors = activeTexts.map { 
             it.textColor ?: if (it.color != null) String.format("#%02x%02x%02x", it.color.r, it.color.g, it.color.b) else null
@@ -518,8 +535,8 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             val iby0: Double
             val ibx1: Double
             val iby1: Double
-            val cx: Double
-            val cy: Double
+            var cx: Double
+            var cy: Double
 
             if (tBox.size >= 4 && bBox.size >= 4) {
                 val t_ymin = tBox[0]
@@ -535,37 +552,48 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                 cx = (t_xmin + t_xmax) / 2.0
                 cy = (t_ymin + t_ymax) / 2.0
 
-                var bw = b_xmax - b_xmin
-                var bh = b_ymax - b_ymin
-
                 val tw = t_xmax - t_xmin
                 val th = t_ymax - t_ymin
 
-                val shape = shapes?.getOrNull(index) ?: "oval"
+                var marginLeft = maxOf(0.0, t_xmin - b_xmin)
+                var marginRight = maxOf(0.0, b_xmax - t_xmax)
+                var marginTop = maxOf(0.0, t_ymin - b_ymin)
+                var marginBottom = maxOf(0.0, b_ymax - t_ymax)
 
-                if (bw >= 2 * tw || bh >= 2 * th) {
-                    val fallbackMult = 1.25
-                    bw = tw * fallbackMult
-                    bh = th * fallbackMult
+                val thresholdX = tw * 0.5
+                val thresholdY = th * 0.5
+                val fallbackX = tw * 0.4
+                val fallbackY = th * 0.4
+
+                val isHallucinating = (
+                    marginLeft > thresholdX ||
+                    marginRight > thresholdX ||
+                    marginTop > thresholdY ||
+                    marginBottom > thresholdY
+                )
+
+                if (isHallucinating) {
+                    if (marginLeft > thresholdX) marginLeft = fallbackX
+                    if (marginRight > thresholdX) marginRight = fallbackX
+                    if (marginTop > thresholdY) marginTop = fallbackY
+                    if (marginBottom > thresholdY) marginBottom = fallbackY
+
+                    ibx0 = t_xmin - marginLeft
+                    ibx1 = t_xmax + marginRight
+                    iby0 = t_ymin - marginTop
+                    iby1 = t_ymax + marginBottom
+
+                    cx = (ibx0 + ibx1) / 2.0
+                    cy = (iby0 + iby1) / 2.0
+                } else {
+                    val bw = b_xmax - b_xmin
+                    val bh = b_ymax - b_ymin
+
+                    ibx0 = cx - bw / 2.0
+                    ibx1 = cx + bw / 2.0
+                    iby0 = cy - bh / 2.0
+                    iby1 = cy + bh / 2.0
                 }
-
-                // Interpolates inside logic: restrict the orange box so it never exceeds the purple box
-                // We use simple intersection to keep it as large as possible while staying inside.
-                // This means the text might be shifted slightly off cy if it hits the edge, which is intended
-                // to prevent it from squashing into a tiny font.
-                var calc_ibx0 = maxOf(cx - bw / 2.0, b_xmin)
-                var calc_ibx1 = minOf(cx + bw / 2.0, b_xmax)
-                var calc_iby0 = maxOf(cy - bh / 2.0, b_ymin)
-                var calc_iby1 = minOf(cy + bh / 2.0, b_ymax)
-
-                // Failsafe in case text center is completely outside the balloon (shouldn't happen but just in case)
-                if (calc_ibx0 >= calc_ibx1) { calc_ibx0 = b_xmin; calc_ibx1 = b_xmax }
-                if (calc_iby0 >= calc_iby1) { calc_iby0 = b_ymin; calc_iby1 = b_ymax }
-
-                ibx0 = calc_ibx0
-                ibx1 = calc_ibx1
-                iby0 = calc_iby0
-                iby1 = calc_iby1
             } else if (bBox.size >= 4) {
                 ibx0 = bBox[1]; iby0 = bBox[0]; ibx1 = bBox[3]; iby1 = bBox[2]
                 cx = (ibx0 + ibx1) / 2.0; cy = (iby0 + iby1) / 2.0
@@ -607,10 +635,21 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                 if (shape.equals("rectangular", ignoreCase = true)) {
                     g2d.drawRect(box.ibx0.toInt(), box.iby0.toInt(), (box.ibx1 - box.ibx0).toInt(), (box.iby1 - box.iby0).toInt())
                 } else {
-                    g2d.drawOval(box.bBox[1].toInt(), box.bBox[0].toInt(), (box.bBox[3] - box.bBox[1]).toInt(), (box.bBox[2] - box.bBox[0]).toInt())
+                    g2d.drawOval(box.ibx0.toInt(), box.iby0.toInt(), (box.ibx1 - box.ibx0).toInt(), (box.iby1 - box.iby0).toInt())
                 }
             }
             g2d.dispose()
+
+            val debugImgFile = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+            val g2dFile = debugImgFile.createGraphics()
+            g2dFile.drawImage(baseImage, 0, 0, null)
+            g2dFile.drawImage(debugImg, 0, 0, null)
+            g2dFile.dispose()
+            
+            val outDir = java.io.File("build/tmp")
+            if (!outDir.exists()) outDir.mkdirs()
+            val baseName = java.io.File(imagePath).nameWithoutExtension
+            javax.imageio.ImageIO.write(debugImgFile, "png", java.io.File(outDir, "${baseName}_psd_builder.png"))
 
             val debugRgbData = IntArray(width * height)
             debugImg.getRGB(0, 0, width, height, debugRgbData, 0, width)

@@ -1,3 +1,8 @@
+Version: 4.4.8
+Date: 2026-06-19
+Changes:
+  - minor changes to the centering algorythm to be more accurate
+-------------------------------------------------------------------------------------------------
 Version: 4.4.7
 Date: 2026-06-14
 Changes:
