@@ -115,13 +115,19 @@ data class PSDBuilderSettings(
         description = "Enable debug mode to draw bounding boxes on the output image",
         defaultValue = "false"
     )
-    val debugMode: Boolean = false
+    val debugMode: Boolean = false,
+
+    @PluginSetting(
+        description = "Percentage of the bounding box size to use as padding",
+        defaultValue = "0.10"
+    )
+    val paddingPercentage: Float = 0.10f
 )
 
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "PSD Builder Native",
-    version = "4.4.9",
+    version = "4.4.10",
     description = "A plugin that builds layered PSD files natively in Kotlin."
 )
 class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) {
@@ -937,7 +943,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                         boxBounds = floatArrayOf(0f, 0f, boxWidth.toFloat(), boxHeight.toFloat())
                         transform(cos, sin, -sin, cos, ibLeft.toDouble(), ibTop.toDouble())
 
-                        val bPadding = minOf(boxWidth, boxHeight) * 0.05f
+                        val bPadding = minOf(boxWidth, boxHeight) * settings.paddingPercentage
                         var boundaryShape = customBoundaries?.getOrNull(index)
                         if (boundaryShape == null) {
                             boundaryShape = if (shape.equals("rectangular", ignoreCase = true)) {

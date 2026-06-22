@@ -1,3 +1,8 @@
+Version: 4.4.10
+Date: 2026-06-22
+Added:
+  - setting for padding multiplier in baloons
+-------------------------------------------------------------------------------------------------
 Version: 4.4.9
 Date: 2026-06-19
 Added:

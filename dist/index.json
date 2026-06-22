@@ -46,26 +46,6 @@
       "signature": "dXl4w89R3MgHFR0opdZRlvLTOM4sI4QJ/P3idHR+K/s3raLvjvzMEEfBTaBakmS0eSIctJD5LiP0ssrZf3QNqTJxNz/bRSeu9Sg4WweEa34dewbBilZb17Ie0ZPylabCZ3HY9snLd9Qtdk9LeK9HTwjxh0OLqeQenfmOoY6kBGyJ6zFv+nahfF74LInFvWckKZAPTIZ58xj83rOro2i3EFegX/RVXc5S0O5/sWZQJeuF837JZUTCcSpAyCE1LlrT6Hb+1rXeQkxVvcWFfOuABHqdJQN1g8ZxlYHmlBqs1u2Fa4FpJJCcPE+8aKWh9uAgls/WReoEgr3EobAePAwuoQ=="
     },
     {
-      "name": "PSD Builder",
-      "pkg": "com.wip.psdbuilder",
-      "version": "4.4.3",
-      "fileName": "PSD_builder.jar",
-      "description": "A plugin that builds layered PSD files using PSD_builder.exe.",
-      "targetAppVersion": "1.0.0",
-      "hash": "bb5aca923e537399e04e73d4134d76acc4c2ee276789a4b77840d99283a672a4",
-      "signature": "Gycqvyoa5HnuXbcp32eE8GgW3iGtUTsIjujLbQB2KyAPARGbw31QO8WeX+94QJXI0qDIuR5e8Iha37NQMWa2jduo+13Emw9JUS5tE2qOcakCZoDzm4Gc0PM+u1S3iXTxraMhBMOymkgVa8wAWLgb+O5cX4wEcbcAKNV/djLs+WPVJPab0Kq373erYQ6J5/y/ctBp5CkT4hK+Deedh0Eln/YXQDLdv4HbkAXPxChZzD6v/In7zS7tIo9zzpUeCKR5R/zq2eJRr04FlTRcfycyxTUvyR7rrATewkQxJPKbCD3SI3fSiYjkB/4qmw84YCm/3UsBP2duON3kfRCQXe3KLQ=="
-    },
-    {
-      "name": "PSD Builder Native",
-      "pkg": "com.wip.psdbuilder.native",
-      "version": "4.4.9",
-      "fileName": "PSD_builder_native.jar",
-      "description": "A plugin that builds layered PSD files natively in Kotlin.",
-      "targetAppVersion": "1.0.0",
-      "hash": "c67f81c345a25bf0e221c084ada183f8ce17d68e99df6c59223c22100011f072",
-      "signature": "RPH/VZ64pLgLiEZGjJRqXhTwQEjQCeeo3KacNAZWw8v0rfCUpWYlANyJoQxBFpozEeXuWXmpGkatWiEXwByKyUT/ZBdr3mDyQ7zpWya302qgwlr0fJADAmiplT246smlhvoiunrSupeDCMQNYKg0vcTuXNVU2k7iLlCYASiYoJZMupyzzat10VuV/tw+hdZ8vI4Unsj7ZWIebZ6F4vDjQ7dHFCRB0/TMD8ZB84BuDybIajIdeA63F8UrSftV/6xaChOLISy/l9YnMQ6fCCvKCGnd26VB5Z3GkTJeX6IjoSwGx9Ja+5+vByDmD7so5do6QuvrD/94ZrPyxX1bJVJ6uA=="
-    },
-    {
       "name": "Slicer",
       "pkg": "com.wip.slicer",
       "version": "1.1.5",
