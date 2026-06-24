@@ -26,5 +26,6 @@ dependencies {
 }
 
 tasks.processResources {
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
     exclude("scripts/vapoursynth-portable/**")
 }

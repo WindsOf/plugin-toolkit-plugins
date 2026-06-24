@@ -38,7 +38,7 @@ class Test2Outputs {
 
             // Parse OCR JSON
             val rawContent = jsonFile.readText()
-            val jsonContent = rawContent.substringAfter("```json\n").substringBefore("\n```").trim()
+            val jsonContent = rawContent.substringAfter("```json").substringBeforeLast("```").trim()
             val jsonObj = Json.parseToJsonElement(jsonContent).jsonObject
             val balloons = jsonObj["balloons"]?.jsonArray ?: emptyList()
 

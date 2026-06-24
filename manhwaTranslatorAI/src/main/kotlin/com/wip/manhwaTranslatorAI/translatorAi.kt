@@ -8,6 +8,8 @@ import org.wip.plugintoolkit.api.annotations.PluginSetting
 import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
+import org.wip.plugintoolkit.api.annotations.CapabilityFileAccess
+import org.wip.plugintoolkit.api.HostFileSystem
 
 data class TranslatorAISettings(
     @PluginSetting(
@@ -41,6 +43,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
     @Capability(
         name = "translate",
         description = "Translates a list of strings into Italian using Google AI")
+    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     suspend fun translate(
             @CapabilityParam(
                 description = "List of text strings to translate"
@@ -63,9 +66,19 @@ class TranslatorAI(val settings: TranslatorAISettings) {
             pageNames: List<String>? = emptyList(),
             @CapabilityParam(
                 description = "Path to the folder containing the images",
-                defaultValue = "\"\""
+                semanticTypes = ["path/folder"]
             )
-            inputFolder: String? = "",
+            inputFolder: String,
+            @CapabilityParam(
+                description = "Directory to save translation result",
+                semanticTypes = ["path/folder"]
+            )
+            outputDir: String,
+            @CapabilityParam(
+                description = "Temporary directory for summary images",
+                semanticTypes = ["path/folder"]
+            )
+            tempSummaryDir: String,
             @CapabilityParam(
                 description = "Send images to AI for visual context (Requires Gemini 1.5/Gemma)",
                 defaultValue = "false"
@@ -81,7 +94,8 @@ class TranslatorAI(val settings: TranslatorAISettings) {
                 defaultValue = "true"
             )
             save: Boolean? = true,
-            context: PluginContext
+            context: PluginContext,
+            hostFs: HostFileSystem
     ): List<String> {
         val logger = context.logger
         val effectiveDict = dictionary ?: ""
@@ -91,8 +105,8 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         logger.info("Input size: ${input.size} | Dictionary size: ${effectiveDict.length} | Context Images: $effectiveContextImages | Global Summary: $effectiveSummary")
 
         return try {
-            val service = KoogAITranslatorService(context)
-            val result = service.performTranslation(input, effectiveDict, settings.googleApiKey, settings.useStructuredOutput, model.id, pageNames, inputFolder, effectiveContextImages, effectiveSummary, save ?: true)
+            val service = KoogAITranslatorService(context, hostFs)
+            val result = service.performTranslation(input, effectiveDict, settings.googleApiKey, settings.useStructuredOutput, model.id, pageNames, inputFolder, outputDir, tempSummaryDir, effectiveContextImages, effectiveSummary, save ?: true)
             logger.info("Translation completed.")
             result
         } catch (e: Throwable) {

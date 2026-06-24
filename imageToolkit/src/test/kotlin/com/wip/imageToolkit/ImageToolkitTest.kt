@@ -18,7 +18,7 @@ class ImageToolkitTest {
     @Test
     fun testAddTextToImage() = runBlocking {
         // 1. Create a dummy image
-        val tempDir = File("build/tmp/test").apply { mkdirs() }
+        val tempDir = java.nio.file.Files.createTempDirectory("test_image_toolkit").toFile().apply { deleteOnExit() }
         val imageFile = File(tempDir, "test_image.png")
         val bufferedImage = BufferedImage(100, 100, BufferedImage.TYPE_INT_RGB)
         val g = bufferedImage.createGraphics()
@@ -47,7 +47,8 @@ class ImageToolkitTest {
             fontName = "Helvetica",
             pageNumber = 1,
             pageName = "test_image.png",
-            context = context
+            context = context,
+            hostFs = io.mockk.mockk(relaxed = true)
         )
 
         // 4. Verify result
@@ -61,10 +62,7 @@ class ImageToolkitTest {
     @Test
     fun testAddTextToChapter() = runBlocking {
         // 1. Create a dummy image in a folder
-        val tempDir = File("build/tmp/test_chapter").apply { 
-            if (exists()) deleteRecursively()
-            mkdirs() 
-        }
+        val tempDir = java.nio.file.Files.createTempDirectory("test_chapter").toFile().apply { deleteOnExit() }
         val imageFile = File(tempDir, "page1.png")
         val bufferedImage = BufferedImage(100, 100, BufferedImage.TYPE_INT_RGB)
         val g = bufferedImage.createGraphics()
@@ -91,10 +89,11 @@ class ImageToolkitTest {
             texts = texts,
             bb = bb,
             pageNames = pageNames,
-            outputDir = "", // Default to output_pdfs
+            outputDir = File(tempDir, "output").absolutePath,
             fontSize = 12,
             fontName = "Helvetica",
-            context = context
+            context = context,
+            hostFs = io.mockk.mockk(relaxed = true)
         )
 
         // 4. Verify result

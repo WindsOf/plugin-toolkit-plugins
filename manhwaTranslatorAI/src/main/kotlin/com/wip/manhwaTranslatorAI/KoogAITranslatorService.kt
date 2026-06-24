@@ -11,6 +11,7 @@ import kotlinx.serialization.json.*
 import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.PluginSignal
 import kotlinx.coroutines.delay
+import org.wip.plugintoolkit.api.HostFileSystem
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -31,11 +32,13 @@ data class TranslationResponse(
     val translations: List<String>
 )
 
+
+
 /**
  * Kotlin-native Translator service using Koog + Google AI.
  * Translates a list of strings to Italian following dictionary guidelines.
  */
-class KoogAITranslatorService(private val context: PluginContext) {
+class KoogAITranslatorService(private val context: PluginContext, private val hostFs: HostFileSystem) {
     private val logger = context.logger
     private val progressReporter = context.progress
     private var isCancelled = false
@@ -105,7 +108,9 @@ class KoogAITranslatorService(private val context: PluginContext) {
         useStructuredOutput: Boolean = true,
         modelId: String,
         pageNames: List<String>? = null,
-        inputFolder: String? = null,
+        inputFolder: String,
+        outputDir: String,
+        tempSummaryDir: String,
         useContextImages: Boolean = false,
         generateChapterSummary: Boolean = true,
         save: Boolean = true
@@ -156,11 +161,8 @@ class KoogAITranslatorService(private val context: PluginContext) {
 
             if (allImages.isNotEmpty()) {
                 logger.info("Preparing ${allImages.size} images for global context summary (resizing and compressing)...")
-                val tempDir = try {
-                    java.nio.file.Files.createTempDirectory("manhwa_summary_").toFile()
-                } catch (e: Exception) {
-                    null
-                }
+                val tempDir = File(tempSummaryDir)
+                if (!tempDir.exists()) tempDir.mkdirs()
 
                 try {
                     val processedImages = allImages.mapIndexed { idx, img ->
@@ -174,14 +176,12 @@ class KoogAITranslatorService(private val context: PluginContext) {
 
                     globalContext = generateChapterContext(processedImages, effectiveApiKey)
                 } finally {
-                    // Clean up temp directory
-                    if (tempDir != null) {
-                        try {
-                            tempDir.deleteRecursively()
-                            logger.info("Temporary directory for summary images deleted successfully.")
-                        } catch (e: Exception) {
-                            logger.warn("Failed to delete temp directory: ${e.message}")
-                        }
+                    // Cleanup temp directory
+                    try {
+                        tempDir.deleteRecursively()
+                        logger.info("Temporary directory for summary images deleted successfully.")
+                    } catch (e: Exception) {
+                        logger.warn("Failed to delete temp directory: ${e.message}")
                     }
                 }
             }
@@ -266,7 +266,7 @@ class KoogAITranslatorService(private val context: PluginContext) {
 
         if (save) {
             try {
-                val outDir = if (inputFolder != null && inputFolder.isNotBlank()) File(inputFolder) else File(".")
+                val outDir = File(outputDir)
                 if (!outDir.exists()) outDir.mkdirs()
                 val outFile = File(outDir, "translation_result.json")
                 val json = Json { prettyPrint = true }

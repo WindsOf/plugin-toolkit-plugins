@@ -4,7 +4,10 @@ import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.annotations.Capability
 import org.wip.plugintoolkit.api.annotations.PluginInfo
 import org.wip.plugintoolkit.api.annotations.CapabilityParam
+import org.wip.plugintoolkit.api.annotations.CapabilityFileAccess
+import org.wip.plugintoolkit.api.HostFileSystem
 import kotlinx.io.asInputStream
+
 import kotlinx.io.asOutputStream
 import kotlinx.io.files.SystemFileSystem
 import kotlinx.io.files.Path
@@ -34,17 +37,19 @@ class Slicer {
         name = "slicer",
         description = "Slices a list of images"
     )
+    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     fun slicer(
         @CapabilityParam(
             description = "List of items to slice",
-            semanticTypes = ["sys/path"]
+            semanticTypes = ["path/folder"]
         ) folderPath: String,
         @CapabilityParam(description = "Minimum height", defaultValue = "1000") minHeight: Int,
         @CapabilityParam(description = "Desired Height", defaultValue = "10000") desiredHeight: Int,
         @CapabilityParam(description = "Maximum Height", defaultValue = "10000") maxHeight: Int,
         @CapabilityParam(description = "Prioritize smaller", defaultValue = "true") prioritizeSmallerImages: Boolean,
         @CapabilityParam(description = "Cut tolerance", defaultValue = "5") cutTolerance: Int,
-        context: PluginContext
+        context: PluginContext,
+        hostFs: HostFileSystem
     ): String {
         val logger = context.logger
         val progressReporter = context.progress
@@ -92,10 +97,12 @@ class Slicer {
         name = "Max distance for cuts",
         description = "Analyzes row variances and determines the biggest section without cuts"
     )
+    @CapabilityFileAccess(readsFiles = true)
     fun maxDistanceForCuts(
-        @CapabilityParam(description = "List of items to slice") folderPath: String,
+        @CapabilityParam(description = "List of items to slice", semanticTypes = ["path/folder"]) folderPath: String,
         @CapabilityParam(description = "Cut tolerance", defaultValue = "5") cutTolerance: Int,
-        context: PluginContext
+        context: PluginContext,
+        hostFs: HostFileSystem
     ): Int {
         val logger = context.logger
         val progressReporter = context.progress

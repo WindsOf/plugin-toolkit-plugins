@@ -27,7 +27,7 @@ turbine = "1.2.1"
 buildkonfig = "0.19.0"
 koog = "0.8.0"
 openpdf = "3.0.5"
-kpsd = "1.1.2"
+kpsd = "1.1.4"
 twelvemonkeys = "3.10.1"
 
 

@@ -47,7 +47,8 @@ class OcrDataTest {
             imagePath = imageFile.absolutePath,
             ocrData = ocrResult,
             outputDir = tempDir.absolutePath,
-            context = context
+            context = context,
+            hostFs = io.mockk.mockk(relaxed = true)
         )
 
         val outputFile = File(result.psdPath)
@@ -104,7 +105,8 @@ class OcrDataTest {
             imagePath = imageFile.absolutePath,
             ocrData = advancedOcrResult,
             outputDir = tempDir.absolutePath,
-            context = context
+            context = context,
+            hostFs = io.mockk.mockk(relaxed = true)
         )
 
         val outputFile = File(result.psdPath)

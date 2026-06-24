@@ -8,6 +8,8 @@ import org.wip.plugintoolkit.api.annotations.PluginInfo
 import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
+import org.wip.plugintoolkit.api.annotations.CapabilityFileAccess
+import org.wip.plugintoolkit.api.HostFileSystem
 
 @PluginInfo(
     id = "com.wip.ocr_ia",
@@ -21,32 +23,33 @@ class OCR_IA(val settings: OcrIASettings) {
         name = "ocr",
         description = "Performs basic OCR on an image or a folder of images"
     )
+    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     suspend fun ocr(
         @CapabilityParam(
             description = "Path to image or folder",
-            semanticTypes = ["sys/directory"]
+            semanticTypes = ["path/folder"]
         )
         input: String,
         @CapabilityParam(description = "Save output to a .txt file alongside each image", defaultValue = "true")
         save: Boolean,
-        @CapabilityParam(description = "Custom output directory (optional)", defaultValue = "")
-        outputDir: String? = "",
+        @CapabilityParam(description = "Custom output directory", semanticTypes = ["path/folder"])
+        outputDir: String,
         @CapabilityParam(description = "Whether to use native structured output (might not be supported by all models)", defaultValue = "false")
         useStructuredOutput: Boolean,
         @CapabilityParam(description = "Whether to save the thinking inside the json", defaultValue = "false")
         saveThinking: Boolean,
         @CapabilityParam(description = "The AI Model to use", defaultValue = "GEMMA_26B")
         model: AIModel,
-        context: PluginContext
+        context: PluginContext,
+        hostFs: HostFileSystem
     ): OCRResult {
         val logger = context.logger
-        val effectiveOutputDir = outputDir ?: ""
         logger.info("OCR IA (Basic) v2.4.0 started. Model: ${model.id}")
-        logger.info("Input: $input | Save: $save | OutputDir: '${effectiveOutputDir.ifBlank { "<same as image>" }}' | StructuredOutput: $useStructuredOutput")
+        logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput")
 
         return try {
-            val service = KoogOcrService(context, settings)
-            val ocrResult = service.performOcr(input, save, effectiveOutputDir, useStructuredOutput, saveThinking, model)
+            val service = KoogOcrService(context, settings, hostFs)
+            val ocrResult = service.performOcr(input, save, outputDir, useStructuredOutput, saveThinking, model)
             OCRResult(ocrResult.texts, ocrResult.bb, ocrResult.pageNumbers, ocrResult.pageNames, ocrResult.failedFiles)
         } catch (e: Throwable) {
             val msg = "OCR failed: ${e::class.simpleName}: ${e.message}"
@@ -62,32 +65,33 @@ class OCR_IA(val settings: OcrIASettings) {
         name = "advanced_ocr",
         description = "Performs advanced OCR extracting exact balloon and text boxes, shapes, text orientation, sparsity, and color."
     )
+    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     suspend fun advancedOcr(
         @CapabilityParam(
             description = "Path to image or folder",
-            semanticTypes = ["sys/directory"]
+            semanticTypes = ["path/folder"]
         )
         input: String,
         @CapabilityParam(description = "Save output to a .txt file alongside each image", defaultValue = "true")
         save: Boolean,
-        @CapabilityParam(description = "Custom output directory (optional)", defaultValue = "")
-        outputDir: String? = "",
+        @CapabilityParam(description = "Custom output directory", semanticTypes = ["path/folder"])
+        outputDir: String,
         @CapabilityParam(description = "Whether to use native structured output (might not be supported by all models)", defaultValue = "false")
         useStructuredOutput: Boolean,
         @CapabilityParam(description = "Whether to save the thinking inside the json", defaultValue = "false")
         saveThinking: Boolean,
         @CapabilityParam(description = "The AI Model to use", defaultValue = "GEMMA_31B")
         model: AIModel,
-        context: PluginContext
+        context: PluginContext,
+        hostFs: HostFileSystem
     ): AdvancedOCRResult {
         val logger = context.logger
-        val effectiveOutputDir = outputDir ?: ""
         logger.info("OCR IA (Advanced) v2.4.0 started. Model: ${model.id}")
-        logger.info("Input: $input | Save: $save | OutputDir: '${effectiveOutputDir.ifBlank { "<same as image>" }}' | StructuredOutput: $useStructuredOutput")
+        logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput")
 
         return try {
-            val service = KoogOcrService(context, settings)
-            val ocrResult = service.performAdvancedOcr(input, save, effectiveOutputDir, useStructuredOutput, saveThinking, model)
+            val service = KoogOcrService(context, settings, hostFs)
+            val ocrResult = service.performAdvancedOcr(input, save, outputDir, useStructuredOutput, saveThinking, model)
             AdvancedOCRResult(
                 texts = ocrResult.texts,
                 balloonBoxes = ocrResult.balloonBoxes,

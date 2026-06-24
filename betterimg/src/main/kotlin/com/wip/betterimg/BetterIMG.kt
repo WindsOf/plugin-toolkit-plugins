@@ -12,6 +12,8 @@ import org.wip.plugintoolkit.api.annotations.PluginInfo
 import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
+import org.wip.plugintoolkit.api.annotations.CapabilityFileAccess
+import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.annotations.ResumeState
 
 enum class OutputFormat {
@@ -37,8 +39,9 @@ class BetterIMG {
             name = "Image Processor",
             description = "Process a folder of images using BetterIMG CLI"
     )
+    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     fun imageProcessor(
-            @CapabilityParam(description = "Folder to process")
+            @CapabilityParam(description = "Folder to process", semanticTypes = ["path/folder"])
             folder: String,
             @CapabilityParam(description = "Output width in pixels", defaultValue = "940")
             width: Int,
@@ -47,12 +50,13 @@ class BetterIMG {
             @CapabilityParam(description = "Output image format", defaultValue = "WEBP")
             outputFormat: OutputFormat,
             @CapabilityParam(
-                    description = "Output folder (leave null to auto-create)",
-                    defaultValue = "null"
+                    description = "Output folder",
+                    semanticTypes = ["path/folder"]
             )
-            outFolder: String? = null,
+            outFolder: String,
             @ResumeState resumeState: JsonElement? = null,
-            context: PluginContext
+            context: PluginContext,
+            hostFs: HostFileSystem
     ): String {
         return runImageProcessor(
             folder = folder,
@@ -69,8 +73,9 @@ class BetterIMG {
         name = "Image Processor with Scaling",
         description = "Process a folder of images using BetterIMG CLI with scaling"
     )
+    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     suspend fun imageProcessorWithScaling(
-        @CapabilityParam(description = "Folder to process")
+        @CapabilityParam(description = "Folder to process", semanticTypes = ["path/folder"])
         folder: String,
         @CapabilityParam(description = "Output width multiplier", defaultValue = "x1")
         width: Widths,
@@ -79,12 +84,13 @@ class BetterIMG {
         @CapabilityParam(description = "Output image format", defaultValue = "WEBP")
         outputFormat: OutputFormat,
         @CapabilityParam(
-            description = "Output folder (leave null to auto-create)",
-            defaultValue = "null"
+            description = "Output folder",
+            semanticTypes = ["path/folder"]
         )
-        outFolder: String? = null,
+        outFolder: String,
         @ResumeState resumeState: JsonElement? = null,
-        context: PluginContext
+        context: PluginContext,
+        hostFs: HostFileSystem
     ): String {
         val widthStr = when (width) {
             Widths.x1 -> "x1"
@@ -108,7 +114,7 @@ class BetterIMG {
             width: String,
             grain: Int,
             outputFormat: OutputFormat,
-            outFolder: String? = null,
+            outFolder: String,
             resumeState: JsonElement? = null,
             context: PluginContext
     ): String {
@@ -125,12 +131,7 @@ class BetterIMG {
         val progressReporter = context.progress
 
         // Determine output folder
-        val outputDir =
-                if (!outFolder.isNullOrBlank() && outFolder != "null") {
-                    File(outFolder)
-                } else {
-                    File(inputDir.parent, "${inputDir.name}_output")
-                }
+        val outputDir = File(outFolder)
 
         if (!outputDir.exists()) {
             outputDir.mkdirs()

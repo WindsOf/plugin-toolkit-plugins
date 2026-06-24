@@ -484,6 +484,35 @@ def generate_repo(name, url, output_dir, clean=False, target_plugin=None):
     print(f"Total flows: {len(repo_flows)}")
 
 
+def push_to_git(output_dir):
+    dist_path = Path(output_dir).resolve()
+    if not (dist_path / ".git").exists():
+        print(f"Error: '{output_dir}' is not a git repository. Cannot push.")
+        return
+        
+    print(f"\nPushing changes in '{output_dir}' to remote...")
+    
+    if not run_command(["git", "add", "."], cwd=str(dist_path)):
+        print("Failed to add files.")
+        return
+        
+    # Check if there are changes to commit
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=str(dist_path), capture_output=True, text=True)
+    if not status.stdout.strip():
+        print("No changes to commit in dist folder.")
+        return
+        
+    if not run_command(["git", "commit", "-m", "Auto-update plugins via generate_repo.py"], cwd=str(dist_path)):
+        print("Failed to commit changes.")
+        return
+        
+    if not run_command(["git", "push"], cwd=str(dist_path)):
+        print("Failed to push changes.")
+        return
+        
+    print("Successfully pushed changes to remote repository.")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate a static plugin repository.")
     parser.add_argument("plugin", nargs="?", help="Name of the plugin directory or ID to build (optional)")
@@ -492,6 +521,7 @@ if __name__ == "__main__":
     parser.add_argument("--out", help="Output directory")
     parser.add_argument("--clean", action="store_true", help="Force clean build (recompile target or all plugins)")
     parser.add_argument("--force", action="store_true", help="Force regenerate (recompile target or all plugins)")
+    parser.add_argument("--push", action="store_true", help="Automatically commit and push the output directory to git")
 
     args = parser.parse_args()
 
@@ -519,3 +549,6 @@ if __name__ == "__main__":
     clean_build = args.clean or args.force or False
 
     generate_repo(config["name"], config["url"], config["out"], clean=clean_build, target_plugin=args.plugin)
+
+    if args.push:
+        push_to_git(config["out"])

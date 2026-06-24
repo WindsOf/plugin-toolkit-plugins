@@ -27,3 +27,5 @@ PluginDevelopment.md
 /PSD_builder/dist
 /ag-psd/
 /.venv/Scripts
+.agents
+/dist/

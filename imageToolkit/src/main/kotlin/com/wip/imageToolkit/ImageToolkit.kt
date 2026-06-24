@@ -4,6 +4,8 @@ import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.annotations.Capability
 import org.wip.plugintoolkit.api.annotations.PluginInfo
 import org.wip.plugintoolkit.api.annotations.CapabilityParam
+import org.wip.plugintoolkit.api.annotations.CapabilityFileAccess
+import org.wip.plugintoolkit.api.HostFileSystem
 import org.openpdf.text.*
 import org.openpdf.text.pdf.*
 import java.io.File
@@ -23,8 +25,9 @@ class ImageToolkit {
         name = "Add Text to Image",
         description = "Adds text to an image and saves as a layered PDF with vector text"
     )
+    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     suspend fun addTextToImage(
-        @CapabilityParam(description = "Path to image") imagePath: String,
+        @CapabilityParam(description = "Path to image", semanticTypes = ["path/file"]) imagePath: String,
         @CapabilityParam(description = "Texts to add") texts: List<String>,
         @CapabilityParam(
             description = "Bounding boxes to add, (xmin, ymin, xmax, ymax)",
@@ -34,7 +37,8 @@ class ImageToolkit {
         @CapabilityParam(description = "Font name (optional)", defaultValue = "Arial") fontName: String? = "Helvetica",
         @CapabilityParam(description = "Page number (optional)") pageNumber: Int? = null,
         @CapabilityParam(description = "Page name (optional)") pageName: String? = null,
-        context: PluginContext
+        context: PluginContext,
+        hostFs: HostFileSystem
     ): String {
         val logger = context.logger
         logger.info("Starting addTextToImage for $imagePath")
@@ -65,10 +69,11 @@ class ImageToolkit {
         name = "Add Text to Chapter",
         description = "Adds text to a folder of images and saves as layered PDFs in an output directory"
     )
+    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     suspend fun addTextToChapter(
         @CapabilityParam(
             description = "Path to folder of images",
-            semanticTypes = ["sys/directory"]
+            semanticTypes = ["path/folder"]
         ) inputFolder: String,
         @CapabilityParam(description = "Texts to add") texts: List<String>,
         @CapabilityParam(
@@ -76,10 +81,11 @@ class ImageToolkit {
             semanticTypes = ["wom/bounding-box"]
         ) bb: List<List<Double>>,
         @CapabilityParam(description = "Page names corresponding to each text") pageNames: List<String>,
-        @CapabilityParam(description = "Output directory", defaultValue = "") outputDir: String? = "",
+        @CapabilityParam(description = "Output directory", semanticTypes = ["path/folder"]) outputDir: String,
         @CapabilityParam(description = "Font size (optional)", defaultValue = "20") fontSize: Int? = 20,
         @CapabilityParam(description = "Font name (optional)", defaultValue = "Arial") fontName: String? = "Helvetica",
-        context: PluginContext
+        context: PluginContext,
+        hostFs: HostFileSystem
     ): String {
         val logger = context.logger
         logger.info("Starting addTextToChapter for $inputFolder")
@@ -90,11 +96,7 @@ class ImageToolkit {
             throw IllegalArgumentException("Input folder not found or is not a directory: $inputFolder")
         }
 
-        val outDir = if (outputDir.isNullOrBlank()) {
-            File(folder, "output_pdfs").apply { mkdirs() }
-        } else {
-            File(outputDir).apply { mkdirs() }
-        }
+        val outDir = File(outputDir).apply { mkdirs() }
 
         // Group data by page name safely, handling potential size mismatches
         val minSize = minOf(texts.size, bb.size, pageNames.size)

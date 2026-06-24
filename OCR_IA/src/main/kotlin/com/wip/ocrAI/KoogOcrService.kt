@@ -36,7 +36,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import javax.imageio.ImageIO
 
-class KoogOcrService(private val context: PluginContext, private val settings: OcrIASettings) {
+import org.wip.plugintoolkit.api.HostFileSystem
+
+class KoogOcrService(private val context: PluginContext, private val settings: OcrIASettings, private val hostFs: HostFileSystem) {
     private val logger = context.logger
     private val progressReporter = context.progress
     private var isCancelled = false
@@ -534,7 +536,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
 
     private fun saveResult(save: Boolean, outputDir: String, file: File, rawResponse: String) {
         if (!save) return
-        val outDir = if (outputDir.isNotBlank()) File(outputDir) else file.parentFile ?: File(".")
+        val outDir = File(outputDir)
         if (!outDir.exists()) outDir.mkdirs()
         val outFile = File(outDir, "${file.nameWithoutExtension}_OCR.json")
         outFile.writeText(rawResponse, Charsets.UTF_8)
@@ -548,7 +550,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
             progressReporter.report((processedFilesCount + 1).toFloat() / total.toFloat())
         }
         if (save) {
-            val outDir = if (outputDir.isNotBlank()) File(outputDir) else file.parentFile ?: File(".")
+            val outDir = File(outputDir)
             if (!outDir.exists()) outDir.mkdirs()
             val errorFile = File(outDir, "${file.name}_ERROR.txt")
             errorFile.writeText("Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}", Charsets.UTF_8)
