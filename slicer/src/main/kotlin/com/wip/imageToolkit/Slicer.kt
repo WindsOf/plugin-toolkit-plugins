@@ -17,6 +17,7 @@ import kotlin.math.abs
 import java.awt.image.BufferedImage
 
 import com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi
+import org.wip.plugintoolkit.api.annotations.CapabilityOutput
 import javax.imageio.spi.IIORegistry
 
 @PluginInfo(

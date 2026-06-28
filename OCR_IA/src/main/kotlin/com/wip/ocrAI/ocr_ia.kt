@@ -72,7 +72,7 @@ class OCR_IA(val settings: OcrIASettings) {
             semanticTypes = ["path/folder"]
         )
         input: String,
-        @CapabilityParam(description = "Save output to a .txt file alongside each image", defaultValue = "true")
+        @CapabilityParam(description = "Save output to a .json file alongside each image", defaultValue = "true")
         save: Boolean,
         @CapabilityParam(description = "Custom output directory", semanticTypes = ["path/folder"])
         outputDir: String,
