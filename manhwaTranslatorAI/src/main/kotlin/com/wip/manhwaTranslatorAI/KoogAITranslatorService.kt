@@ -2,6 +2,15 @@ package com.wip.manhwaTranslatorAI
 
 import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.executor.llms.all.simpleGoogleAIExecutor
+import ai.koog.prompt.executor.clients.openai.OpenAILLMClient
+import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
+import ai.koog.prompt.executor.llms.SingleLLMPromptExecutor
+import ai.koog.prompt.dsl.Prompt
+import ai.koog.agents.core.tools.ToolDescriptor
+import ai.koog.prompt.message.Message
+import ai.koog.prompt.message.LLMChoice
+import ai.koog.prompt.streaming.StreamFrame
+import kotlinx.coroutines.flow.Flow
 import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
@@ -38,10 +47,72 @@ data class TranslationResponse(
  * Kotlin-native Translator service using Koog + Google AI.
  * Translates a list of strings to Italian following dictionary guidelines.
  */
-class KoogAITranslatorService(private val context: PluginContext, private val hostFs: HostFileSystem) {
+class KoogAITranslatorService(private val context: PluginContext, private val settings: TranslatorAISettings, private val hostFs: HostFileSystem) {
     private val logger = context.logger
     private val progressReporter = context.progress
     private var isCancelled = false
+
+    private fun getProvider(modelId: String): LLMProvider {
+        return when (modelId) {
+            AIModel.GEMMA_26B.id, AIModel.GEMMA_31B.id, AIModel.GEMINI_3_5_FLASH.id, AIModel.GEMINI_3_1_FLASH_LITE.id -> LLMProvider.Google
+            AIModel.LM_STUDIO.id -> LLMProvider.OpenAI
+            else -> LLMProvider.Google
+        }
+    }
+
+    private fun getExecutor(modelId: String) = when (modelId) {
+        AIModel.LM_STUDIO.id -> {
+            val key = settings.lmStudioApiKey.ifBlank { "lm-studio" }
+            val baseUrl = settings.lmStudioUrl.ifBlank { "http://localhost:1234/v1" }.trim().removeSuffix("/")
+            val customModelId = settings.lmStudioModelName.ifBlank { "default-model" }
+            
+            val wrapperClient = object : OpenAILLMClient(key, OpenAIClientSettings(baseUrl = baseUrl)) {
+                private val fullCapabilities = ai.koog.prompt.executor.clients.openai.OpenAIModels.Chat.GPT4o.capabilities
+                
+                private fun injectCapabilities(model: LLModel): LLModel {
+                    return if (model.capabilities.isNullOrEmpty()) {
+                        LLModel(
+                            provider = model.provider,
+                            id = model.id,
+                            capabilities = fullCapabilities,
+                            contextLength = 128000,
+                            maxOutputTokens = 16384
+                        )
+                    } else model
+                }
+
+                override suspend fun execute(
+                    prompt: Prompt,
+                    model: LLModel,
+                    tools: List<ToolDescriptor>
+                ): List<Message.Response> {
+                    return super.execute(prompt, injectCapabilities(model), tools)
+                }
+
+                override fun executeStreaming(
+                    prompt: Prompt,
+                    model: LLModel,
+                    tools: List<ToolDescriptor>
+                ): Flow<StreamFrame> {
+                    return super.executeStreaming(prompt, injectCapabilities(model), tools)
+                }
+
+                override suspend fun executeMultipleChoices(
+                    prompt: Prompt,
+                    model: LLModel,
+                    tools: List<ToolDescriptor>
+                ): List<LLMChoice> {
+                    return super.executeMultipleChoices(prompt, injectCapabilities(model), tools)
+                }
+            }
+            SingleLLMPromptExecutor(wrapperClient)
+        }
+        else -> {
+            val key = settings.googleApiKey.ifBlank { System.getenv("API_KEY") ?: "" }
+            if (key.isBlank()) throw IllegalArgumentException("Google API Key not found.")
+            simpleGoogleAIExecutor(key)
+        }
+    }
 
     private val requestTimes = ConcurrentLinkedQueue<Long>()
     private val concurrentSemaphore = Semaphore(5)
@@ -290,11 +361,12 @@ class KoogAITranslatorService(private val context: PluginContext, private val ho
         chunkIndex: Int,
         chapterContext: String?
     ): List<String> {
-        val executor = simpleGoogleAIExecutor(apiKey)
+        val executor = getExecutor(modelId)
+        val finalModelId = if (modelId == AIModel.LM_STUDIO.id) settings.lmStudioModelName.ifBlank { "default-model" } else modelId
         
         val model = LLModel(
-            provider = LLMProvider.Google,
-            id = modelId,
+            provider = getProvider(modelId),
+            id = finalModelId,
             capabilities = buildList {
                 add(LLMCapability.Completion)
                 add(LLMCapability.Temperature)
@@ -433,7 +505,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val ho
         logger.info("Generating global chapter context using gemini-3.1-flash-lite with ${images.size} images...")
         return try {
             retryWithBackoff {
-                val executor = simpleGoogleAIExecutor(apiKey)
+                val executor = getExecutor("gemini-3.1-flash-lite")
                 val model = LLModel(
                     provider = LLMProvider.Google,
                     id = "gemini-3.1-flash-lite",

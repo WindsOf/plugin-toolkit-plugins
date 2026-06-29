@@ -1,12 +1,10 @@
 package com.wip.psdbuilder
 
-import com.wip.ocrAI.models.OCRResult
-import com.wip.ocrAI.models.AdvancedOCRResult
+import com.wip.common.models.OCRResult
+import com.wip.common.models.AdvancedOCRResult
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.wip.plugintoolkit.api.PluginContext
-import org.wip.plugintoolkit.api.PluginLogger
-import org.wip.plugintoolkit.api.ProgressReporter
 import java.io.File
 import kotlin.test.assertTrue
 

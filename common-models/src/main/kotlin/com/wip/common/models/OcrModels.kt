@@ -1,32 +1,32 @@
-package com.wip.ocrAI.models
+package com.wip.common.models
 
 import kotlinx.serialization.Serializable
-import org.wip.plugintoolkit.api.annotations.CapabilityOutput
+import org.wip.plugintoolkit.api.annotations.CapabilityResult
 
 @Serializable
 data class OCRResult(
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "extracted text",
         description = "a list of strings representing the extracted text"
     )
     val texts: List<String>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "bounding box",
         description = "(xmin, ymin, xmax, ymax), a list of lists of doubles representing the bounding box coordinates for each extracted text",
         semanticTypes = ["wom/bounding-box"]
     )
     val bb: List<List<Double>>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "page number",
         description = "a list of integers representing the page number (1-indexed) for each extracted text"
     )
     val pageNumbers: List<Int>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "page name",
         description = "a list of strings representing the filename/page name for each extracted text"
     )
     val pageNames: List<String>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "failed files",
         description = "a list of strings representing the filenames that failed to process"
     )
@@ -35,75 +35,75 @@ data class OCRResult(
 
 @Serializable
 data class AdvancedOCRResult(
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "extracted text",
         description = "a list of strings representing the extracted text"
     )
     val texts: List<String>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "balloon bounding box",
         description = "(ymin, xmin, ymax, xmax), bounding box coordinates of the speech balloon",
         semanticTypes = ["wom/bounding-box"]
     )
     val balloonBoxes: List<List<Double>>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "text bounding box",
         description = "(ymin, xmin, ymax, xmax), bounding box coordinates tightly wrapping the text",
         semanticTypes = ["wom/bounding-box"]
     )
     val textBoxes: List<List<Double>>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "balloon shapes",
         description = "shape of the speech balloon. Valid values are strictly: 'oval' or 'rectangular'",
         semanticTypes = ["wom/shape"]
     )
     val shapes: List<String>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "font styles",
         description = "style of the text font. Valid values are strictly: 'normal', 'italic', 'bold', 'bold-italic'"
     )
     val fontStyles: List<String>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "font families",
         description = "general classification of the font, e.g., 'sans-serif', 'serif', 'handwritten', 'screaming'"
     )
     val fontFamilies: List<String>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "text angles",
         description = "rotation angle of the text in degrees"
     )
     val textAngles: List<Double>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "is sparse",
         description = "whether the text is sparsely distributed inside the bounding box"
     )
     val isSparse: List<Boolean>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "text colors",
         description = "color of the text"
     )
     val textColors: List<String>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "has border",
         description = "whether the text has an outline/stroke"
     )
     val hasBorder: List<Boolean>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "border colors",
         description = "color of the text outline/stroke if present"
     )
     val borderColors: List<String>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "page number",
         description = "a list of integers representing the page number (1-indexed) for each extracted text"
     )
     val pageNumbers: List<Int>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "page name",
         description = "a list of strings representing the filename/page name for each extracted text"
     )
     val pageNames: List<String>,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "failed files",
         description = "a list of strings representing the filenames that failed to process"
     )

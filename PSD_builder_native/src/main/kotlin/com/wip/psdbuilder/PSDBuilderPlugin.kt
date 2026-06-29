@@ -21,16 +21,17 @@ import kotlinx.serialization.json.Json
 import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.annotations.Capability
 import org.wip.plugintoolkit.api.annotations.CapabilityParam
+import org.wip.plugintoolkit.api.annotations.CapabilityInput
+import org.wip.plugintoolkit.api.annotations.CapabilityOutput
 import org.wip.plugintoolkit.api.annotations.PluginInfo
 import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
-import org.wip.plugintoolkit.api.annotations.CapabilityOutput
-import org.wip.plugintoolkit.api.annotations.CapabilityFileAccess
+import org.wip.plugintoolkit.api.annotations.CapabilityResult
 import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.annotations.PluginSetting
-import com.wip.ocrAI.models.AdvancedOCRResult
-import com.wip.ocrAI.models.OCRResult
+import com.wip.common.models.AdvancedOCRResult
+import com.wip.common.models.OCRResult
 import java.io.File
 import javax.imageio.ImageIO
 import javax.imageio.spi.IIORegistry
@@ -89,7 +90,7 @@ data class ExtractedText(
 
 @Serializable
 data class PSDBuildResult(
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "generated psd",
         description = "Path to the generated PSD file",
         semanticTypes = ["path/file"]
@@ -99,13 +100,7 @@ data class PSDBuildResult(
 
 @Serializable
 data class ChapterPSDBuildResult(
-    @CapabilityOutput(
-        name = "generated psd folder",
-        description = "Path to the folder containing the generated PSD files",
-        semanticTypes = ["path/folder"]
-    )
-    val psdFolder: String,
-    @CapabilityOutput(
+    @CapabilityResult(
         name = "generated psds",
         description = "List of paths to the generated PSD files"
     )
@@ -129,7 +124,7 @@ data class PSDBuilderSettings(
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "PSD Builder Native",
-    version = "4.4.10",
+    version = "4.4.11",
     description = "A plugin that builds layered PSD files natively in Kotlin."
 )
 class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) {
@@ -171,9 +166,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         name = "Build PSD from Image and Texts",
         description = "Generates a layered PSD natively in Kotlin from an image, texts and bounding boxes"
     )
-    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     suspend fun buildPsdFromInputs(
-        @CapabilityParam(description = "Path to the base image (JPG, PNG, WebP)", semanticTypes = ["path/file"]) imagePath: String,
+        @CapabilityInput(description = "Path to the base image (JPG, PNG, WebP)", semanticTypes = ["path/file"])
+        imagePath: String,
         @CapabilityParam(description = "List of text strings to render") texts: List<String>,
         @CapabilityParam(
             description = "List of bounding boxes for each balloon (ymin, xmin, ymax, xmax)",
@@ -192,10 +187,11 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             description = "Thickness of the text stroke/border (0 to disable)",
             defaultValue = "3"
         ) borderSize: Int? = 3,
-        @CapabilityParam(
+        @CapabilityOutput(
             description = "Directory to save generated PSD",
             semanticTypes = ["path/folder"]
-        ) outputDir: String,
+        )
+        outputDir: String,
         @CapabilityParam(
             description = "Keep intermediate JSON and temp image files for debugging",
             defaultValue = "false"
@@ -257,14 +253,15 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         name = "Build PSD from Image and Advanced OCR Data",
         description = "Generates a layered PSD natively from an image and advanced OCR data"
     )
-    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     suspend fun buildPsdFromAdvancedOcrData(
-        @CapabilityParam(description = "Path to the base image", semanticTypes = ["path/file"]) imagePath: String,
+        @CapabilityInput(description = "Path to the base image", semanticTypes = ["path/file"])
+        imagePath: String,
         @CapabilityParam(description = "Advanced OCR Result") ocrData: AdvancedOCRResult,
         @CapabilityParam(description = "Font size in pixels", defaultValue = "24") fontSize: Int? = 24,
         @CapabilityParam(description = "Typeface for the text", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
         @CapabilityParam(description = "Thickness of the text stroke/border (0 to disable)", defaultValue = "3") borderSize: Int? = 3,
-        @CapabilityParam(description = "Directory to save generated PSD", semanticTypes = ["path/folder"]) outputDir: String,
+        @CapabilityOutput(description = "Directory to save generated PSD", semanticTypes = ["path/folder"])
+        outputDir: String,
         @CapabilityParam(description = "Keep intermediate JSON and temp image files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
         context: PluginContext,
         hostFs: HostFileSystem
@@ -293,14 +290,15 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         name = "Build PSD from Image and OCR Data",
         description = "Generates a layered PSD natively from an image and basic OCR data"
     )
-    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     suspend fun buildPsdFromOcrData(
-        @CapabilityParam(description = "Path to the base image", semanticTypes = ["path/file"]) imagePath: String,
+        @CapabilityInput(description = "Path to the base image", semanticTypes = ["path/file"])
+        imagePath: String,
         @CapabilityParam(description = "OCR Result") ocrData: OCRResult,
         @CapabilityParam(description = "Font size in pixels", defaultValue = "24") fontSize: Int? = 24,
         @CapabilityParam(description = "Typeface for the text", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
         @CapabilityParam(description = "Thickness of the text stroke/border (0 to disable)", defaultValue = "3") borderSize: Int? = 3,
-        @CapabilityParam(description = "Directory to save generated PSD", semanticTypes = ["path/folder"]) outputDir: String,
+        @CapabilityOutput(description = "Directory to save generated PSD", semanticTypes = ["path/folder"])
+        outputDir: String,
         @CapabilityParam(description = "Keep intermediate JSON and temp image files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
         context: PluginContext,
         hostFs: HostFileSystem
@@ -322,12 +320,12 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         name = "Build PSD for Chapter",
         description = "Generates layered PSDs natively for a folder of images concurrently"
     )
-    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     suspend fun buildPsdForChapter(
-        @CapabilityParam(
+        @CapabilityInput(
             description = "Path to folder containing chapter images",
             semanticTypes = ["path/folder"]
-        ) inputFolder: String,
+        )
+        inputFolder: String,
         @CapabilityParam(description = "List of text strings to render across all pages") texts: List<String>,
         @CapabilityParam(
             description = "List of bounding boxes for each balloon (ymin, xmin, ymax, xmax)",
@@ -338,10 +336,11 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             semanticTypes = ["wom/bounding-box"]
         ) textBoxes: List<List<Double>>? = null,
         @CapabilityParam(description = "List of image filenames corresponding to each text") pageNames: List<String>,
-        @CapabilityParam(
+        @CapabilityOutput(
             description = "Directory to save generated PSDs",
             semanticTypes = ["path/folder"]
-        ) outputDir: String,
+        )
+        outputDir: String,
         @CapabilityParam(description = "Font size in pixels", defaultValue = "60") fontSize: Int? = 60,
         @CapabilityParam(
             description = "Typeface for the text",
@@ -462,18 +461,19 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             logger.info("All $totalPages PSDs generated successfully.")
         }
 
-        return ChapterPSDBuildResult(outDir.absolutePath, psdPaths)
+        return ChapterPSDBuildResult(psdPaths)
     }
 
     @Capability(
         name = "Build PSD for Chapter from Advanced OCR Data",
         description = "Generates layered PSDs natively for a folder of images concurrently using advanced OCR data"
     )
-    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     suspend fun buildPsdForChapterFromAdvancedOcrData(
-        @CapabilityParam(description = "Path to folder containing chapter images", semanticTypes = ["path/folder"]) inputFolder: String,
+        @CapabilityInput(description = "Path to folder containing chapter images", semanticTypes = ["path/folder"])
+        inputFolder: String,
         @CapabilityParam(description = "Advanced OCR Result") ocrData: AdvancedOCRResult,
-        @CapabilityParam(description = "Directory to save generated PSDs", semanticTypes = ["path/folder"]) outputDir: String,
+        @CapabilityOutput(description = "Directory to save generated PSDs", semanticTypes = ["path/folder"])
+        outputDir: String,
         @CapabilityParam(description = "Font size in pixels", defaultValue = "60") fontSize: Int? = 60,
         @CapabilityParam(description = "Typeface for the text", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
         @CapabilityParam(description = "Thickness of the text stroke/border (0 to disable)", defaultValue = "3") borderSize: Int? = 3,
@@ -506,11 +506,12 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         name = "Build PSD for Chapter from OCR Data",
         description = "Generates layered PSDs natively for a folder of images concurrently using basic OCR data"
     )
-    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     suspend fun buildPsdForChapterFromOcrData(
-        @CapabilityParam(description = "Path to folder containing chapter images", semanticTypes = ["path/folder"]) inputFolder: String,
+        @CapabilityInput(description = "Path to folder containing chapter images", semanticTypes = ["path/folder"])
+        inputFolder: String,
         @CapabilityParam(description = "OCR Result") ocrData: OCRResult,
-        @CapabilityParam(description = "Directory to save generated PSDs", semanticTypes = ["path/folder"]) outputDir: String,
+        @CapabilityOutput(description = "Directory to save generated PSDs", semanticTypes = ["path/folder"])
+        outputDir: String,
         @CapabilityParam(description = "Font size in pixels", defaultValue = "60") fontSize: Int? = 60,
         @CapabilityParam(description = "Typeface for the text", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
         @CapabilityParam(description = "Thickness of the text stroke/border (0 to disable)", defaultValue = "3") borderSize: Int? = 3,
@@ -539,11 +540,13 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         name = "Build PSD from JSON",
         description = "Generates a layered PSD natively from a given JSON file"
     )
-    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     suspend fun buildPsdFromJson(
-        @CapabilityParam(description = "Path to JSON file", semanticTypes = ["path/file"]) jsonPath: String,
-        @CapabilityParam(description = "Output PSD path", semanticTypes = ["path/file"]) outputPsdPath: String,
-        @CapabilityParam(description = "Path to base image (optional, default looks in JSON)", defaultValue = "\"\"", semanticTypes = ["path/file"]) baseImagePath: String? = "",
+        @CapabilityInput(description = "Path to JSON file", semanticTypes = ["path/file"])
+        jsonPath: String,
+        @CapabilityOutput(description = "Output PSD path", semanticTypes = ["path/file"])
+        outputPsdPath: String,
+        @CapabilityInput(description = "Path to base image (optional, default looks in JSON)", defaultValue = "\"\"", semanticTypes = ["path/file"])
+        baseImagePath: String? = "",
         context: PluginContext,
         hostFs: HostFileSystem
     ): PSDBuildResult {

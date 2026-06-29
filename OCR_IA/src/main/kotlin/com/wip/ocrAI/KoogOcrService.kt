@@ -17,7 +17,12 @@ import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.params.LLMParams
-import com.wip.ocrAI.models.*
+import com.wip.common.models.AIModel
+import com.wip.common.models.AdvancedBalloonsResponse
+import com.wip.common.models.AdvancedOcrServiceResult
+import com.wip.common.models.BalloonsResponse
+import com.wip.common.models.OcrIASettings
+import com.wip.common.models.OcrServiceResult
 import kotlinx.io.files.Path
 import kotlinx.serialization.json.*
 import org.wip.plugintoolkit.api.PluginContext
@@ -112,7 +117,8 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
             AIModel.GEMMA_26B, AIModel.GEMMA_31B, AIModel.GEMINI_1_5_PRO, AIModel.GEMINI_2_5_PRO, AIModel.GEMINI_3_1_FLASH_LITE -> {
                 val key = settings.googleApiKey.ifBlank { System.getenv("API_KEY") ?: "" }
                 if (key.isBlank()) throw IllegalArgumentException("Google API Key not found.")
-                simpleGoogleAIExecutor(key)
+                simpleGoogleAIExecutor(key).apply {
+                }
             }
             AIModel.CLAUDE_3_5_SONNET -> {
                 val key = settings.anthropicApiKey.ifBlank { System.getenv("ANTHROPIC_API_KEY") ?: "" }
@@ -127,7 +133,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
             }
             AIModel.LM_STUDIO -> {
                 val key = settings.lmStudioApiKey.ifBlank { "lm-studio" }
-                val baseUrl = settings.lmStudioUrl.ifBlank { "http://localhost:1234/v1" }.removeSuffix("/v1").removeSuffix("/")
+                val baseUrl = settings.lmStudioUrl.ifBlank { "http://localhost:1234/v1" }.trim().removeSuffix("/")
                 val customModelId = settings.lmStudioModelName.ifBlank { "default-model" }
                 
                 val wrapperClient = object : OpenAILLMClient(key, OpenAIClientSettings(baseUrl = baseUrl)) {
@@ -359,7 +365,22 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
     ): AdvancedOcrServiceResult {
         val files = resolveFiles(input)
         if (files.isEmpty()) {
-            return AdvancedOcrServiceResult(emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
+            return AdvancedOcrServiceResult(
+                emptyList(),
+                emptyList(),
+                emptyList(),
+                emptyList(),
+                emptyList(),
+                emptyList(),
+                emptyList(),
+                emptyList(),
+                emptyList(),
+                emptyList(),
+                emptyList(),
+                emptyList(),
+                emptyList(),
+                emptyList()
+            )
         }
         
         val isGemma = aiModel == AIModel.GEMMA_26B || aiModel == AIModel.GEMMA_31B
@@ -521,7 +542,22 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
                 }
             }.awaitAll()
         }
-        return AdvancedOcrServiceResult(allTexts, allBalloonBoxes, allTextBoxes, allShapes, allFontStyles, allFontFamilies, allAngles, allIsSparse, allTextColors, allHasBorder, allBorderColors, allPageNumbers, allPageNames, failedFiles)
+        return AdvancedOcrServiceResult(
+            allTexts,
+            allBalloonBoxes,
+            allTextBoxes,
+            allShapes,
+            allFontStyles,
+            allFontFamilies,
+            allAngles,
+            allIsSparse,
+            allTextColors,
+            allHasBorder,
+            allBorderColors,
+            allPageNumbers,
+            allPageNames,
+            failedFiles
+        )
     }
 
     private fun extractJsonFromText(text: String): String {

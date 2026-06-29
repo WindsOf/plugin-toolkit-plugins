@@ -126,7 +126,7 @@ def sign_jar(jar_path, private_key_b64):
             return False
 
         # 4. Sign the JAR using jarsigner
-        cmd = ["jarsigner", "-keystore", str(p12_file), "-storetype", "PKCS12", "-storepass", "password", str(jar_path), "plugin-key"]
+        cmd = ["jarsigner", "-keystore", str(p12_file), "-storetype", "PKCS12", "-storepass", "password", "-sigalg", "SHA256withRSA", "-digestalg", "SHA-256", str(jar_path), "plugin-key"]
         if not run_command(cmd):
             return False
             

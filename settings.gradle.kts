@@ -52,7 +52,6 @@ plugins { id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 include(":slicer")
 include(":betterimg")
 include(":OCR_IA")
-include(":imageToolkit")
 include(":manhwaTranslatorAI")
 include(":PSD_builder_native")
 include(":common-models")

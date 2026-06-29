@@ -1,20 +1,24 @@
 package com.wip.ocrAI
 
-import com.wip.ocrAI.models.*
+import com.wip.common.models.AIModel
+import com.wip.common.models.AdvancedOCRResult
+import com.wip.common.models.OCRResult
+import com.wip.common.models.OcrIASettings
 import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.annotations.Capability
 import org.wip.plugintoolkit.api.annotations.CapabilityParam
+import org.wip.plugintoolkit.api.annotations.CapabilityInput
+import org.wip.plugintoolkit.api.annotations.CapabilityOutput
 import org.wip.plugintoolkit.api.annotations.PluginInfo
 import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
-import org.wip.plugintoolkit.api.annotations.CapabilityFileAccess
 import org.wip.plugintoolkit.api.HostFileSystem
 
 @PluginInfo(
     id = "com.wip.ocr_ia",
     name = "OCR IA",
-    version = "2.4.5",
+    version = "2.4.6",
     description = "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog"
 )
 class OCR_IA(val settings: OcrIASettings) {
@@ -23,16 +27,15 @@ class OCR_IA(val settings: OcrIASettings) {
         name = "ocr",
         description = "Performs basic OCR on an image or a folder of images"
     )
-    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     suspend fun ocr(
-        @CapabilityParam(
+        @CapabilityInput(
             description = "Path to image or folder",
             semanticTypes = ["path/folder"]
         )
         input: String,
         @CapabilityParam(description = "Save output to a .txt file alongside each image", defaultValue = "true")
         save: Boolean,
-        @CapabilityParam(description = "Custom output directory", semanticTypes = ["path/folder"])
+        @CapabilityOutput(description = "Custom output directory", semanticTypes = ["path/folder"])
         outputDir: String,
         @CapabilityParam(description = "Whether to use native structured output (might not be supported by all models)", defaultValue = "false")
         useStructuredOutput: Boolean,
@@ -65,16 +68,15 @@ class OCR_IA(val settings: OcrIASettings) {
         name = "advanced_ocr",
         description = "Performs advanced OCR extracting exact balloon and text boxes, shapes, text orientation, sparsity, and color."
     )
-    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     suspend fun advancedOcr(
-        @CapabilityParam(
+        @CapabilityInput(
             description = "Path to image or folder",
             semanticTypes = ["path/folder"]
         )
         input: String,
         @CapabilityParam(description = "Save output to a .json file alongside each image", defaultValue = "true")
         save: Boolean,
-        @CapabilityParam(description = "Custom output directory", semanticTypes = ["path/folder"])
+        @CapabilityOutput(description = "Custom output directory", semanticTypes = ["path/folder"])
         outputDir: String,
         @CapabilityParam(description = "Whether to use native structured output (might not be supported by all models)", defaultValue = "false")
         useStructuredOutput: Boolean,

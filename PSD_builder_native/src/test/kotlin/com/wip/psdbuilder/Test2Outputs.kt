@@ -4,7 +4,6 @@ import org.junit.Test
 import java.io.File
 import kotlinx.serialization.json.*
 import kotlinx.coroutines.runBlocking
-import kotlin.math.pow
 
 class Test2Outputs {
     @Test

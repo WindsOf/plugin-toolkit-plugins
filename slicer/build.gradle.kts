@@ -27,6 +27,7 @@ dependencies {
 }
 
 tasks.jar {
+    dependsOn(configurations.runtimeClasspath)
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
     from(configurations.runtimeClasspath.get().filter { file ->

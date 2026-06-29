@@ -1,7 +1,7 @@
-package com.wip.ocrAI.models
+package com.wip.common.models
 
 import kotlinx.serialization.Serializable
-import org.wip.plugintoolkit.api.annotations.CapabilityOutput
+import org.wip.plugintoolkit.api.annotations.CapabilityResult
 import org.wip.plugintoolkit.api.annotations.PluginSetting
 
 data class OcrIASettings(

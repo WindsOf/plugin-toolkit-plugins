@@ -8,13 +8,15 @@ import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.PluginSignal
 import org.wip.plugintoolkit.api.annotations.Capability
 import org.wip.plugintoolkit.api.annotations.CapabilityParam
+import org.wip.plugintoolkit.api.annotations.CapabilityInput
+import org.wip.plugintoolkit.api.annotations.CapabilityOutput
 import org.wip.plugintoolkit.api.annotations.PluginInfo
 import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
-import org.wip.plugintoolkit.api.annotations.CapabilityFileAccess
 import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.annotations.ResumeState
+import org.wip.plugintoolkit.api.toRelativePath
 
 enum class OutputFormat {
     PNG,
@@ -31,7 +33,7 @@ enum class Widths {
 @PluginInfo(
         id = "com.wip.betterimg",
         name = "BetterIMG",
-        version = "2.0.5",
+        version = "2.0.6",
         description = "A plugin that processes images using the BetterIMG CLI tool."
 )
 class BetterIMG {
@@ -39,21 +41,20 @@ class BetterIMG {
             name = "Image Processor",
             description = "Process a folder of images using BetterIMG CLI"
     )
-    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     fun imageProcessor(
-            @CapabilityParam(description = "Folder to process", semanticTypes = ["path/folder"])
-            folder: String,
+            @CapabilityInput(description = "Folder to process", semanticTypes = ["path/folder"])
+        folder: String,
             @CapabilityParam(description = "Output width in pixels", defaultValue = "940")
             width: Int,
             @CapabilityParam(description = "Grain level for processing", defaultValue = "5")
             grain: Int,
             @CapabilityParam(description = "Output image format", defaultValue = "WEBP")
             outputFormat: OutputFormat,
-            @CapabilityParam(
+            @CapabilityOutput(
                     description = "Output folder",
                     semanticTypes = ["path/folder"]
             )
-            outFolder: String,
+        outFolder: String,
             @ResumeState resumeState: JsonElement? = null,
             context: PluginContext,
             hostFs: HostFileSystem
@@ -73,9 +74,8 @@ class BetterIMG {
         name = "Image Processor with Scaling",
         description = "Process a folder of images using BetterIMG CLI with scaling"
     )
-    @CapabilityFileAccess(readsFiles = true, writesFiles = true)
     suspend fun imageProcessorWithScaling(
-        @CapabilityParam(description = "Folder to process", semanticTypes = ["path/folder"])
+        @CapabilityInput(description = "Folder to process", semanticTypes = ["path/folder"])
         folder: String,
         @CapabilityParam(description = "Output width multiplier", defaultValue = "x1")
         width: Widths,
@@ -83,7 +83,7 @@ class BetterIMG {
         grain: Int,
         @CapabilityParam(description = "Output image format", defaultValue = "WEBP")
         outputFormat: OutputFormat,
-        @CapabilityParam(
+        @CapabilityOutput(
             description = "Output folder",
             semanticTypes = ["path/folder"]
         )
@@ -258,7 +258,7 @@ class BetterIMG {
 
             for ((jarResource, targetPath) in resourcesToExtract) {
                 logger.info("Extracting resource: $jarResource -> $targetPath")
-                val result = fileSystem.extractResource(jarResource, targetPath)
+                val result = fileSystem.extractResource(jarResource, targetPath.toRelativePath().getOrThrow())
                 if (result.isFailure) {
                     val error = "Failed to extract $jarResource: ${result.exceptionOrNull()?.message}"
                     logger.error(error)
@@ -355,7 +355,7 @@ class BetterIMG {
             // existing ones
             for ((jarResource, targetPath) in resourcesToExtract) {
                 logger.info("Extracting resource: $jarResource -> $targetPath")
-                val result = fileSystem.extractResource(jarResource, targetPath)
+                val result = fileSystem.extractResource(jarResource, targetPath.toRelativePath().getOrThrow())
                 if (result.isFailure) {
                     val error = "Failed to extract $jarResource during update: ${result.exceptionOrNull()?.message}"
                     logger.error(error)
