@@ -4,6 +4,7 @@ import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.executor.llms.all.simpleGoogleAIExecutor
 import ai.koog.prompt.executor.clients.openai.OpenAILLMClient
 import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
+import ai.koog.prompt.executor.clients.google.GoogleLLMClient
 import ai.koog.prompt.executor.llms.SingleLLMPromptExecutor
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.agents.core.tools.ToolDescriptor
@@ -11,6 +12,8 @@ import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.LLMChoice
 import ai.koog.prompt.streaming.StreamFrame
 import kotlinx.coroutines.flow.Flow
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeout
 import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
@@ -60,13 +63,23 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
         }
     }
 
+    private fun createKoogHttpClient(): HttpClient {
+        return HttpClient {
+            install(HttpTimeout) {
+                requestTimeoutMillis = 5 * 60 * 1000 // 5 minutes
+                connectTimeoutMillis = 5 * 60 * 1000
+                socketTimeoutMillis = 5 * 60 * 1000
+            }
+        }
+    }
+
     private fun getExecutor(modelId: String) = when (modelId) {
         AIModel.LM_STUDIO.id -> {
             val key = settings.lmStudioApiKey.ifBlank { "lm-studio" }
             val baseUrl = settings.lmStudioUrl.ifBlank { "http://localhost:1234/v1" }.trim().removeSuffix("/")
             val customModelId = settings.lmStudioModelName.ifBlank { "default-model" }
             
-            val wrapperClient = object : OpenAILLMClient(key, OpenAIClientSettings(baseUrl = baseUrl)) {
+            val wrapperClient = object : OpenAILLMClient(apiKey = key, settings = OpenAIClientSettings(baseUrl = baseUrl), baseClient = createKoogHttpClient()) {
                 private val fullCapabilities = ai.koog.prompt.executor.clients.openai.OpenAIModels.Chat.GPT4o.capabilities
                 
                 private fun injectCapabilities(model: LLModel): LLModel {
@@ -110,7 +123,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
         else -> {
             val key = settings.googleApiKey.ifBlank { System.getenv("API_KEY") ?: "" }
             if (key.isBlank()) throw IllegalArgumentException("Google API Key not found.")
-            simpleGoogleAIExecutor(key)
+            SingleLLMPromptExecutor(GoogleLLMClient(apiKey = key, baseClient = createKoogHttpClient()))
         }
     }
 
@@ -391,6 +404,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
               "translations": ["string1", "string2", ...]
             }
             Do not include any other text, explanations, or markdown formatting outside of the JSON block.
+            Do not use " inside the translated strings.
             """.trimIndent()
         } else ""
 

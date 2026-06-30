@@ -2,6 +2,8 @@ Version: 4.4.11
 Date: 2026-06-29
 Added:
   - Support fot 1.7.0
+Bugfix:
+  - Workign with webp images would take ages
 -------------------------------------------------------------------------------------------------
 Version: 4.4.10
 Date: 2026-06-22

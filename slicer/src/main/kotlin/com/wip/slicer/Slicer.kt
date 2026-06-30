@@ -29,7 +29,15 @@ import javax.imageio.spi.IIORegistry
 class Slicer {
     init {
         try {
-            IIORegistry.getDefaultInstance().registerServiceProvider(WebPImageReaderSpi())
+            val registry = IIORegistry.getDefaultInstance()
+            val providers = registry.getServiceProviders(javax.imageio.spi.ImageReaderSpi::class.java, false)
+            while (providers.hasNext()) {
+                val provider = providers.next()
+                if (provider.javaClass.name == "com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi") {
+                    registry.deregisterServiceProvider(provider)
+                }
+            }
+            registry.registerServiceProvider(WebPImageReaderSpi())
         } catch (e: Exception) {
             // Ignore
         }
@@ -75,6 +83,7 @@ class Slicer {
                 name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".webp")
             }
         }
+        val step = .4f/files.size
         val sortedImages = images.sortedWith(natsortComparator)
         if (sortedImages.isEmpty()) throw IllegalArgumentException("No valid images found in the specified folder.")
 
@@ -83,11 +92,11 @@ class Slicer {
         val width = firstImage.width
         val fullBitmap = mutableListOf<BufferedImage>()
 
-        val usefulRowVarianceList = analyzeRowVariances(sortedImages, cutTolerance, fullBitmap)
+        val usefulRowVarianceList = analyzeRowVariances(sortedImages, cutTolerance, fullBitmap, context.progress)
         val totalHeight = usefulRowVarianceList.size
-        progressReporter.report(0.5f)
+        progressReporter.report(0.4f)
 
-        val (finalCuts, totalError) = findOptimalCuts(totalHeight, usefulRowVarianceList, minHeight, desiredHeight, maxHeight, prioritizeSmallerImages)
+        val (finalCuts, totalError) = findOptimalCuts(totalHeight, usefulRowVarianceList, minHeight, desiredHeight, maxHeight, prioritizeSmallerImages, context.progress)
 
         if (finalCuts.isEmpty()) throw IllegalArgumentException("No valid cuts found. Please adjust the parameters.")
 
@@ -130,7 +139,8 @@ class Slicer {
         val progressIncrement = 0.9f / sortedImages.size
         val validRows = mutableListOf<Int>()
         sortedImages.forEachIndexed { index, imagePath ->
-            val img = ImageIO.read(java.io.File(imagePath.toString()))
+            val originalImg = ImageIO.read(java.io.File(imagePath.toString()))
+            val img = ensureFastImage(originalImg)
             for (i in 0 until img.height) {
                 validRows.add(if (analyzeSingleRowVariance(img, i) <= cutTolerance) 1 else 0)
             }
@@ -157,6 +167,17 @@ class Slicer {
         return max_distance
     }
 
+    private fun ensureFastImage(image: BufferedImage): BufferedImage {
+        if (image.type == BufferedImage.TYPE_INT_RGB || image.type == BufferedImage.TYPE_INT_ARGB) {
+            return image
+        }
+        val newImage = BufferedImage(image.width, image.height, BufferedImage.TYPE_INT_ARGB)
+        val g = newImage.createGraphics()
+        g.drawImage(image, 0, 0, null)
+        g.dispose()
+        return newImage
+    }
+
     private fun analyzeSingleRowVariance(bufferedImage: BufferedImage, y: Int): Int {
         val width = bufferedImage.width
         if (width <= 1) return 0
@@ -181,15 +202,19 @@ class Slicer {
     private fun analyzeRowVariances(
         sortedImages: List<Path>,
         cutTolerance: Int,
-        fullBitmap: MutableList<BufferedImage>
+        fullBitmap: MutableList<BufferedImage>,
+        progressReporter: org.wip.plugintoolkit.api.ProgressReporter
     ): List<Boolean> {
         val rowVarianceList = mutableListOf<Int>()
-        sortedImages.forEach { imagePath ->
-            val bufferedImage = ImageIO.read(java.io.File(imagePath.toString()))
+        val total = sortedImages.size
+        sortedImages.forEachIndexed { index, imagePath ->
+            val originalImg = ImageIO.read(java.io.File(imagePath.toString()))
+            val bufferedImage = ensureFastImage(originalImg)
             fullBitmap.add(bufferedImage)
             for (y in 0 until bufferedImage.height) {
                 rowVarianceList.add(analyzeSingleRowVariance(bufferedImage, y))
             }
+            progressReporter.report(0.1f + ((index + 1).toFloat() / total) * 0.3f)
         }
         return rowVarianceList.map { it <= cutTolerance }
     }
@@ -200,15 +225,20 @@ class Slicer {
         minHeight: Int,
         desiredHeight: Int,
         maxHeight: Int,
-        prioritizeSmallerImages: Boolean
+        prioritizeSmallerImages: Boolean,
+        progressReporter: org.wip.plugintoolkit.api.ProgressReporter
     ): Pair<List<Int>, Long> {
         val dp = LongArray(totalHeight + 1) { Long.MAX_VALUE }
         val parent = IntArray(totalHeight + 1) { -1 }
         dp[0] = 0
 
         val FORCED_CUT_PENALTY = 1_000_000_000_000L
+        val notifyInterval = (totalHeight / 20).coerceAtLeast(1)
 
         for (i in 0 until totalHeight) {
+            if (i % notifyInterval == 0) {
+                progressReporter.report(0.4f + (i.toFloat() / totalHeight) * 0.4f)
+            }
             if (dp[i] == Long.MAX_VALUE) continue
 
             val searchStart = (i + minHeight.coerceAtLeast(1)).coerceAtMost(totalHeight)

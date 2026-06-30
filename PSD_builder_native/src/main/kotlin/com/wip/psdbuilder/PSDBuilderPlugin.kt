@@ -124,7 +124,7 @@ data class PSDBuilderSettings(
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "PSD Builder Native",
-    version = "4.4.11",
+    version = "4.4.13",
     description = "A plugin that builds layered PSD files natively in Kotlin."
 )
 class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) {
@@ -562,7 +562,8 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             throw IllegalArgumentException("Background image path not provided in JSON or as parameter")
         }
 
-        val baseImage = withContext(Dispatchers.IO) { ImageIO.read(File(imagePathToUse)) }
+        val originalBaseImage = withContext(Dispatchers.IO) { ImageIO.read(File(imagePathToUse)) }
+        val baseImage = ensureFastImage(originalBaseImage)
         val width = baseImage.width.toDouble()
         val height = baseImage.height.toDouble()
 
@@ -625,6 +626,17 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             File(outputPsdPath).writeBytes(psdBytes)
         }
         return PSDBuildResult(outputPsdPath)
+    }
+
+    private fun ensureFastImage(image: java.awt.image.BufferedImage): java.awt.image.BufferedImage {
+        if (image.type == java.awt.image.BufferedImage.TYPE_INT_RGB || image.type == java.awt.image.BufferedImage.TYPE_INT_ARGB) {
+            return image
+        }
+        val newImage = java.awt.image.BufferedImage(image.width, image.height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+        val g = newImage.createGraphics()
+        g.drawImage(image, 0, 0, null)
+        g.dispose()
+        return newImage
     }
 
     private fun normalizeBoundingBox(box: List<Double>): List<Double> {
@@ -691,8 +703,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         customBoundaries: List<com.wip.kpsd.TextBoundary>? = null
     ): Psd {
         val inputFile = File(imagePath)
-        val baseImage = withContext(Dispatchers.IO) { ImageIO.read(inputFile) }
+        val originalBaseImage = withContext(Dispatchers.IO) { ImageIO.read(inputFile) }
             ?: throw IllegalArgumentException("Failed to read image: $imagePath")
+        val baseImage = ensureFastImage(originalBaseImage)
 
         val width = baseImage.width
         val height = baseImage.height

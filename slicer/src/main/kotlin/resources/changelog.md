@@ -1,7 +1,9 @@
-Version: 1.1.5
+Version: 1.1.6
 Date: 2026-06-29
 Added:
   - Support for 1.7.0
+Bugfix:
+  - Working with webp images would take ages
 -------------------------------------------------------------------------------------------------
 Version: 1.1.4
 Date: 2026-06-01
