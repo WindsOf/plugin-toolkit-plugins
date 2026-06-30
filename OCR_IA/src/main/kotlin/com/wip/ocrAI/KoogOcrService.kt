@@ -11,6 +11,7 @@ import ai.koog.prompt.executor.clients.anthropic.AnthropicLLMClient
 import ai.koog.prompt.executor.llms.SingleLLMPromptExecutor
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.agents.core.tools.ToolDescriptor
+import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.LLMChoice
 import ai.koog.prompt.streaming.StreamFrame
@@ -46,6 +47,7 @@ import kotlinx.coroutines.Dispatchers
 import javax.imageio.ImageIO
 
 import org.wip.plugintoolkit.api.HostFileSystem
+import kotlin.time.Duration.Companion.minutes
 
 class KoogOcrService(private val context: PluginContext, private val settings: OcrIASettings, private val hostFs: HostFileSystem) {
     private val logger = context.logger
@@ -124,7 +126,6 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
                 connectTimeoutMillis = 5 * 60 * 1000
                 socketTimeoutMillis = 5 * 60 * 1000
             }
-            5.minutes.
         }
     }
 
@@ -132,17 +133,17 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
             AIModel.GEMMA_26B, AIModel.GEMMA_31B, AIModel.GEMINI_1_5_PRO, AIModel.GEMINI_2_5_PRO, AIModel.GEMINI_3_1_FLASH_LITE -> {
                 val key = settings.googleApiKey.ifBlank { System.getenv("API_KEY") ?: "" }
                 if (key.isBlank()) throw IllegalArgumentException("Google API Key not found.")
-                SingleLLMPromptExecutor(GoogleLLMClient(apiKey = key, baseClient = createKoogHttpClient()))
+                MultiLLMPromptExecutor(GoogleLLMClient(apiKey = key, baseClient = createKoogHttpClient()))
             }
             AIModel.CLAUDE_3_5_SONNET -> {
                 val key = settings.anthropicApiKey.ifBlank { System.getenv("ANTHROPIC_API_KEY") ?: "" }
                 if (key.isBlank()) throw IllegalArgumentException("Anthropic API Key not found.")
-                SingleLLMPromptExecutor(AnthropicLLMClient(apiKey = key, baseClient = createKoogHttpClient()))
+                MultiLLMPromptExecutor(AnthropicLLMClient(apiKey = key, baseClient = createKoogHttpClient()))
             }
             AIModel.GPT_4O -> {
                 val key = settings.openAIApiKey.ifBlank { System.getenv("OPENAI_API_KEY") ?: "" }
                 if (key.isBlank()) throw IllegalArgumentException("OpenAI API Key not found.")
-                SingleLLMPromptExecutor(OpenAILLMClient(apiKey = key, baseClient = createKoogHttpClient()))
+                MultiLLMPromptExecutor(OpenAILLMClient(apiKey = key, baseClient = createKoogHttpClient()))
             }
             AIModel.LM_STUDIO -> {
                 val key = settings.lmStudioApiKey.ifBlank { "lm-studio" }

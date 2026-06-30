@@ -353,7 +353,7 @@ def generate_repo(name, url, output_dir, clean=False, target_plugin=None):
         shutil.copy2(source_jar, target_jar_path)
 
         # Sign the JAR in the dist folder
-        # sign_jar(target_jar_path, PRIVATE_KEY_B64)
+        sign_jar(target_jar_path, PRIVATE_KEY_B64)
 
         # Get detached signature and hash
         jar_hash, jar_sig = get_detached_signature(target_jar_path, PRIVATE_KEY_B64)

@@ -39,6 +39,12 @@ tasks.jar {
         !path.contains("koin-core") &&
         !path.contains("slf4j")
     }.map { if (it.isDirectory) it else zipTree(it) })
+
+    exclude("META-INF/*.RSA", "META-INF/*.SF", "META-INF/*.DSA")
+    exclude("META-INF/versions/**/module-info.class")
+    exclude("module-info.class")
+    exclude("META-INF/INDEX.LIST")
+    exclude("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*")
 }
 
 

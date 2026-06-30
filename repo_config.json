@@ -1,5 +1,5 @@
 {
   "name": "WindsOf Plugin Toolkit Repository",
-  "url": "https://raw.githubusercontent.com/WindsOf/plugin-toolkit-plugins/master/dist/",
+  "url": "https://raw.githubusercontent.com/WindsOf/WOTK-s-plugins/refs/heads/main/",
   "out": "dist"
 }
