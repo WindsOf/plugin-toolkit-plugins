@@ -1,3 +1,8 @@
+Version: 5.0.0
+Date: 2026-07-12
+Added:
+  - Support for merging multiple images into a single PSD up to a desired height
+-------------------------------------------------------------------------------------------------
 Version: 4.4.11
 Date: 2026-06-29
 Added:
