@@ -88,6 +88,24 @@ def run_command(command, cwd=None):
     if result.returncode != 0:
         print(f"Error: {result.stdout}\n{result.stderr}")
         return False
+
+    if "gradle" in command[0].lower():
+        warnings = []
+        for line in (result.stdout + "\n" + result.stderr).splitlines():
+            line_stripped = line.strip()
+            if not line_stripped:
+                continue
+            lower_line = line_stripped.lower()
+            if "warning" in lower_line or line_stripped.startswith("w: "):
+                warnings.append(line_stripped)
+                
+        if warnings:
+            yellow = "\033[93m"
+            reset = "\033[0m"
+            print(f"{yellow}Warnings detected:{reset}")
+            for w in warnings:
+                print(f"{yellow}  {w}{reset}")
+
     return True
 
 
