@@ -124,7 +124,6 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
                 connectTimeoutMillis = 5 * 60 * 1000
                 socketTimeoutMillis = 5 * 60 * 1000
             }
-            5.minutes.
         }
     }
 
