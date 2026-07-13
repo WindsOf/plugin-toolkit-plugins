@@ -23,7 +23,8 @@ data class TranslatorAISettings(
 
     @PluginSetting(
         description = "Use structured output (JSON schema). Disable if the model does not support it.",
-        defaultValue = "true"
+        defaultValue = "true",
+        required = true 
     )
     val useStructuredOutput: Boolean = true,
 
@@ -31,20 +32,20 @@ data class TranslatorAISettings(
         description = "URL for LM Studio (e.g. http://localhost:1234/v1)",
         required = false
     )
-    val lmStudioUrl: String = "http://localhost:1234/v1",
+    val lmStudioUrl: String? = "http://localhost:1234/v1",
 
     @PluginSetting(
         description = "API Key for LM Studio",
         required = false,
         secret = true
     )
-    val lmStudioApiKey: String = "lm-studio",
+    val lmStudioApiKey: String? = "lm-studio",
 
     @PluginSetting(
         description = "The specific model name to request from LM Studio",
         required = false
     )
-    val lmStudioModelName: String = "default-model"
+    val lmStudioModelName: String? = "default-model"
 )
 
 enum class AIModel(val id: String) {

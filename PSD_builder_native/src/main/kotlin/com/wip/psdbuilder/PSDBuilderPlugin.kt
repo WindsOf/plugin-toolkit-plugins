@@ -110,13 +110,15 @@ data class ChapterPSDBuildResult(
 data class PSDBuilderSettings(
     @PluginSetting(
         description = "Enable debug mode to draw bounding boxes on the output image",
-        defaultValue = "false"
+        defaultValue = "false",
+        required = true
     )
     val debugMode: Boolean = false,
 
     @PluginSetting(
         description = "Percentage of the bounding box size to use as padding",
-        defaultValue = "0.10"
+        defaultValue = "0.10",
+        required = true
     )
     val paddingPercentage: Float = 0.10f
 )

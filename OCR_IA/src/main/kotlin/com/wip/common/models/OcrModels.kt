@@ -3,6 +3,7 @@ package com.wip.common.models
 import kotlinx.serialization.Serializable
 import org.wip.plugintoolkit.api.annotations.CapabilityResult
 import org.wip.plugintoolkit.api.annotations.PluginSetting
+import org.wip.plugintoolkit.api.annotations.RequiresSetting
 
 data class OcrIASettings(
     @PluginSetting(
@@ -17,33 +18,33 @@ data class OcrIASettings(
         required = false,
         secret = true
     )
-    val anthropicApiKey: String = "",
+    val anthropicApiKey: String? = "",
 
     @PluginSetting(
         description = "API Key for OpenAI services",
         required = false,
         secret = true
     )
-    val openAIApiKey: String = "",
+    val openAIApiKey: String? = "",
 
     @PluginSetting(
         description = "URL for LM Studio (e.g. http://localhost:1234/v1)",
         required = false
     )
-    val lmStudioUrl: String = "http://localhost:1234/v1",
+    val lmStudioUrl: String? = "http://localhost:1234/v1",
 
     @PluginSetting(
         description = "API Key for LM Studio",
         required = false,
         secret = true
     )
-    val lmStudioApiKey: String = "lm-studio",
+    val lmStudioApiKey: String? = "lm-studio",
 
     @PluginSetting(
         description = "The specific model name to request from LM Studio",
         required = false
     )
-    val lmStudioModelName: String = "default-model"
+    val lmStudioModelName: String? = "default-model"
 )
 
 enum class AIModel(val id: String) {
@@ -52,8 +53,11 @@ enum class AIModel(val id: String) {
     GEMINI_1_5_PRO("gemini-1.5-pro"),
     GEMINI_2_5_PRO("gemini-2.5-pro"),
     GEMINI_3_1_FLASH_LITE("gemini-3.1-flash-lite"),
+    @RequiresSetting(["anthropicApiKey"])
     CLAUDE_3_5_SONNET("claude-3-5-sonnet-20241022"),
+    @RequiresSetting(["openAIApiKey"])
     GPT_4O("gpt-4o"),
+    @RequiresSetting(["lmStudioApiKey"])
     LM_STUDIO("lm-studio")
 }
 

@@ -78,9 +78,9 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
 
     private fun getExecutor(modelId: String) = when (modelId) {
         AIModel.LM_STUDIO.id -> {
-            val key = settings.lmStudioApiKey.ifBlank { "lm-studio" }
-            val baseUrl = settings.lmStudioUrl.ifBlank { "http://localhost:1234/v1" }.trim().removeSuffix("/")
-            val customModelId = settings.lmStudioModelName.ifBlank { "default-model" }
+            val key = settings.lmStudioApiKey!!.ifBlank { "lm-studio" }
+            val baseUrl = settings.lmStudioUrl!!.ifBlank { "http://localhost:1234/v1" }.trim().removeSuffix("/")
+            val customModelId = settings.lmStudioModelName!!.ifBlank { "default-model" }
             
             val wrapperClient = object : OpenAILLMClient(apiKey = key, settings = OpenAIClientSettings(baseUrl = baseUrl), baseClient = createKoogHttpClient()) {
                 private val fullCapabilities = ai.koog.prompt.executor.clients.openai.OpenAIModels.Chat.GPT4o.capabilities
@@ -378,7 +378,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
         chapterContext: String?
     ): List<String> {
         val executor = getExecutor(modelId)
-        val finalModelId = if (modelId == AIModel.LM_STUDIO.id) settings.lmStudioModelName.ifBlank { "default-model" } else modelId
+        val finalModelId = if (modelId == AIModel.LM_STUDIO.id) settings.lmStudioModelName!!.ifBlank { "default-model" } else modelId
         
         val model = LLModel(
             provider = getProvider(modelId),
