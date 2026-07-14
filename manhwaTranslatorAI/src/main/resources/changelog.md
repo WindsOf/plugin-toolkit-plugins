@@ -1,3 +1,8 @@
+Version: 1.3.10
+Date: 2026-07-14
+Added:
+  - default to advanced ocr translation path
+-------------------------------------------------------------------------------------------------
 Version: 1.3.9
 Date: 2026-07-14
 Added:
