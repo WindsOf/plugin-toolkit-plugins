@@ -110,13 +110,15 @@ data class ChapterPSDBuildResult(
 data class PSDBuilderSettings(
     @PluginSetting(
         description = "Enable debug mode to draw bounding boxes on the output image",
-        defaultValue = "false"
+        defaultValue = "false",
+        required = false
     )
     val debugMode: Boolean = false,
 
     @PluginSetting(
         description = "Percentage of the bounding box size to use as padding",
-        defaultValue = "0.10"
+        defaultValue = "0.10",
+        required = false
     )
     val paddingPercentage: Float = 0.10f
 )
@@ -124,11 +126,12 @@ data class PSDBuilderSettings(
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "PSD Builder Native",
-    version = "5.0.0",
+    version = "5.1.2",
     description = "A plugin that builds layered PSD files natively in Kotlin."
 )
 class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) {
     init {
+        javax.imageio.ImageIO.setUseCache(false)
         try {
             val registry = IIORegistry.getDefaultInstance()
             val existing = registry.getServiceProviders(javax.imageio.spi.ImageReaderSpi::class.java, true)
@@ -467,11 +470,12 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
             val totalGroups = imageGroups.size
 
-            val generatedPaths = imageGroups.map { group ->
+            val generatedPaths = imageGroups.mapIndexed { index, group ->
                 async {
                     semaphore.withPermit {
-                        val outputPsdPath = File(outDir, group.files.first().nameWithoutExtension + ".psd").absolutePath
-                        logger.info("Processing group starting with: ${group.files.first().name}")
+                        val paddedIndex = (index + 1).toString().padStart(3, '0')
+                        val outputPsdPath = File(outDir, "$paddedIndex.psd").absolutePath
+                        logger.info("Processing group starting with: ${group.files.first().name} -> $paddedIndex.psd")
 
                         val pageTexts = mutableListOf<String>()
                         val pageBalloonBoxes = mutableListOf<List<Double>>()
@@ -987,9 +991,13 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
             val outDir = File("build/tmp")
             if (!outDir.exists()) outDir.mkdirs()
-            val baseName = File(imagePath).nameWithoutExtension
+            val baseName = imagePath?.let { File(it).nameWithoutExtension } ?: "merged_psd"
             withContext(Dispatchers.IO) {
-                ImageIO.write(debugImgFile, "png", File(outDir, "${baseName}_psd_builder.png"))
+                try {
+                    ImageIO.write(debugImgFile, "png", File(outDir, "${baseName}_psd_builder.png"))
+                } catch (e: Exception) {
+                    context.logger.warn("Failed to write debug image: ${e.message}")
+                }
             }
 
             val debugRgbData = IntArray(width * height)
@@ -1050,6 +1058,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
             if (debugPixelData != null) {
                 layer(name = "Debug Boxes") {
+                    hidden = true
                     top = 0
                     left = 0
                     bottom = height
