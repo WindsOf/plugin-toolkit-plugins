@@ -58,6 +58,35 @@ def extract_plugin_info_from_source(plugin_dir):
     return None
 
 
+def find_optional_settings(plugin_dir):
+    """
+    Scans Kotlin source files for @PluginSetting annotations and returns a set of setting names
+    that have required = false.
+    """
+    optional_settings = set()
+    src_dir = plugin_dir / "src"
+    if not src_dir.exists():
+        return optional_settings
+
+    setting_pattern = re.compile(r'@PluginSetting\s*\((.*?)\)\s*(?:private\s+)?val\s+(\w+)', re.DOTALL)
+    required_false_pattern = re.compile(r'\brequired\s*=\s*false\b')
+
+    for path in src_dir.rglob("*.kt"):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception:
+            continue
+
+        for match in setting_pattern.finditer(content):
+            args_str = match.group(1)
+            var_name = match.group(2)
+            if required_false_pattern.search(args_str):
+                optional_settings.add(var_name)
+                
+    return optional_settings
+
+
 
 def run_command(command, cwd=None):
     env = os.environ.copy()
@@ -225,6 +254,18 @@ def generate_repo(name, url, output_dir, clean=False, target_plugin=None):
     flows_dist_path = dist_path / "flows"
 
     # Load previous index.json if it exists (always load if target_plugin is provided to preserve others)
+    default_target_version = "1.7.1"
+    try:
+        toml_path = root_path / "gradle" / "libs.versions.toml"
+        if toml_path.exists():
+            with open(toml_path, "r", encoding="utf-8") as tf:
+                toml_content = tf.read()
+            version_match = re.search(r'plugin-toolkit\s*=\s*["\']([^"\']+)["\']', toml_content)
+            if version_match:
+                default_target_version = version_match.group(1)
+    except Exception as e:
+        print(f"Warning: could not parse plugin-toolkit version from libs.versions.toml: {e}")
+
     previous_plugins = {}
     previous_index_path = dist_path / "index.json"
     should_load_index = not clean or target_plugin is not None
@@ -302,7 +343,7 @@ def generate_repo(name, url, output_dir, clean=False, target_plugin=None):
                     "version": version,
                     "fileName": prev_p.get("fileName"),
                     "description": prev_p.get("description", ""),
-                    "targetAppVersion": prev_p.get("targetAppVersion", "1.0.0")
+                    "targetAppVersion": prev_p.get("targetAppVersion", default_target_version)
                 }
                 if "hash" in prev_p:
                     plugin_entry["hash"] = prev_p["hash"]
@@ -337,12 +378,21 @@ def generate_repo(name, url, output_dir, clean=False, target_plugin=None):
         with open(manifest_path, "r") as f:
             manifest = json.load(f)
 
+        # Fix KSP bug by marking settings with required = false in source as not required in manifest
+        optional_settings = find_optional_settings(plugin_dir)
+        if "settings" in manifest and manifest["settings"] is not None:
+            for sname, sdata in manifest["settings"].items():
+                if sname in optional_settings:
+                    sdata["required"] = False
+            with open(manifest_path, "w") as f:
+                json.dump(manifest, f, indent=4)
+
         plugin_meta = manifest.get("plugin", {})
         pkg = plugin_meta.get("id")
         p_name = plugin_meta.get("name")
         version = plugin_meta.get("version")
         description = plugin_meta.get("description", "")
-        target_app_version = plugin_meta.get("targetAppVersion", "1.0.0")
+        target_app_version = plugin_meta.get("targetAppVersion", default_target_version)
 
         if not pkg or not version:
             print(

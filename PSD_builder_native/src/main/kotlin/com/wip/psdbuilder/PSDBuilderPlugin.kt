@@ -111,14 +111,14 @@ data class PSDBuilderSettings(
     @PluginSetting(
         description = "Enable debug mode to draw bounding boxes on the output image",
         defaultValue = "false",
-        required = true
+        required = false
     )
     val debugMode: Boolean = false,
 
     @PluginSetting(
         description = "Percentage of the bounding box size to use as padding",
         defaultValue = "0.10",
-        required = true
+        required = false
     )
     val paddingPercentage: Float = 0.10f
 )
@@ -126,11 +126,12 @@ data class PSDBuilderSettings(
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "PSD Builder Native",
-    version = "5.0.0",
+    version = "5.1.2",
     description = "A plugin that builds layered PSD files natively in Kotlin."
 )
 class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) {
     init {
+        javax.imageio.ImageIO.setUseCache(false)
         try {
             val registry = IIORegistry.getDefaultInstance()
             val existing = registry.getServiceProviders(javax.imageio.spi.ImageReaderSpi::class.java, true)
@@ -203,6 +204,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         @CapabilityParam(description = "Has Border") hasBorder: List<Boolean>? = null,
         @CapabilityParam(description = "Border Colors") borderColors: List<String>? = null,
         @CapabilityParam(description = "Shapes of the balloons") shapes: List<String>? = null,
+        @CapabilityParam(description = "Desired height of the final PSD. 0 to disable merging", defaultValue = "0") desiredHeight: Int? = 0,
         context: PluginContext,
         hostFs: HostFileSystem
     ): PSDBuildResult {
@@ -361,6 +363,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         @CapabilityParam(description = "Has Border") hasBorder: List<Boolean>? = null,
         @CapabilityParam(description = "Border Colors") borderColors: List<String>? = null,
         @CapabilityParam(description = "Shapes of the balloons") shapes: List<String>? = null,
+        @CapabilityParam(description = "Desired height of the final PSD. 0 to disable merging", defaultValue = "0") desiredHeight: Int? = 0,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterPSDBuildResult {
@@ -395,30 +398,157 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             file.isFile && file.extension.lowercase() in supportedExtensions
         }?.sortedBy { it.name } ?: emptyList()
 
-        val totalPages = allImages.size
         val processedPages = java.util.concurrent.atomic.AtomicInteger(0)
-
         val semaphore = Semaphore(4)
-
         val psdPaths = mutableListOf<String>()
 
+        data class ImageGroup(val files: List<File>, val mergedHeight: Int, val maxWidth: Int)
+
         coroutineScope {
-            val generatedPaths = allImages.map { imageFile ->
+            val imageDimensions = allImages.map { img ->
+                async(Dispatchers.IO) {
+                    var w = 0; var h = 0
+                    val iter = ImageIO.getImageReadersBySuffix(img.extension)
+                    if (iter.hasNext()) {
+                        val reader = iter.next()
+                        try {
+                            ImageIO.createImageInputStream(img).use { stream ->
+                                reader.input = stream
+                                w = reader.getWidth(reader.minIndex)
+                                h = reader.getHeight(reader.minIndex)
+                            }
+                        } catch(e: Exception) {
+                            val imgBmp = ImageIO.read(img)
+                            w = imgBmp?.width ?: 0
+                            h = imgBmp?.height ?: 0
+                        } finally {
+                            reader.dispose()
+                        }
+                    } else {
+                        val imgBmp = ImageIO.read(img)
+                        w = imgBmp?.width ?: 0
+                        h = imgBmp?.height ?: 0
+                    }
+                    img to Pair(w, h)
+                }
+            }.awaitAll().toMap()
+
+            val imageGroups = mutableListOf<ImageGroup>()
+            if (desiredHeight != null && desiredHeight > 0) {
+                var currentGroup = mutableListOf<File>()
+                var currentH = 0
+                var currentMaxW = 0
+                for (img in allImages) {
+                    val dims = imageDimensions[img] ?: Pair(0, 0)
+                    val w = dims.first
+                    val h = dims.second
+                    
+                    if (currentGroup.isEmpty()) {
+                        currentGroup.add(img)
+                        currentH = h
+                        currentMaxW = w
+                    } else if (currentH + h > desiredHeight) {
+                        imageGroups.add(ImageGroup(currentGroup, currentH, currentMaxW))
+                        currentGroup = mutableListOf(img)
+                        currentH = h
+                        currentMaxW = w
+                    } else {
+                        currentGroup.add(img)
+                        currentH += h
+                        currentMaxW = maxOf(currentMaxW, w)
+                    }
+                }
+                if (currentGroup.isNotEmpty()) {
+                    imageGroups.add(ImageGroup(currentGroup, currentH, currentMaxW))
+                }
+            } else {
+                imageGroups.addAll(allImages.map { 
+                    val dims = imageDimensions[it] ?: Pair(0, 0)
+                    ImageGroup(listOf(it), dims.second, dims.first) 
+                })
+            }
+
+            val totalGroups = imageGroups.size
+
+            val generatedPaths = imageGroups.mapIndexed { index, group ->
                 async {
                     semaphore.withPermit {
-                        val pageName = imageFile.name
-                        logger.info("Processing page: $pageName")
-                        val outputPsdPath = File(outDir, imageFile.nameWithoutExtension + ".psd").absolutePath
+                        val paddedIndex = (index + 1).toString().padStart(3, '0')
+                        val outputPsdPath = File(outDir, "$paddedIndex.psd").absolutePath
+                        logger.info("Processing group starting with: ${group.files.first().name} -> $paddedIndex.psd")
 
-                        val indices = groupedData[pageName] ?: emptyList()
-                        val pageTexts = indices.map { safeTexts[it] }
-                        val pageBalloonBoxes = indices.map { safeBalloonBoxes[it] }
-                        val pageTextBoxes = safeTextBoxes?.let { tList -> indices.map { tList[it] } }
-                        val pageTextAngles = safeTextAngles?.let { rList -> indices.map { rList[it] } }
-                        val pageTextColors = safeTextColors?.let { cList -> indices.map { cList[it] } }
-                        val pageHasBorder = safeHasBorder?.let { bList -> indices.map { bList[it] } }
-                        val pageBorderColors = safeBorderColors?.let { cList -> indices.map { cList[it] } }
-                        val pageShapes = shapes?.let { sList -> indices.map { sList[it] } }
+                        val pageTexts = mutableListOf<String>()
+                        val pageBalloonBoxes = mutableListOf<List<Double>>()
+                        val pageTextBoxes = mutableListOf<List<Double>>()
+                        val pageTextAngles = mutableListOf<Double>()
+                        val pageTextColors = mutableListOf<String>()
+                        val pageHasBorder = mutableListOf<Boolean>()
+                        val pageBorderColors = mutableListOf<String>()
+                        val pageShapes = mutableListOf<String>()
+
+                        var currentYOffset = 0
+                        var mergedBmp: java.awt.image.BufferedImage? = null
+                        var g2d: java.awt.Graphics2D? = null
+
+                        if (desiredHeight != null && desiredHeight > 0 && group.files.size > 1) {
+                            mergedBmp = java.awt.image.BufferedImage(group.maxWidth, group.mergedHeight, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+                            g2d = mergedBmp.createGraphics()
+                        }
+
+                        for (imageFile in group.files) {
+                            val pageName = imageFile.name
+                            val indices = groupedData[pageName] ?: emptyList()
+                            val imgW = imageDimensions[imageFile]?.first ?: 0
+                            val imgH = imageDimensions[imageFile]?.second ?: 0
+
+                            if (mergedBmp != null && g2d != null) {
+                                val bmp = withContext(Dispatchers.IO) { ImageIO.read(imageFile) }
+                                g2d.drawImage(bmp, 0, currentYOffset, null)
+                            }
+
+                            indices.forEach { idx ->
+                                pageTexts.add(safeTexts[idx])
+                                val bBox = safeBalloonBoxes[idx]
+                                if (bBox.size >= 4) {
+                                    val absYMin = (if (bBox[0] <= 1.0 && bBox[2] <= 1.0) bBox[0] * imgH else bBox[0]) + currentYOffset
+                                    val absXMin = if (bBox[1] <= 1.0 && bBox[3] <= 1.0) bBox[1] * imgW else bBox[1]
+                                    val absYMax = (if (bBox[2] <= 1.0 && bBox[0] <= 1.0) bBox[2] * imgH else bBox[2]) + currentYOffset
+                                    val absXMax = if (bBox[3] <= 1.0 && bBox[1] <= 1.0) bBox[3] * imgW else bBox[3]
+                                    val normYMin = if (mergedBmp != null) absYMin / mergedBmp.height else bBox[0]
+                                    val normXMin = if (mergedBmp != null) absXMin / mergedBmp.width else bBox[1]
+                                    val normYMax = if (mergedBmp != null) absYMax / mergedBmp.height else bBox[2]
+                                    val normXMax = if (mergedBmp != null) absXMax / mergedBmp.width else bBox[3]
+                                    pageBalloonBoxes.add(listOf(normYMin, normXMin, normYMax, normXMax))
+                                } else {
+                                    pageBalloonBoxes.add(bBox)
+                                }
+
+                                if (safeTextBoxes != null) {
+                                    val tBox = safeTextBoxes[idx]
+                                    if (tBox.size >= 4) {
+                                        val absYMin = (if (tBox[0] <= 1.0 && tBox[2] <= 1.0) tBox[0] * imgH else tBox[0]) + currentYOffset
+                                        val absXMin = if (tBox[1] <= 1.0 && tBox[3] <= 1.0) tBox[1] * imgW else tBox[1]
+                                        val absYMax = (if (tBox[2] <= 1.0 && tBox[0] <= 1.0) tBox[2] * imgH else tBox[2]) + currentYOffset
+                                        val absXMax = if (tBox[3] <= 1.0 && tBox[1] <= 1.0) tBox[3] * imgW else tBox[3]
+                                        val normYMin = if (mergedBmp != null) absYMin / mergedBmp.height else tBox[0]
+                                        val normXMin = if (mergedBmp != null) absXMin / mergedBmp.width else tBox[1]
+                                        val normYMax = if (mergedBmp != null) absYMax / mergedBmp.height else tBox[2]
+                                        val normXMax = if (mergedBmp != null) absXMax / mergedBmp.width else tBox[3]
+                                        pageTextBoxes.add(listOf(normYMin, normXMin, normYMax, normXMax))
+                                    } else {
+                                        pageTextBoxes.add(tBox)
+                                    }
+                                }
+
+                                if (safeTextAngles != null) pageTextAngles.add(safeTextAngles[idx])
+                                if (safeTextColors != null) pageTextColors.add(safeTextColors[idx])
+                                if (safeHasBorder != null) pageHasBorder.add(safeHasBorder[idx])
+                                if (safeBorderColors != null) pageBorderColors.add(safeBorderColors[idx])
+                                if (shapes != null) pageShapes.add(shapes[idx])
+                            }
+                            currentYOffset += imgH
+                        }
+                        g2d?.dispose()
 
                         val psdFontString = when (fontName) {
                             PsdFont.ARIAL -> "ArialMT"
@@ -430,19 +560,20 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                         val borderSizes = List(pageTexts.size) { borderSize ?: 3 }
 
                         val psd = buildPsdObject(
-                            imagePath = imageFile.absolutePath,
+                            imagePath = if (mergedBmp == null) group.files.first().absolutePath else null,
+                            baseImageBmp = mergedBmp,
                             texts = pageTexts,
                             balloonBoxes = pageBalloonBoxes,
-                            textBoxes = pageTextBoxes,
+                            textBoxes = if (safeTextBoxes != null) pageTextBoxes else null,
                             fontSizes = fontSizes,
                             fontNames = fontNames,
                             borderSizes = borderSizes,
                             context = context,
-                            textAngles = pageTextAngles,
-                            shapes = pageShapes,
-                            textColors = pageTextColors,
-                            hasBorder = pageHasBorder,
-                            borderColors = pageBorderColors
+                            textAngles = if (safeTextAngles != null) pageTextAngles else null,
+                            shapes = if (shapes != null) pageShapes else null,
+                            textColors = if (safeTextColors != null) pageTextColors else null,
+                            hasBorder = if (safeHasBorder != null) pageHasBorder else null,
+                            borderColors = if (safeBorderColors != null) pageBorderColors else null
                         )
                         val psdBytes = withContext(Dispatchers.Default) {
                             KPsd.write(psd, compress = false)
@@ -451,8 +582,8 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                             File(outputPsdPath).writeBytes(psdBytes)
                         }
 
-                        val completed = processedPages.incrementAndGet()
-                        progressReporter.report(completed.toFloat() / totalPages.toFloat())
+                        val completed = processedPages.addAndGet(group.files.size)
+                        progressReporter.report(completed.toFloat() / allImages.size.toFloat())
 
                         outputPsdPath
                     }
@@ -460,7 +591,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             }.awaitAll()
 
             psdPaths.addAll(generatedPaths)
-            logger.info("All $totalPages PSDs generated successfully.")
+            logger.info("All ${allImages.size} images processed into $totalGroups PSDs successfully.")
         }
 
         return ChapterPSDBuildResult(psdPaths)
@@ -480,6 +611,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         @CapabilityParam(description = "Typeface for the text", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
         @CapabilityParam(description = "Thickness of the text stroke/border (0 to disable)", defaultValue = "3") borderSize: Int? = 3,
         @CapabilityParam(description = "Keep intermediate JSON and temp image files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
+        @CapabilityParam(description = "Desired height of the final PSD. 0 to disable merging", defaultValue = "0") desiredHeight: Int? = 0,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterPSDBuildResult {
@@ -499,6 +631,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             hasBorder = ocrData.hasBorder,
             borderColors = ocrData.borderColors,
             shapes = ocrData.shapes,
+            desiredHeight = desiredHeight,
             context = context,
             hostFs = hostFs
         )
@@ -518,6 +651,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         @CapabilityParam(description = "Typeface for the text", defaultValue = "\"ANIME_ACE_2_0_BB\"") fontName: PsdFont? = PsdFont.ANIME_ACE_2_0_BB,
         @CapabilityParam(description = "Thickness of the text stroke/border (0 to disable)", defaultValue = "3") borderSize: Int? = 3,
         @CapabilityParam(description = "Keep intermediate JSON and temp image files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
+        @CapabilityParam(description = "Desired height of the final PSD. 0 to disable merging", defaultValue = "0") desiredHeight: Int? = 0,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterPSDBuildResult {
@@ -531,6 +665,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             fontName = fontName,
             borderSize = borderSize,
             leaveIntermediateFiles = leaveIntermediateFiles,
+            desiredHeight = desiredHeight,
             context = context,
             hostFs = hostFs
         )
@@ -689,7 +824,8 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
     }
 
     suspend fun buildPsdObject(
-        imagePath: String,
+        imagePath: String? = null,
+        baseImageBmp: java.awt.image.BufferedImage? = null,
         texts: List<String>,
         balloonBoxes: List<List<Double>>,
         textBoxes: List<List<Double>>? = null,
@@ -704,9 +840,13 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         borderColors: List<String?>? = null,
         customBoundaries: List<com.wip.kpsd.TextBoundary>? = null
     ): Psd {
-        val inputFile = File(imagePath)
-        val originalBaseImage = withContext(Dispatchers.IO) { ImageIO.read(inputFile) }
-            ?: throw IllegalArgumentException("Failed to read image: $imagePath")
+        val originalBaseImage = if (baseImageBmp != null) {
+            baseImageBmp
+        } else {
+            val inputFile = File(imagePath!!)
+            withContext(Dispatchers.IO) { ImageIO.read(inputFile) }
+                ?: throw IllegalArgumentException("Failed to read image: $imagePath")
+        }
         val baseImage = ensureFastImage(originalBaseImage)
 
         val width = baseImage.width
@@ -851,9 +991,13 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
             val outDir = File("build/tmp")
             if (!outDir.exists()) outDir.mkdirs()
-            val baseName = File(imagePath).nameWithoutExtension
+            val baseName = imagePath?.let { File(it).nameWithoutExtension } ?: "merged_psd"
             withContext(Dispatchers.IO) {
-                ImageIO.write(debugImgFile, "png", File(outDir, "${baseName}_psd_builder.png"))
+                try {
+                    ImageIO.write(debugImgFile, "png", File(outDir, "${baseName}_psd_builder.png"))
+                } catch (e: Exception) {
+                    context.logger.warn("Failed to write debug image: ${e.message}")
+                }
             }
 
             val debugRgbData = IntArray(width * height)
@@ -914,6 +1058,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
             if (debugPixelData != null) {
                 layer(name = "Debug Boxes") {
+                    hidden = true
                     top = 0
                     left = 0
                     bottom = height
