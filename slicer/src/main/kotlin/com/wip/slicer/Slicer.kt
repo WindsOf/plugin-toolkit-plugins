@@ -23,7 +23,7 @@ import javax.imageio.spi.IIORegistry
 @PluginInfo(
     id = "com.wip.slicer",
     name = "Slicer",
-    version = "1.1.6",
+    version = "1.1.7",
     description = "A plugin that provides vertical images sliding capabilities for manhwa."
 )
 class Slicer {

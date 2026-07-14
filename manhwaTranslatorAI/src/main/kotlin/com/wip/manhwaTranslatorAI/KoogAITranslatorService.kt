@@ -8,6 +8,7 @@ import ai.koog.prompt.executor.clients.google.GoogleLLMClient
 import ai.koog.prompt.executor.llms.SingleLLMPromptExecutor
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.agents.core.tools.ToolDescriptor
+import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.LLMChoice
 import ai.koog.prompt.streaming.StreamFrame
@@ -38,6 +39,8 @@ import javax.imageio.ImageIO
 import javax.imageio.IIOImage
 import javax.imageio.ImageWriteParam
 import javax.imageio.stream.FileImageOutputStream
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.minutes
 
 @Serializable
 data class TranslationResponse(
@@ -66,18 +69,18 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
     private fun createKoogHttpClient(): HttpClient {
         return HttpClient {
             install(HttpTimeout) {
-                requestTimeoutMillis = 5 * 60 * 1000 // 5 minutes
-                connectTimeoutMillis = 5 * 60 * 1000
-                socketTimeoutMillis = 5 * 60 * 1000
+                requestTimeoutMillis = (10.minutes).inWholeMilliseconds
+                connectTimeoutMillis = (10.minutes).inWholeMilliseconds
+                socketTimeoutMillis = (10.minutes).inWholeMilliseconds
             }
         }
     }
 
     private fun getExecutor(modelId: String) = when (modelId) {
         AIModel.LM_STUDIO.id -> {
-            val key = settings.lmStudioApiKey.ifBlank { "lm-studio" }
-            val baseUrl = settings.lmStudioUrl.ifBlank { "http://localhost:1234/v1" }.trim().removeSuffix("/")
-            val customModelId = settings.lmStudioModelName.ifBlank { "default-model" }
+            val key = settings.lmStudioApiKey!!.ifBlank { "lm-studio" }
+            val baseUrl = settings.lmStudioUrl!!.ifBlank { "http://localhost:1234/v1" }.trim().removeSuffix("/")
+            val customModelId = settings.lmStudioModelName!!.ifBlank { "default-model" }
             
             val wrapperClient = object : OpenAILLMClient(apiKey = key, settings = OpenAIClientSettings(baseUrl = baseUrl), baseClient = createKoogHttpClient()) {
                 private val fullCapabilities = ai.koog.prompt.executor.clients.openai.OpenAIModels.Chat.GPT4o.capabilities
@@ -118,12 +121,12 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
                     return super.executeMultipleChoices(prompt, injectCapabilities(model), tools)
                 }
             }
-            SingleLLMPromptExecutor(wrapperClient)
+            MultiLLMPromptExecutor(wrapperClient)
         }
         else -> {
             val key = settings.googleApiKey.ifBlank { System.getenv("API_KEY") ?: "" }
             if (key.isBlank()) throw IllegalArgumentException("Google API Key not found.")
-            SingleLLMPromptExecutor(GoogleLLMClient(apiKey = key, baseClient = createKoogHttpClient()))
+            MultiLLMPromptExecutor(GoogleLLMClient(apiKey = key, baseClient = createKoogHttpClient()))
         }
     }
 
@@ -146,7 +149,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
             val oldest = requestTimes.peek() ?: now
             val waitTime = windowMs - (now - oldest)
             if (waitTime > 0) {
-                delay(waitTime + 100)
+                delay((waitTime + 100).milliseconds)
             }
         }
     }
@@ -165,7 +168,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
                 if (attempt < maxAttempts) {
                     val currentDelay = delaysMs[attempt - 1]
                     logger.warn("Attempt $attempt failed: ${e::class.simpleName}: ${e.message}. Retrying in ${currentDelay}ms...")
-                    delay(currentDelay)
+                    delay(currentDelay.milliseconds)
                 } else {
                     logger.error("Attempt $attempt failed: ${e::class.simpleName}: ${e.message}. Max retries reached.")
                 }
@@ -375,7 +378,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
         chapterContext: String?
     ): List<String> {
         val executor = getExecutor(modelId)
-        val finalModelId = if (modelId == AIModel.LM_STUDIO.id) settings.lmStudioModelName.ifBlank { "default-model" } else modelId
+        val finalModelId = if (modelId == AIModel.LM_STUDIO.id) settings.lmStudioModelName!!.ifBlank { "default-model" } else modelId
         
         val model = LLModel(
             provider = getProvider(modelId),

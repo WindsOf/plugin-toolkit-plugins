@@ -1,14 +1,10 @@
 package com.wip.ocrAI
 
 import ai.koog.prompt.dsl.prompt
-import ai.koog.prompt.executor.llms.all.simpleGoogleAIExecutor
-import ai.koog.prompt.executor.llms.all.simpleAnthropicExecutor
-import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
 import ai.koog.prompt.executor.clients.openai.OpenAILLMClient
 import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
 import ai.koog.prompt.executor.clients.google.GoogleLLMClient
 import ai.koog.prompt.executor.clients.anthropic.AnthropicLLMClient
-import ai.koog.prompt.executor.llms.SingleLLMPromptExecutor
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
@@ -136,19 +132,19 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
                 MultiLLMPromptExecutor(GoogleLLMClient(apiKey = key, baseClient = createKoogHttpClient()))
             }
             AIModel.CLAUDE_3_5_SONNET -> {
-                val key = settings.anthropicApiKey.ifBlank { System.getenv("ANTHROPIC_API_KEY") ?: "" }
+                val key = settings.anthropicApiKey!!.ifBlank { System.getenv("ANTHROPIC_API_KEY") ?: "" }
                 if (key.isBlank()) throw IllegalArgumentException("Anthropic API Key not found.")
                 MultiLLMPromptExecutor(AnthropicLLMClient(apiKey = key, baseClient = createKoogHttpClient()))
             }
             AIModel.GPT_4O -> {
-                val key = settings.openAIApiKey.ifBlank { System.getenv("OPENAI_API_KEY") ?: "" }
+                val key = settings.openAIApiKey!!.ifBlank { System.getenv("OPENAI_API_KEY") ?: "" }
                 if (key.isBlank()) throw IllegalArgumentException("OpenAI API Key not found.")
                 MultiLLMPromptExecutor(OpenAILLMClient(apiKey = key, baseClient = createKoogHttpClient()))
             }
             AIModel.LM_STUDIO -> {
-                val key = settings.lmStudioApiKey.ifBlank { "lm-studio" }
-                val baseUrl = settings.lmStudioUrl.ifBlank { "http://localhost:1234/v1" }.trim().removeSuffix("/")
-                val customModelId = settings.lmStudioModelName.ifBlank { "default-model" }
+                val key = settings.lmStudioApiKey!!.ifBlank { "lm-studio" }
+                val baseUrl = settings.lmStudioUrl!!.ifBlank { "http://localhost:1234/v1" }.trim().removeSuffix("/")
+                val customModelId = settings.lmStudioModelName!!.ifBlank { "default-model" }
                 
                 val wrapperClient = object : OpenAILLMClient(apiKey = key, settings = OpenAIClientSettings(baseUrl = baseUrl), baseClient = createKoogHttpClient()) {
                     private val fullCapabilities = ai.koog.prompt.executor.clients.openai.OpenAIModels.Chat.GPT4o.capabilities
@@ -189,7 +185,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
                         return super.executeMultipleChoices(prompt, injectCapabilities(model), tools)
                     }
                 }
-                SingleLLMPromptExecutor(wrapperClient)
+                MultiLLMPromptExecutor(wrapperClient)
             }
         }
 
@@ -249,7 +245,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
             throw e
         }
 
-        val modelId = if (aiModel == AIModel.LM_STUDIO) settings.lmStudioModelName.ifBlank { "default-model" } else aiModel.id
+        val modelId = if (aiModel == AIModel.LM_STUDIO) settings.lmStudioModelName!!.ifBlank { "default-model" } else aiModel.id
         logger.info("Defining LLModel: $modelId with provider ${getProvider(aiModel)}")
         val model = LLModel(
             provider = getProvider(aiModel),
@@ -398,7 +394,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
         }
         
         val isGemma = aiModel == AIModel.GEMMA_26B || aiModel == AIModel.GEMMA_31B
-        val modelId = if (aiModel == AIModel.LM_STUDIO) settings.lmStudioModelName.ifBlank { "default-model" } else aiModel.id
+        val modelId = if (aiModel == AIModel.LM_STUDIO) settings.lmStudioModelName!!.ifBlank { "default-model" } else aiModel.id
         logger.info("Found ${files.size} image(s). Advanced OCR with model: $modelId (isGemma: $isGemma)")
 
         val executor = try {
