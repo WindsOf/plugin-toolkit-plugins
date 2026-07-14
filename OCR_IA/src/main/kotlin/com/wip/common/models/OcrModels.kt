@@ -57,7 +57,7 @@ enum class AIModel(val id: String) {
     CLAUDE_3_5_SONNET("claude-3-5-sonnet-20241022"),
     @RequiresSetting(["openAIApiKey"])
     GPT_4O("gpt-4o"),
-    @RequiresSetting(["lmStudioApiKey"])
+    @RequiresSetting(["lmStudioModelName", "lmStudioApiKey", "lmStudioUrl"])
     LM_STUDIO("lm-studio")
 }
 
