@@ -21,7 +21,7 @@ import org.wip.plugintoolkit.api.HostFileSystem
     version = "2.4.8",
     description = "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog"
 )
-class OCR_IA(val settings: OcrIASettings) {
+class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
     
     @Capability(
         name = "ocr",

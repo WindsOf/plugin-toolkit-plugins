@@ -111,14 +111,14 @@ data class PSDBuilderSettings(
     @PluginSetting(
         description = "Enable debug mode to draw bounding boxes on the output image",
         defaultValue = "false",
-        required = false
+        required = true
     )
     val debugMode: Boolean = false,
 
     @PluginSetting(
         description = "Percentage of the bounding box size to use as padding",
         defaultValue = "0.10",
-        required = false
+        required = true
     )
     val paddingPercentage: Float = 0.10f
 )
@@ -131,7 +131,7 @@ data class PSDBuilderSettings(
 )
 class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) {
     init {
-        javax.imageio.ImageIO.setUseCache(false)
+        ImageIO.setUseCache(false)
         try {
             val registry = IIORegistry.getDefaultInstance()
             val existing = registry.getServiceProviders(javax.imageio.spi.ImageReaderSpi::class.java, true)
