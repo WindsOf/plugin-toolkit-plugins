@@ -167,10 +167,10 @@ class Slicer {
         return max_distance
     }
 
-    private fun ensureFastImage(image: BufferedImage): BufferedImage {
-        if (image.type == BufferedImage.TYPE_INT_RGB || image.type == BufferedImage.TYPE_INT_ARGB) {
-            return image
-        }
+    private fun ensureFastImage(image: BufferedImage): BufferedImage {        
+        //if (image.type == BufferedImage.TYPE_INT_RGB || image.type == BufferedImage.TYPE_INT_ARGB) {
+        //    return image
+        //}
         val newImage = BufferedImage(image.width, image.height, BufferedImage.TYPE_INT_ARGB)
         val g = newImage.createGraphics()
         g.drawImage(image, 0, 0, null)
