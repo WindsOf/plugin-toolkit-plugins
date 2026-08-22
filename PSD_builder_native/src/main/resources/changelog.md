@@ -1,3 +1,12 @@
+Version: 5.2.0
+Date: 2026-08-22
+Added:
+  - Upgraded to plugin-api 2.0.0.
+  - Declared supported operating systems: WINDOWS, LINUX, MACOS.
+  - Annotated ExtractedText, PSDBuildResult, and ChapterPSDBuildResult with @ComplexObject.
+  - Implemented @PluginLoad lifecycle hook.
+  - Fixed hardcoded paths in ImageTest to use local test resources.
+-------------------------------------------------------------------------------------------------
 Version: 5.1.4
 Date: 2026-07-14
 Fixed:

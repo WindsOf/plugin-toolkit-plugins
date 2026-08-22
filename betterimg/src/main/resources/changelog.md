@@ -1,3 +1,11 @@
+Version: 2.1.0
+Date: 2026-08-22
+Added:
+  - Upgraded to plugin-api 2.0.0.
+  - Declared supported operating system constraint: WINDOWS.
+  - Implemented @PluginLoad lifecycle hook.
+  - Added automated unit tests for enums, lifecycle hooks, and validation.
+-------------------------------------------------------------------------------------------------
 Version: 2.0.7
 Date: 2026-07-13
 Added:

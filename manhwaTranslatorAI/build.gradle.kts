@@ -26,7 +26,14 @@ dependencies {
     ksp(libs.plugin.api)
     implementation(libs.koog.agents)
     implementation(libs.koog.google)
-    implementation(project(":common-models"))
+
+    testImplementation(libs.kotlin.test)
+    testImplementation(libs.kotlin.test.junit)
+    testImplementation(libs.mockk)
+}
+
+tasks.test {
+    useJUnit()
 }
 
 tasks.withType<ProcessResources> {

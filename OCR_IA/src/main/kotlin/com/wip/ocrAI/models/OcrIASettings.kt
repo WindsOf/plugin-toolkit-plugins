@@ -1,7 +1,5 @@
-package com.wip.common.models
+package com.wip.ocrAI.models
 
-import kotlinx.serialization.Serializable
-import org.wip.plugintoolkit.api.annotations.CapabilityResult
 import org.wip.plugintoolkit.api.annotations.PluginSetting
 import org.wip.plugintoolkit.api.annotations.RequiresSetting
 
@@ -60,5 +58,3 @@ enum class AIModel(val id: String) {
     @RequiresSetting(["lmStudioModelName", "lmStudioApiKey", "lmStudioUrl"])
     LM_STUDIO("lm-studio")
 }
-
-

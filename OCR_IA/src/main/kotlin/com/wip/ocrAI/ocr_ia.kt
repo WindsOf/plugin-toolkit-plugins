@@ -1,27 +1,37 @@
 package com.wip.ocrAI
 
-import com.wip.common.models.AIModel
 import com.wip.common.models.AdvancedOCRResult
 import com.wip.common.models.OCRResult
-import com.wip.common.models.OcrIASettings
+import com.wip.ocrAI.models.AIModel
+import com.wip.ocrAI.models.OcrIASettings
+import org.wip.plugintoolkit.api.HostFileSystem
+import org.wip.plugintoolkit.api.OS
 import org.wip.plugintoolkit.api.PluginContext
+import org.wip.plugintoolkit.api.PluginLogger
 import org.wip.plugintoolkit.api.annotations.Capability
-import org.wip.plugintoolkit.api.annotations.CapabilityParam
 import org.wip.plugintoolkit.api.annotations.CapabilityInput
 import org.wip.plugintoolkit.api.annotations.CapabilityOutput
+import org.wip.plugintoolkit.api.annotations.CapabilityParam
 import org.wip.plugintoolkit.api.annotations.PluginInfo
+import org.wip.plugintoolkit.api.annotations.PluginLoad
 import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
-import org.wip.plugintoolkit.api.HostFileSystem
 
 @PluginInfo(
     id = "com.wip.ocr_ia",
     name = "OCR IA",
-    version = "2.4.8",
-    description = "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog"
+    version = "2.5.0",
+    description = "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog",
+    supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
 class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
+
+    @PluginLoad
+    fun onLoad(logger: PluginLogger): Result<Unit> {
+        logger.info("Executing PluginLoad lifecycle hook for OCR IA...")
+        return Result.success(Unit)
+    }
     
     @Capability(
         name = "ocr",

@@ -18,4 +18,11 @@ kotlin {
 dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.plugin.api)
+
+    testImplementation(libs.kotlin.test)
+    testImplementation(libs.kotlin.test.junit)
+}
+
+tasks.test {
+    useJUnit()
 }

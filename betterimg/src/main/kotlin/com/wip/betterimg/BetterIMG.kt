@@ -4,17 +4,20 @@ import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
+import org.wip.plugintoolkit.api.HostFileSystem
+import org.wip.plugintoolkit.api.OS
 import org.wip.plugintoolkit.api.PluginContext
+import org.wip.plugintoolkit.api.PluginLogger
 import org.wip.plugintoolkit.api.PluginSignal
 import org.wip.plugintoolkit.api.annotations.Capability
-import org.wip.plugintoolkit.api.annotations.CapabilityParam
 import org.wip.plugintoolkit.api.annotations.CapabilityInput
 import org.wip.plugintoolkit.api.annotations.CapabilityOutput
+import org.wip.plugintoolkit.api.annotations.CapabilityParam
 import org.wip.plugintoolkit.api.annotations.PluginInfo
+import org.wip.plugintoolkit.api.annotations.PluginLoad
 import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
-import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.annotations.ResumeState
 import org.wip.plugintoolkit.api.toRelativePath
 
@@ -31,15 +34,23 @@ enum class Widths {
 }
 
 @PluginInfo(
-        id = "com.wip.betterimg",
-        name = "BetterIMG",
-        version = "2.0.7",
-        description = "A plugin that processes images using the BetterIMG CLI tool."
+    id = "com.wip.betterimg",
+    name = "BetterIMG",
+    version = "2.1.0",
+    description = "A plugin that processes images using the BetterIMG CLI tool.",
+    supportedOs = [OS.WINDOWS]
 )
 class BetterIMG {
+
+    @PluginLoad
+    fun onLoad(logger: PluginLogger): Result<Unit> {
+        logger.info("Executing PluginLoad lifecycle hook for BetterIMG...")
+        return Result.success(Unit)
+    }
+
     @Capability(
-            name = "Image Processor",
-            description = "Process a folder of images using BetterIMG CLI"
+        name = "Image Processor",
+        description = "Process a folder of images using BetterIMG CLI"
     )
     fun imageProcessor(
             @CapabilityInput(description = "Folder to process", semanticTypes = ["path/folder"])

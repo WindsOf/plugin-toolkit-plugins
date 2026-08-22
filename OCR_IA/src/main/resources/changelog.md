@@ -1,3 +1,13 @@
+Version: 2.5.0
+Date: 2026-08-22
+Added:
+  - Upgraded to plugin-api 2.0.0.
+  - Declared supported operating systems: WINDOWS, LINUX, MACOS.
+  - Implemented @PluginLoad lifecycle hook.
+  - Resolved namespace collision by moving OCR_IA specific settings into com.wip.ocrAI.models.OcrIASettings.
+  - Bound complex objects (OCRResult, AdvancedOCRResult) from common-models annotated with @ComplexObject.
+  - Added unit test suite.
+-------------------------------------------------------------------------------------------------
 Version: 2.4.8
 Date: 2026-07-14
 Changes:

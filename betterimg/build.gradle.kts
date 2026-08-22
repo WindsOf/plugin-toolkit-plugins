@@ -23,6 +23,14 @@ dependencies {
     implementation(libs.kotlinx.coroutines.swing)
     implementation(libs.plugin.api)
     ksp(libs.plugin.api)
+
+    testImplementation(libs.kotlin.test)
+    testImplementation(libs.kotlin.test.junit)
+    testImplementation(libs.mockk)
+}
+
+tasks.test {
+    useJUnit()
 }
 
 tasks.processResources {

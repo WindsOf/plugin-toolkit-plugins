@@ -1,6 +1,8 @@
 package com.wip.psdbuilder
 
 import com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi
+import com.wip.common.models.AdvancedOCRResult
+import com.wip.common.models.OCRResult
 import com.wip.kpsd.Justification
 import com.wip.kpsd.KPsd
 import com.wip.kpsd.Layer
@@ -9,6 +11,11 @@ import com.wip.kpsd.Psd
 import com.wip.kpsd.TextShapeType
 import com.wip.kpsd.Units
 import com.wip.kpsd.psd
+import java.io.File
+import javax.imageio.ImageIO
+import javax.imageio.spi.IIORegistry
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -18,25 +25,22 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import org.wip.plugintoolkit.api.HostFileSystem
+import org.wip.plugintoolkit.api.OS
 import org.wip.plugintoolkit.api.PluginContext
+import org.wip.plugintoolkit.api.PluginLogger
 import org.wip.plugintoolkit.api.annotations.Capability
-import org.wip.plugintoolkit.api.annotations.CapabilityParam
 import org.wip.plugintoolkit.api.annotations.CapabilityInput
 import org.wip.plugintoolkit.api.annotations.CapabilityOutput
+import org.wip.plugintoolkit.api.annotations.CapabilityParam
+import org.wip.plugintoolkit.api.annotations.CapabilityResult
+import org.wip.plugintoolkit.api.annotations.ComplexObject
 import org.wip.plugintoolkit.api.annotations.PluginInfo
+import org.wip.plugintoolkit.api.annotations.PluginLoad
+import org.wip.plugintoolkit.api.annotations.PluginSetting
 import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
-import org.wip.plugintoolkit.api.annotations.CapabilityResult
-import org.wip.plugintoolkit.api.HostFileSystem
-import org.wip.plugintoolkit.api.annotations.PluginSetting
-import com.wip.common.models.AdvancedOCRResult
-import com.wip.common.models.OCRResult
-import java.io.File
-import javax.imageio.ImageIO
-import javax.imageio.spi.IIORegistry
-import kotlin.math.cos
-import kotlin.math.sin
 
 enum class PsdFont {
     ANIME_ACE_2_0_BB,
@@ -77,6 +81,11 @@ data class PsdPayload(
     val balloons: List<PsdText> = emptyList()
 )
 
+@ComplexObject(
+    id = "com.wip.psdbuilder.ExtractedText",
+    description = "Extracted text layer metadata from a PSD file",
+    version = 1
+)
 @Serializable
 data class ExtractedText(
     val text: String,
@@ -88,6 +97,11 @@ data class ExtractedText(
     val fontSize: Float? = null
 )
 
+@ComplexObject(
+    id = "com.wip.psdbuilder.PSDBuildResult",
+    description = "Result containing the path to a single generated PSD file",
+    version = 1
+)
 @Serializable
 data class PSDBuildResult(
     @CapabilityResult(
@@ -98,6 +112,11 @@ data class PSDBuildResult(
     val psdPath: String
 )
 
+@ComplexObject(
+    id = "com.wip.psdbuilder.ChapterPSDBuildResult",
+    description = "Result containing the list of paths to generated chapter PSD files",
+    version = 1
+)
 @Serializable
 data class ChapterPSDBuildResult(
     @CapabilityResult(
@@ -126,10 +145,17 @@ data class PSDBuilderSettings(
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "PSD Builder Native",
-    version = "5.1.3",
-    description = "A plugin that builds layered PSD files natively in Kotlin."
+    version = "5.2.0",
+    description = "A plugin that builds layered PSD files natively in Kotlin.",
+    supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
 class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) {
+
+    @PluginLoad
+    fun onLoad(logger: PluginLogger): Result<Unit> {
+        logger.info("Executing PluginLoad lifecycle hook for PSDBuilderPlugin...")
+        return Result.success(Unit)
+    }
     init {
         ImageIO.setUseCache(false)
         try {

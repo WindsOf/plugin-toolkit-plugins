@@ -2,7 +2,13 @@ package com.wip.common.models
 
 import kotlinx.serialization.Serializable
 import org.wip.plugintoolkit.api.annotations.CapabilityResult
+import org.wip.plugintoolkit.api.annotations.ComplexObject
 
+@ComplexObject(
+    id = "com.wip.common.models.OCRResult",
+    description = "Result of OCR text extraction with bounding boxes and page metadata",
+    version = 1
+)
 @Serializable
 data class OCRResult(
     @CapabilityResult(
@@ -12,7 +18,7 @@ data class OCRResult(
     val texts: List<String>,
     @CapabilityResult(
         name = "bounding box",
-        description = "(xmin, ymin, xmax, ymax), a list of lists of doubles representing the bounding box coordinates for each extracted text",
+        description = "(ymin, xmin, ymax, xmax), a list of lists of doubles representing the bounding box coordinates for each extracted text",
         semanticTypes = ["wom/bounding-box"]
     )
     val bb: List<List<Double>>,
@@ -33,6 +39,11 @@ data class OCRResult(
     val failedFiles: List<String>
 )
 
+@ComplexObject(
+    id = "com.wip.common.models.AdvancedOCRResult",
+    description = "Result of advanced OCR extraction with balloon and text bounding boxes, shape, and typography styles",
+    version = 1
+)
 @Serializable
 data class AdvancedOCRResult(
     @CapabilityResult(

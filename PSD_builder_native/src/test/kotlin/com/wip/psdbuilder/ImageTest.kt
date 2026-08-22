@@ -1,10 +1,16 @@
 package com.wip.psdbuilder
 
 import com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi
-import org.junit.Test
+import io.mockk.mockk
+import java.awt.Color
+import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
 import javax.imageio.spi.IIORegistry
+import kotlin.test.Test
+import kotlin.test.assertTrue
+import kotlinx.coroutines.runBlocking
+import org.wip.plugintoolkit.api.PluginContext
 
 class ImageTest {
     @Test
@@ -12,37 +18,47 @@ class ImageTest {
         val registry = IIORegistry.getDefaultInstance()
         registry.registerServiceProvider(WebPImageReaderSpi())
 
-        val files = listOf("1_upscaled.webp", "2_upscaled.webp", "3_upscaled.webp")
-        for (f in files) {
-            val file = File("C:/Users/sgroo/Desktop/testc/denoise/$f")
-            println("Reading $f")
+        val test2Dir = File("src/main/resources/test2")
+        val files = if (test2Dir.exists()) {
+            test2Dir.listFiles { _, name -> name.endsWith(".webp") && !name.contains("clean") }?.toList() ?: emptyList()
+        } else emptyList()
+
+        val imagesToTest = if (files.isNotEmpty()) {
+            files
+        } else {
+            // Generate temporary image if test2 resources are not present
+            val temp = File.createTempFile("test_sample", ".png")
+            temp.deleteOnExit()
+            val img = BufferedImage(200, 200, BufferedImage.TYPE_INT_RGB)
+            val g = img.createGraphics()
+            g.color = Color.RED
+            g.fillRect(0, 0, 200, 200)
+            g.dispose()
+            ImageIO.write(img, "png", temp)
+            listOf(temp)
+        }
+
+        val plugin = PSDBuilderPlugin()
+        val ctx = mockk<PluginContext>(relaxed = true)
+
+        for (file in imagesToTest) {
+            println("Reading ${file.name}")
             val img = ImageIO.read(file)
-            println("Width: ${img.width}, Height: ${img.height}")
-            val w = img.width
-            val h = img.height
-            val rgb = IntArray(w * h)
-            img.getRGB(0, 0, w, h, rgb, 0, w)
-            println("Got RGB successfully for $f")
-            
-            // Build PSD Object to see if it crashes
-            val plugin = PSDBuilderPlugin()
-            val ctx = io.mockk.mockk<org.wip.plugintoolkit.api.PluginContext>(relaxed = true)
-            
-            kotlinx.coroutines.runBlocking {
-                try {
-                    val psd = plugin.buildPsdObject(
-                        imagePath = file.absolutePath,
-                        texts = emptyList(),
-                        balloonBoxes = emptyList(),
-                        context = ctx
-                    )
-                    com.wip.kpsd.KPsd.write(psd, compress = false)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    throw e
-                }
+            assertTrue(img != null, "ImageIO should successfully read ${file.name}")
+            assertTrue(img.width > 0 && img.height > 0)
+
+            runBlocking {
+                val psd = plugin.buildPsdObject(
+                    imagePath = file.absolutePath,
+                    texts = listOf("Sample"),
+                    balloonBoxes = listOf(listOf(0.1, 0.1, 0.5, 0.5)),
+                    context = ctx
+                )
+                val psdBytes = com.wip.kpsd.KPsd.write(psd, compress = false)
+                assertTrue(psdBytes.isNotEmpty(), "Generated PSD bytes should not be empty")
             }
-            println("Successfully built and wrote PSD for $f")
+            println("Successfully built and wrote PSD for ${file.name}")
         }
     }
 }
+

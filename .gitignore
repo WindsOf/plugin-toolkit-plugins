@@ -3,6 +3,7 @@
 .gradle
 **/build/
 **/bin/
+*/venv312/*
 xcuserdata
 !src/**/build/
 local.properties

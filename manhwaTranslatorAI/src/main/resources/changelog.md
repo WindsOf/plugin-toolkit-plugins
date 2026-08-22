@@ -1,3 +1,12 @@
+Version: 1.4.0
+Date: 2026-08-22
+Added:
+  - Upgraded to plugin-api 2.0.0.
+  - Declared supported operating systems: WINDOWS, LINUX, MACOS.
+  - Implemented @PluginLoad lifecycle hook.
+  - Added new capability 'translate_ocr' to directly accept OCRResult and return translated OCRResult without friction.
+  - Added unit test suite.
+-------------------------------------------------------------------------------------------------
 Version: 1.3.10
 Date: 2026-07-14
 Added:

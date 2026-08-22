@@ -1,30 +1,36 @@
 package com.wip.slicer
 
+import com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi
+import java.awt.image.BufferedImage
+import java.io.File
+import javax.imageio.ImageIO
+import javax.imageio.spi.IIORegistry
+import kotlin.math.abs
+import kotlinx.io.asOutputStream
+import kotlinx.io.buffered
+import kotlinx.io.files.Path
+import kotlinx.io.files.SystemFileSystem
+import org.wip.plugintoolkit.api.HostFileSystem
+import org.wip.plugintoolkit.api.OS
 import org.wip.plugintoolkit.api.PluginContext
+import org.wip.plugintoolkit.api.PluginLogger
+import org.wip.plugintoolkit.api.ProgressReporter
 import org.wip.plugintoolkit.api.annotations.Capability
-import org.wip.plugintoolkit.api.annotations.PluginInfo
-import org.wip.plugintoolkit.api.annotations.CapabilityParam
 import org.wip.plugintoolkit.api.annotations.CapabilityInput
 import org.wip.plugintoolkit.api.annotations.CapabilityOutput
-import org.wip.plugintoolkit.api.HostFileSystem
-
-import kotlinx.io.asOutputStream
-import kotlinx.io.files.SystemFileSystem
-import kotlinx.io.files.Path
-import kotlinx.io.buffered
-import javax.imageio.ImageIO
-import kotlin.math.abs
-import java.awt.image.BufferedImage
-
-import com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi
-import org.wip.plugintoolkit.api.toRelativePath
-import javax.imageio.spi.IIORegistry
+import org.wip.plugintoolkit.api.annotations.CapabilityParam
+import org.wip.plugintoolkit.api.annotations.PluginInfo
+import org.wip.plugintoolkit.api.annotations.PluginLoad
+import org.wip.plugintoolkit.api.annotations.PluginSetup
+import org.wip.plugintoolkit.api.annotations.PluginUpdate
+import org.wip.plugintoolkit.api.annotations.PluginValidate
 
 @PluginInfo(
     id = "com.wip.slicer",
     name = "Slicer",
-    version = "1.1.7",
-    description = "A plugin that provides vertical images sliding capabilities for manhwa."
+    version = "1.2.0",
+    description = "A plugin that provides vertical images sliding capabilities for manhwa.",
+    supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
 class Slicer {
     init {
@@ -41,6 +47,30 @@ class Slicer {
         } catch (e: Exception) {
             // Ignore
         }
+    }
+
+    @PluginLoad
+    fun onLoad(logger: PluginLogger): Result<Unit> {
+        logger.info("Executing PluginLoad lifecycle hook for Slicer...")
+        return Result.success(Unit)
+    }
+
+    @PluginSetup
+    suspend fun setup(context: PluginContext): Result<Unit> {
+        context.logger.info("Slicer setup complete.")
+        return Result.success(Unit)
+    }
+
+    @PluginValidate
+    suspend fun validate(context: PluginContext): Result<Unit> {
+        context.logger.info("Slicer validation passed.")
+        return Result.success(Unit)
+    }
+
+    @PluginUpdate
+    suspend fun update(context: PluginContext): Result<Unit> {
+        context.logger.info("Slicer update complete.")
+        return Result.success(Unit)
     }
     @Capability(
         name = "slicer",
