@@ -40,6 +40,8 @@ class SlicerTest {
             assertTrue(slicer.setup(context).isSuccess)
             assertTrue(slicer.validate(context).isSuccess)
             assertTrue(slicer.update(context).isSuccess)
+            val locks = slicer.checkLocks(context)
+            assertTrue(locks.containsKey("model:yolo-det-x-best-v3"))
         }
     }
 

@@ -1,6 +1,7 @@
 package com.wip.ocrAI.models
 
 import org.wip.plugintoolkit.api.annotations.PluginSetting
+import org.wip.plugintoolkit.api.annotations.RequiresLock
 import org.wip.plugintoolkit.api.annotations.RequiresSetting
 
 data class OcrIASettings(
@@ -56,5 +57,9 @@ enum class AIModel(val id: String) {
     @RequiresSetting(["openAIApiKey"])
     GPT_4O("gpt-4o"),
     @RequiresSetting(["lmStudioModelName", "lmStudioApiKey", "lmStudioUrl"])
-    LM_STUDIO("lm-studio")
+    LM_STUDIO("lm-studio"),
+    @RequiresLock(locks = ["model:yolo-det-x-best-v3"])
+    ONNX_YOLO_DET_X("yolo-det-x-best-v3"),
+    @RequiresLock(locks = ["model:rfdetr-seg-2xlarge-ema-v3"])
+    ONNX_RFDETR_SEG_2XLARGE("rfdetr-seg-2xlarge-ema-v3")
 }

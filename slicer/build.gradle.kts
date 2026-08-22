@@ -23,6 +23,7 @@ dependencies {
     implementation(libs.kotlinx.io.core)
     implementation(libs.plugin.api)
     ksp(libs.plugin.api)
+    implementation(project(":common-models"))
     implementation("com.twelvemonkeys.imageio:imageio-webp:3.10.1")
 
     testImplementation(libs.kotlin.test)

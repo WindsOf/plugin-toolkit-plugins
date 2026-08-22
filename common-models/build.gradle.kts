@@ -17,10 +17,19 @@ kotlin {
 
 dependencies {
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.io.core)
     implementation(libs.plugin.api)
+    implementation(libs.onnxruntime.gpu)
+    implementation(libs.kaml)
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.cio)
+    implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.serialization.kotlinx.json)
 
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlin.test.junit)
+    testImplementation(libs.mockk)
 }
 
 tasks.test {

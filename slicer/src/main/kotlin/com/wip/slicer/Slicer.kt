@@ -10,6 +10,8 @@ import kotlinx.io.asOutputStream
 import kotlinx.io.buffered
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
+import com.wip.common.models.ModelCatalog
+import com.wip.common.models.ModelManager
 import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.OS
 import org.wip.plugintoolkit.api.PluginContext
@@ -19,8 +21,10 @@ import org.wip.plugintoolkit.api.annotations.Capability
 import org.wip.plugintoolkit.api.annotations.CapabilityInput
 import org.wip.plugintoolkit.api.annotations.CapabilityOutput
 import org.wip.plugintoolkit.api.annotations.CapabilityParam
+import org.wip.plugintoolkit.api.annotations.PluginAction
 import org.wip.plugintoolkit.api.annotations.PluginInfo
 import org.wip.plugintoolkit.api.annotations.PluginLoad
+import org.wip.plugintoolkit.api.annotations.PluginLocks
 import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
@@ -28,9 +32,9 @@ import org.wip.plugintoolkit.api.annotations.PluginValidate
 @PluginInfo(
     id = "com.wip.slicer",
     name = "Slicer",
-    version = "1.2.0",
+    version = "1.3.0",
     description = "A plugin that provides vertical images sliding capabilities for manhwa.",
-    supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
+    supportedOs = [OS.WINDOWS]
 )
 class Slicer {
     init {
@@ -53,6 +57,33 @@ class Slicer {
     fun onLoad(logger: PluginLogger): Result<Unit> {
         logger.info("Executing PluginLoad lifecycle hook for Slicer...")
         return Result.success(Unit)
+    }
+
+    @PluginLocks
+    suspend fun checkLocks(context: PluginContext): Map<String, Boolean> {
+        return ModelManager.Default.getLocksState(context.fileSystem)
+    }
+
+    @PluginAction(
+        name = "Download Model",
+        description = "Downloads a specific ONNX model and descriptor to local plugin storage"
+    )
+    suspend fun downloadModel(modelName: String, context: PluginContext) {
+        val result = ModelManager.Default.downloadModel(modelName, context)
+        if (result.isFailure) {
+            throw result.exceptionOrNull() ?: RuntimeException("Failed to download model $modelName")
+        }
+    }
+
+    @PluginAction(
+        name = "Download All Models",
+        description = "Downloads all required ONNX models and descriptors to local plugin storage"
+    )
+    suspend fun downloadAllModels(context: PluginContext) {
+        val result = ModelManager.Default.downloadAllModels(context)
+        if (result.isFailure) {
+            throw result.exceptionOrNull() ?: RuntimeException("Failed to download all models")
+        }
     }
 
     @PluginSetup

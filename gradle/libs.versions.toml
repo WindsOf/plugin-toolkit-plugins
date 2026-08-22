@@ -29,6 +29,8 @@ koog = "0.8.0"
 openpdf = "3.0.5"
 kpsd = "1.1.4"
 twelvemonkeys = "3.10.1"
+onnxruntime = "1.20.0"
+kaml = "0.67.0"
 
 
 
@@ -103,6 +105,10 @@ twelvemonkeys-webp = { module = "com.twelvemonkeys.imageio:imageio-webp", versio
 # Koog
 koog-agents = { module = "ai.koog:koog-agents-jvm", version.ref = "koog" }
 koog-google = { module = "ai.koog:prompt-executor-google-client-jvm", version.ref = "koog" }
+
+# ONNX Runtime & YAML
+onnxruntime-gpu = { module = "com.microsoft.onnxruntime:onnxruntime_gpu", version.ref = "onnxruntime" }
+kaml = { module = "com.charleskorn.kaml:kaml", version.ref = "kaml" }
 
 
 

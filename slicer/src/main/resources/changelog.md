@@ -1,3 +1,9 @@
+Version: 1.3.0
+Date: 2026-08-22
+Added:
+  - Integrated common ONNX model retrieval infrastructure via @PluginLocks and @PluginAction.
+  - Added downloadModel and downloadAllModels actions for YOLO v10 detection and RF-DETR segmentation models.
+-------------------------------------------------------------------------------------------------
 Version: 1.2.0
 Date: 2026-08-22
 Added:

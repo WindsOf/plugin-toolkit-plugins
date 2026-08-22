@@ -1,3 +1,17 @@
+Version: 1.3.0
+Date: 2026-08-22
+Added:
+  - Integrated common ONNX model retrieval infrastructure via @PluginLocks and @PluginAction.
+  - Added downloadModel and downloadAllModels actions for YOLO v10 detection and RF-DETR segmentation models.
+-------------------------------------------------------------------------------------------------
+Version: 1.2.0
+Date: 2026-08-22
+Added:
+  - Upgraded to plugin-api 2.0.0.
+  - Declared supported operating systems: WINDOWS, LINUX, MACOS.
+  - Implemented @PluginLoad, @PluginSetup, @PluginValidate, and @PluginUpdate lifecycle hooks.
+  - Added unit test suite covering slicing execution and lifecycle hooks.
+-------------------------------------------------------------------------------------------------
 Version: 1.1.7
 Date: 2026-07-13
 Added:

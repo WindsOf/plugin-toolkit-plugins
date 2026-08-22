@@ -192,6 +192,9 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
                 }
                 MultiLLMPromptExecutor(wrapperClient)
             }
+            AIModel.ONNX_YOLO_DET_X, AIModel.ONNX_RFDETR_SEG_2XLARGE -> {
+                throw UnsupportedOperationException("Local ONNX models are handled via OnnxInferenceEngine.")
+            }
         }
 
     private fun getProvider(model: AIModel): LLMProvider {
@@ -199,6 +202,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
             AIModel.GEMMA_26B, AIModel.GEMMA_31B, AIModel.GEMINI_1_5_PRO, AIModel.GEMINI_2_5_PRO, AIModel.GEMINI_3_1_FLASH_LITE -> LLMProvider.Google
             AIModel.CLAUDE_3_5_SONNET -> LLMProvider.Anthropic
             AIModel.GPT_4O, AIModel.LM_STUDIO -> LLMProvider.OpenAI
+            AIModel.ONNX_YOLO_DET_X, AIModel.ONNX_RFDETR_SEG_2XLARGE -> LLMProvider.Google
         }
     }
 

@@ -38,6 +38,8 @@ class OcrIATest {
         assertEquals("claude-3-5-sonnet-20241022", AIModel.CLAUDE_3_5_SONNET.id)
         assertEquals("gpt-4o", AIModel.GPT_4O.id)
         assertEquals("lm-studio", AIModel.LM_STUDIO.id)
+        assertEquals("yolo-det-x-best-v3", AIModel.ONNX_YOLO_DET_X.id)
+        assertEquals("rfdetr-seg-2xlarge-ema-v3", AIModel.ONNX_RFDETR_SEG_2XLARGE.id)
     }
 
     @Test
@@ -58,6 +60,10 @@ class OcrIATest {
 
             val validateResult = plugin.validate(context)
             assertTrue(validateResult.isSuccess)
+
+            val locks = plugin.checkLocks(context)
+            assertTrue(locks.containsKey("model:yolo-det-x-best-v3"))
+            assertTrue(locks.containsKey("model:rfdetr-seg-2xlarge-ema-v3"))
         }
     }
 }

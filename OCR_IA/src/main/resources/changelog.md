@@ -1,3 +1,10 @@
+Version: 2.6.0
+Date: 2026-08-22
+Added:
+  - Added support for local ONNX detection and segmentation models (YOLO v10 and RF-DETR).
+  - Integrated @RequiresLock on AIModel options to unlock models when downloaded.
+  - Implemented @PluginLocks checkLocks and @PluginAction downloadModel/downloadAllModels for retrieving ONNX models.
+-------------------------------------------------------------------------------------------------
 Version: 2.5.0
 Date: 2026-08-22
 Added:

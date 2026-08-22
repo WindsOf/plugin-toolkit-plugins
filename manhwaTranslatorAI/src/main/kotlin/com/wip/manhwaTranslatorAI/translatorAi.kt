@@ -67,7 +67,7 @@ enum class AIModel(val id: String) {
     name = "Manhwa Translator AI",
     version = "1.4.0",
     description = "Translate text from Manhwa/Manga into Italian using Google AI via Koog",
-    supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
+    supportedOs = [OS.WINDOWS]
 )
 class TranslatorAI(val settings: TranslatorAISettings) {
 

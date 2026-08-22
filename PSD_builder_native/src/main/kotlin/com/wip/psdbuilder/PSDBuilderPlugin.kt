@@ -25,6 +25,8 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import com.wip.common.models.ModelCatalog
+import com.wip.common.models.ModelManager
 import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.OS
 import org.wip.plugintoolkit.api.PluginContext
@@ -35,8 +37,10 @@ import org.wip.plugintoolkit.api.annotations.CapabilityOutput
 import org.wip.plugintoolkit.api.annotations.CapabilityParam
 import org.wip.plugintoolkit.api.annotations.CapabilityResult
 import org.wip.plugintoolkit.api.annotations.ComplexObject
+import org.wip.plugintoolkit.api.annotations.PluginAction
 import org.wip.plugintoolkit.api.annotations.PluginInfo
 import org.wip.plugintoolkit.api.annotations.PluginLoad
+import org.wip.plugintoolkit.api.annotations.PluginLocks
 import org.wip.plugintoolkit.api.annotations.PluginSetting
 import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
@@ -145,7 +149,7 @@ data class PSDBuilderSettings(
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "PSD Builder Native",
-    version = "5.2.0",
+    version = "5.3.0",
     description = "A plugin that builds layered PSD files natively in Kotlin.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
@@ -155,6 +159,33 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
     fun onLoad(logger: PluginLogger): Result<Unit> {
         logger.info("Executing PluginLoad lifecycle hook for PSDBuilderPlugin...")
         return Result.success(Unit)
+    }
+
+    @PluginLocks
+    suspend fun checkLocks(context: PluginContext): Map<String, Boolean> {
+        return ModelManager.Default.getLocksState(context.fileSystem)
+    }
+
+    @PluginAction(
+        name = "Download Model",
+        description = "Downloads a specific ONNX model and descriptor to local plugin storage"
+    )
+    suspend fun downloadModel(modelName: String, context: PluginContext) {
+        val result = ModelManager.Default.downloadModel(modelName, context)
+        if (result.isFailure) {
+            throw result.exceptionOrNull() ?: RuntimeException("Failed to download model $modelName")
+        }
+    }
+
+    @PluginAction(
+        name = "Download All Models",
+        description = "Downloads all required ONNX models and descriptors to local plugin storage"
+    )
+    suspend fun downloadAllModels(context: PluginContext) {
+        val result = ModelManager.Default.downloadAllModels(context)
+        if (result.isFailure) {
+            throw result.exceptionOrNull() ?: RuntimeException("Failed to download all models")
+        }
     }
     init {
         ImageIO.setUseCache(false)

@@ -1,6 +1,8 @@
 package com.wip.ocrAI
 
 import com.wip.common.models.AdvancedOCRResult
+import com.wip.common.models.ModelCatalog
+import com.wip.common.models.ModelManager
 import com.wip.common.models.OCRResult
 import com.wip.ocrAI.models.AIModel
 import com.wip.ocrAI.models.OcrIASettings
@@ -12,8 +14,10 @@ import org.wip.plugintoolkit.api.annotations.Capability
 import org.wip.plugintoolkit.api.annotations.CapabilityInput
 import org.wip.plugintoolkit.api.annotations.CapabilityOutput
 import org.wip.plugintoolkit.api.annotations.CapabilityParam
+import org.wip.plugintoolkit.api.annotations.PluginAction
 import org.wip.plugintoolkit.api.annotations.PluginInfo
 import org.wip.plugintoolkit.api.annotations.PluginLoad
+import org.wip.plugintoolkit.api.annotations.PluginLocks
 import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
@@ -21,9 +25,9 @@ import org.wip.plugintoolkit.api.annotations.PluginValidate
 @PluginInfo(
     id = "com.wip.ocr_ia",
     name = "OCR IA",
-    version = "2.5.0",
+    version = "2.6.0",
     description = "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog",
-    supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
+    supportedOs = [OS.WINDOWS]
 )
 class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
 
@@ -31,6 +35,33 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
     fun onLoad(logger: PluginLogger): Result<Unit> {
         logger.info("Executing PluginLoad lifecycle hook for OCR IA...")
         return Result.success(Unit)
+    }
+
+    @PluginLocks
+    suspend fun checkLocks(context: PluginContext): Map<String, Boolean> {
+        return ModelManager.Default.getLocksState(context.fileSystem)
+    }
+
+    @PluginAction(
+        name = "Download Model",
+        description = "Downloads a specific ONNX model and descriptor to local plugin storage"
+    )
+    suspend fun downloadModel(modelName: String, context: PluginContext) {
+        val result = ModelManager.Default.downloadModel(modelName, context)
+        if (result.isFailure) {
+            throw result.exceptionOrNull() ?: RuntimeException("Failed to download model $modelName")
+        }
+    }
+
+    @PluginAction(
+        name = "Download All Models",
+        description = "Downloads all required ONNX models and descriptors to local plugin storage"
+    )
+    suspend fun downloadAllModels(context: PluginContext) {
+        val result = ModelManager.Default.downloadAllModels(context)
+        if (result.isFailure) {
+            throw result.exceptionOrNull() ?: RuntimeException("Failed to download all models")
+        }
     }
     
     @Capability(
