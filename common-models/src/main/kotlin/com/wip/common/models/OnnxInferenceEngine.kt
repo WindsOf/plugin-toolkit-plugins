@@ -110,7 +110,7 @@ object OnnxInferenceEngine {
                             gpuOptions.addCUDA(0)
                             configured = true
                         } catch (t: Throwable) {
-                            logger?.warn("CUDA provider not available: ${t.message}")
+                            logger?.debug("CUDA provider registration failed: ${t.message}")
                         }
                     }
                     ExecutionDevice.DIRECT_ML -> {
@@ -118,7 +118,7 @@ object OnnxInferenceEngine {
                             gpuOptions.addDirectML(0)
                             configured = true
                         } catch (t: Throwable) {
-                            logger?.warn("DirectML provider not available: ${t.message}")
+                            logger?.debug("DirectML provider registration failed: ${t.message}")
                         }
                     }
                     ExecutionDevice.CORE_ML -> {
@@ -126,7 +126,7 @@ object OnnxInferenceEngine {
                             gpuOptions.addCoreML()
                             configured = true
                         } catch (t: Throwable) {
-                            logger?.warn("CoreML provider not available: ${t.message}")
+                            logger?.debug("CoreML provider registration failed: ${t.message}")
                         }
                     }
                     else -> {}
@@ -138,14 +138,18 @@ object OnnxInferenceEngine {
                     return OnnxInferenceSession(session, environment, device)
                 }
             } catch (t: Throwable) {
-                logger?.warn("Failed to initialize ONNX session with $device: ${t.message}. Attempting fallback...")
+                val errorMsg = t.message ?: t.toString()
+                if (device == ExecutionDevice.CUDA && errorMsg.contains("error 126")) {
+                    logger?.warn("CUDA GPU acceleration unavailable: Missing CUDA 12 runtime or cuDNN DLLs in PATH (cudart64_12.dll, cublas64_12.dll, cudnn64_9.dll).")
+                } else if (!errorMsg.contains("not compiled with")) {
+                    logger?.debug("Could not initialize session with $device: $errorMsg")
+                }
             }
         }
 
-        // Fallback to CPU
-        logger?.info("Falling back to CPU execution provider for ONNX session")
-        val fallbackOptions = OrtSession.SessionOptions()
-        val cpuSession = sessionCreator(fallbackOptions)
-        return OnnxInferenceSession(cpuSession, environment, ExecutionDevice.CPU)
+        logger?.info("Using CPU execution provider for ONNX session")
+        val cpuOptions = OrtSession.SessionOptions()
+        val session = sessionCreator(cpuOptions)
+        return OnnxInferenceSession(session, environment, ExecutionDevice.CPU)
     }
 }

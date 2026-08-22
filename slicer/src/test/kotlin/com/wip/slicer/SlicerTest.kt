@@ -93,4 +93,39 @@ class SlicerTest {
         val outputFiles = tempOutputDir.listFiles { _, name -> name.endsWith(".png") }
         assertTrue(outputFiles != null && outputFiles.isNotEmpty(), "Slicer should generate output slice images")
     }
+
+    @Test
+    fun testMaskForbiddenDetectionRows() {
+        val slicer = Slicer()
+        val rowVariances = MutableList(1000) { true }
+
+        val detections = listOf(
+            com.wip.common.models.DetectionBox(
+                label = "balloon",
+                confidence = 0.95,
+                ymin = 0.40,
+                xmin = 0.10,
+                ymax = 0.60,
+                xmax = 0.90
+            )
+        )
+
+        slicer.maskForbiddenDetectionRows(
+            usefulRowVarianceList = rowVariances,
+            detections = detections,
+            imageHeight = 1000,
+            yOffset = 0,
+            detectionMargin = 20
+        )
+
+        assertTrue(rowVariances[0])
+        assertTrue(rowVariances[379])
+
+        for (y in 380..620) {
+            kotlin.test.assertFalse(rowVariances[y], "Row $y should be forbidden for cutting")
+        }
+
+        assertTrue(rowVariances[621])
+        assertTrue(rowVariances[999])
+    }
 }

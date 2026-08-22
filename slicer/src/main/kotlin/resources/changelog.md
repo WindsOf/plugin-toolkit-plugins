@@ -1,3 +1,9 @@
+Version: 1.4.0
+Date: 2026-08-22
+Added:
+  - Added new Smart Slicer capability powered by YOLO object detection (yolo-det-x-best-v3) and SAHI sliding window.
+  - Automatically forbids cuts across detected speech balloons, text, and watermarks with configurable safety margin.
+-------------------------------------------------------------------------------------------------
 Version: 1.3.0
 Date: 2026-08-22
 Added:
