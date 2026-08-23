@@ -29,7 +29,7 @@ def run_command(command, cwd=None):
         del env["OPENSSL_CONF"]
 
     result = subprocess.run(
-        command, cwd=cwd, shell=True, capture_output=True, text=True, env=env
+        command, cwd=cwd, shell=False, capture_output=True, text=True, env=env
     )
     return result.returncode == 0, result.stdout, result.stderr
 

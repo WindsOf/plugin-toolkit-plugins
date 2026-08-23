@@ -82,6 +82,101 @@ class ModelManifestTest {
         assertEquals("model:rfdetr-seg-2xlarge-ema-v3", rfdetr.lockKey)
         assertEquals(ModelType.RFDETR_SEG, rfdetr.type)
 
-        assertEquals(2, ModelCatalog.ALL_MODELS.size)
+        val lama = ModelCatalog.findById("lama")
+        assertNotNull(lama)
+        assertEquals("model:big-lama", lama.lockKey)
+        assertEquals(ModelType.INPAINTING, lama.type)
+        assertEquals("https://www.windsofresub.cloud/models/big-lama.yaml", lama.yamlUrl)
+        assertEquals("https://www.windsofresub.cloud/models/big-lama.onnx", lama.onnxUrl)
+
+        val mat = ModelCatalog.findById("mat")
+        assertNotNull(mat)
+        assertEquals("model:Places_512_FullData_G", mat.lockKey)
+
+        val fcf = ModelCatalog.findById("fcf")
+        assertNotNull(fcf)
+        assertEquals("model:places_512_G", fcf.lockKey)
+
+        val zits = ModelCatalog.findById("zits")
+        assertNotNull(zits)
+        assertEquals("model:zits-inpaint-0717", zits.lockKey)
+
+        val diffusion = ModelCatalog.findById("ldm")
+        assertNotNull(diffusion)
+        assertEquals("model:diffusion", diffusion.lockKey)
+
+        assertEquals(9, ModelCatalog.ALL_MODELS.size)
+    }
+
+    @Test
+    fun testParseInpaintingYaml() {
+        val lamaYaml = """
+            model_type: lama
+            pipeline_type: single_pass
+            description: Resolution-robust Large Mask Inpainting with Fast Fourier Convolutions
+            repo: https://github.com/saic-mdal/lama
+            input_resolution:
+            - 512
+            - 512
+            dynamic_shape: true
+            norm_mode: zero_to_one
+            mask_mode: zero_to_one
+            input_names:
+            - image
+            - mask
+            output_names:
+            - output
+            opset_version: 17
+        """.trimIndent()
+
+        val spec = ModelSpec.parseFromYaml(lamaYaml)
+        assertEquals("lama", spec.effectiveType)
+        assertEquals("single_pass", spec.pipelineType)
+        assertEquals(ModelType.INPAINTING, spec.modelType)
+        assertEquals(512, spec.effectiveWidth)
+        assertEquals(512, spec.effectiveHeight)
+        assertTrue(spec.dynamicShape)
+        assertEquals(listOf("image", "mask"), spec.inputNames)
+        assertEquals(listOf("output"), spec.outputNames)
+    }
+
+    @Test
+    fun testParseDiffusionYaml() {
+        val diffYaml = """
+            model_type: ldm
+            pipeline_type: diffusion_pipeline
+            description: Latent Diffusion Models for High-Resolution Inpainting
+            repo: https://github.com/CompVis/latent-diffusion
+            input_resolution:
+            - 256
+            - 256
+            dynamic_shape: true
+            norm_mode: neg_one_to_one
+            mask_mode: zero_to_one
+            input_names:
+            - sample
+            - timestep_embed
+            - condition_concat
+            output_names:
+            - noise_pred
+            opset_version: 17
+            pipeline_config:
+              num_timesteps: 1000
+              default_inference_steps: 50
+              beta_schedule: linear
+              channels: 3
+              embed_dim: 256
+        """.trimIndent()
+
+        val spec = ModelSpec.parseFromYaml(diffYaml)
+        assertEquals("ldm", spec.effectiveType)
+        assertEquals("diffusion_pipeline", spec.pipelineType)
+        assertEquals(256, spec.effectiveWidth)
+        assertEquals(256, spec.effectiveHeight)
+        assertEquals(listOf("sample", "timestep_embed", "condition_concat"), spec.inputNames)
+        assertEquals(listOf("noise_pred"), spec.outputNames)
+        assertEquals(1000, spec.pipelineConfig.numTimesteps)
+        assertEquals(50, spec.pipelineConfig.defaultInferenceSteps)
+        assertEquals("linear", spec.pipelineConfig.betaSchedule)
     }
 }

@@ -47,11 +47,15 @@ class ModelManager(
         val Default = ModelManager()
 
         fun getModelYamlRelativePath(modelId: String): RelativePath {
-            return "$MODELS_DIR/${modelId.trim().lowercase()}.yaml".toRelativePath().getOrThrow()
+            val catalogEntry = ModelCatalog.findById(modelId)
+            val exactName = catalogEntry?.id ?: modelId.trim()
+            return "$MODELS_DIR/$exactName.yaml".toRelativePath().getOrThrow()
         }
 
         fun getModelOnnxRelativePath(modelId: String): RelativePath {
-            return "$MODELS_DIR/${modelId.trim().lowercase()}.onnx".toRelativePath().getOrThrow()
+            val catalogEntry = ModelCatalog.findById(modelId)
+            val exactName = catalogEntry?.id ?: modelId.trim()
+            return "$MODELS_DIR/$exactName.onnx".toRelativePath().getOrThrow()
         }
     }
 
@@ -61,7 +65,12 @@ class ModelManager(
     suspend fun isModelInstalled(modelId: String, fileSystem: PluginFileSystem): Boolean {
         val yamlRelPath = getModelYamlRelativePath(modelId)
         val onnxRelPath = getModelOnnxRelativePath(modelId)
-        return fileSystem.exists(yamlRelPath) && fileSystem.exists(onnxRelPath)
+        if (fileSystem.exists(yamlRelPath) && fileSystem.exists(onnxRelPath)) {
+            return true
+        }
+        val lowerYaml = "$MODELS_DIR/${modelId.trim().lowercase()}.yaml".toRelativePath().getOrNull()
+        val lowerOnnx = "$MODELS_DIR/${modelId.trim().lowercase()}.onnx".toRelativePath().getOrNull()
+        return lowerYaml != null && lowerOnnx != null && fileSystem.exists(lowerYaml) && fileSystem.exists(lowerOnnx)
     }
 
     /**
@@ -83,7 +92,14 @@ class ModelManager(
      */
     suspend fun getModelSpec(modelId: String, fileSystem: PluginFileSystem): ModelSpec? {
         val yamlRelPath = getModelYamlRelativePath(modelId)
-        val yamlText = fileSystem.readTextFile(yamlRelPath) ?: return null
+        var yamlText = fileSystem.readTextFile(yamlRelPath)
+        if (yamlText == null) {
+            val lowerYaml = "$MODELS_DIR/${modelId.trim().lowercase()}.yaml".toRelativePath().getOrNull()
+            if (lowerYaml != null) {
+                yamlText = fileSystem.readTextFile(lowerYaml)
+            }
+        }
+        if (yamlText == null) return null
         return try {
             ModelSpec.parseFromYaml(yamlText)
         } catch (e: Exception) {
@@ -96,7 +112,10 @@ class ModelManager(
      */
     suspend fun getModelBytes(modelId: String, fileSystem: PluginFileSystem): ByteArray? {
         val onnxRelPath = getModelOnnxRelativePath(modelId)
-        return fileSystem.readFile(onnxRelPath)
+        val bytes = fileSystem.readFile(onnxRelPath)
+        if (bytes != null && bytes.isNotEmpty()) return bytes
+        val lowerOnnx = "$MODELS_DIR/${modelId.trim().lowercase()}.onnx".toRelativePath().getOrNull() ?: return null
+        return fileSystem.readFile(lowerOnnx)
     }
 
     /**
@@ -104,7 +123,9 @@ class ModelManager(
      */
     fun getModelAbsolutePath(modelId: String, fileSystem: PluginFileSystem): String {
         val basePath = fileSystem.getBasePath().trimEnd('/', '\\')
-        return "$basePath/$MODELS_DIR/${modelId.trim().lowercase()}.onnx"
+        val catalogEntry = ModelCatalog.findById(modelId)
+        val exactName = catalogEntry?.id ?: modelId.trim()
+        return "$basePath/$MODELS_DIR/$exactName.onnx"
     }
 
     /**
@@ -194,19 +215,26 @@ class ModelManager(
     }
 
     /**
-     * Downloads all models registered in the catalog sequentially.
+     * Downloads a specific list of models by model ID sequentially.
      */
-    suspend fun downloadAllModels(context: PluginContext): Result<List<ModelSpec>> {
+    suspend fun downloadModels(modelIds: List<String>, context: PluginContext): Result<List<ModelSpec>> {
         val results = mutableListOf<ModelSpec>()
-        val total = ModelCatalog.ALL_MODELS.size
-        for ((index, entry) in ModelCatalog.ALL_MODELS.withIndex()) {
-            context.logger.info("Downloading model [${index + 1}/$total]: ${entry.id}")
-            val result = downloadModel(entry.id, context)
+        val total = modelIds.size
+        for ((index, id) in modelIds.withIndex()) {
+            context.logger.info("Downloading model [${index + 1}/$total]: $id")
+            val result = downloadModel(id, context)
             if (result.isFailure) {
-                return Result.failure(result.exceptionOrNull() ?: RuntimeException("Failed to download ${entry.id}"))
+                return Result.failure(result.exceptionOrNull() ?: RuntimeException("Failed to download $id"))
             }
             results.add(result.getOrThrow())
         }
         return Result.success(results)
+    }
+
+    /**
+     * Downloads all models registered in the catalog sequentially.
+     */
+    suspend fun downloadAllModels(context: PluginContext): Result<List<ModelSpec>> {
+        return downloadModels(ModelCatalog.ALL_MODELS.map { it.id }, context)
     }
 }

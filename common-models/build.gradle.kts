@@ -20,7 +20,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.io.core)
     implementation(libs.plugin.api)
-    implementation(libs.onnxruntime.gpu)
+    api(libs.onnxruntime.gpu)
     implementation(libs.kaml)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.cio)
