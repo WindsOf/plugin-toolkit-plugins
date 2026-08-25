@@ -10,18 +10,15 @@ from pathlib import Path
 def run_command(command, cwd=None):
     # Helper to find jarsigner if it's not in path but we know common JDK locations
     if command[0] == "jarsigner":
-        # Check if jarsigner is in PATH
-        if shutil.which("jarsigner") is None:
-            # Try common JDK locations
-            common_paths = [
-                r"C:\Program Files\Java\jdk-26\bin\jarsigner.exe",
-                r"C:\Program Files\Java\jdk-24\bin\jarsigner.exe",
-                r"C:\Program Files\Android\Android Studio\jbr\bin\jarsigner.exe"
-            ]
-            for p in common_paths:
-                if Path(p).exists():
-                    command[0] = p
-                    break
+        common_paths = [
+            r"C:\Program Files\Java\jdk-24\bin\jarsigner.exe",
+            r"C:\Program Files\Java\jdk-26\bin\jarsigner.exe",
+            r"C:\Program Files\Android\Android Studio\jbr\bin\jarsigner.exe"
+        ]
+        for p in common_paths:
+            if Path(p).exists():
+                command[0] = p
+                break
                     
     env = os.environ.copy()
     # Fix for broken OPENSSL_CONF on some systems

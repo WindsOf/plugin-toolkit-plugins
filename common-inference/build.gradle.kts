@@ -15,7 +15,21 @@ kotlin {
     }
 }
 
+val onnxVariant = providers.gradleProperty("onnxVariant").orElse("gpu").get().lowercase()
+val onnxDependency = if (onnxVariant == "cpu") {
+    libs.onnxruntime
+} else {
+    libs.onnxruntime.gpu
+}
+
 dependencies {
+    api(project(":common-models"))
+    api(onnxDependency)
+    implementation(libs.kaml)
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.cio)
+    implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.io.core)
@@ -28,4 +42,8 @@ dependencies {
 
 tasks.test {
     useJUnit()
+}
+
+tasks.jar {
+    isZip64 = true
 }

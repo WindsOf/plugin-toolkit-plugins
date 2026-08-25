@@ -62,13 +62,17 @@ class Slicer {
 
     @PluginLoad
     fun onLoad(logger: PluginLogger): Result<Unit> {
-        logger.info("Executing PluginLoad lifecycle hook for Slicer...")
+        logger.info("[Slicer] onLoad: Initializing Slicer...")
         return Result.success(Unit)
     }
 
     @PluginLocks
     suspend fun checkLocks(context: PluginContext): Map<String, Boolean> {
-        return ModelManager.Default.getLocksState(context.fileSystem)
+        val logger = context.logger
+        logger.info("[Slicer] checkLocks: Checking model locks...")
+        val locks = ModelManager.Default.getLocksState(context.fileSystem, logger)
+        logger.info("[Slicer] checkLocks: Locks check completed: $locks")
+        return locks
     }
 
     @PluginAction(
@@ -76,10 +80,14 @@ class Slicer {
         description = "Downloads a specific ONNX model and descriptor to local plugin storage"
     )
     suspend fun downloadModel(modelName: String, context: PluginContext) {
+        val logger = context.logger
+        logger.info("[Slicer] downloadModel action triggered for: $modelName")
         val result = ModelManager.Default.downloadModel(modelName, context)
         if (result.isFailure) {
+            logger.error("[Slicer] downloadModel action failed for $modelName: ${result.exceptionOrNull()?.message}")
             throw result.exceptionOrNull() ?: RuntimeException("Failed to download model $modelName")
         }
+        logger.info("[Slicer] downloadModel action succeeded for: $modelName")
     }
 
     @PluginAction(
@@ -87,27 +95,31 @@ class Slicer {
         description = "Downloads all required ONNX models and descriptors to local plugin storage"
     )
     suspend fun downloadAllModels(context: PluginContext) {
+        val logger = context.logger
+        logger.info("[Slicer] downloadAllModels action triggered")
         val result = ModelManager.Default.downloadAllModels(context)
         if (result.isFailure) {
+            logger.error("[Slicer] downloadAllModels action failed: ${result.exceptionOrNull()?.message}")
             throw result.exceptionOrNull() ?: RuntimeException("Failed to download all models")
         }
+        logger.info("[Slicer] downloadAllModels action succeeded")
     }
 
     @PluginSetup
     suspend fun setup(context: PluginContext): Result<Unit> {
-        context.logger.info("Slicer setup complete.")
+        context.logger.info("[Slicer] setup: Slicer setup complete.")
         return Result.success(Unit)
     }
 
     @PluginValidate
     suspend fun validate(context: PluginContext): Result<Unit> {
-        context.logger.info("Slicer validation passed.")
+        context.logger.info("[Slicer] validate: Slicer validation passed.")
         return Result.success(Unit)
     }
 
     @PluginUpdate
     suspend fun update(context: PluginContext): Result<Unit> {
-        context.logger.info("Slicer update complete.")
+        context.logger.info("[Slicer] update: Slicer update complete.")
         return Result.success(Unit)
     }
 
@@ -168,8 +180,6 @@ class Slicer {
         progressReporter.report(0.35f)
 
         // 2. Load ONNX model and run SAHI detection to mask forbidden rows
-        val modelBytes = ModelManager.Default.getModelBytes(ModelCatalog.YOLO_DET_X_ID, context.fileSystem)
-            ?: throw IllegalStateException("Detection model '${ModelCatalog.YOLO_DET_X_ID}' is not installed. Please run the download action.")
         val modelSpec = ModelManager.Default.getModelSpec(ModelCatalog.YOLO_DET_X_ID, context.fileSystem)
             ?: ModelSpec(
                 name = ModelCatalog.YOLO_DET_X_ID,
@@ -182,7 +192,8 @@ class Slicer {
                 classes = listOf("balloon", "text", "watermark")
             )
 
-        val session = OnnxInferenceEngine.createSession(modelBytes, preferredDevice = ExecutionDevice.AUTO, logger = logger)
+        val session = ModelManager.Default.createInferenceSession(ModelCatalog.YOLO_DET_X_ID, context.fileSystem, ExecutionDevice.AUTO, logger)
+            ?: throw IllegalStateException("Detection model '${ModelCatalog.YOLO_DET_X_ID}' is not installed. Please run the download action.")
         try {
             var currentYOffset = 0
             val sahiConfig = SahiConfig(

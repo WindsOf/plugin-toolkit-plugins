@@ -105,7 +105,86 @@ class ModelManifestTest {
         assertNotNull(diffusion)
         assertEquals("model:diffusion", diffusion.lockKey)
 
-        assertEquals(9, ModelCatalog.ALL_MODELS.size)
+        val ocr = ModelCatalog.findById("Unlimited-OCR")
+        assertNotNull(ocr)
+        assertEquals("model:Unlimited-OCR", ocr.lockKey)
+        assertEquals("https://www.windsofresub.cloud/models/Unlimited-OCR.yaml", ocr.yamlUrl)
+        assertEquals("https://www.windsofresub.cloud/models/Unlimited-OCR.onnx", ocr.onnxUrl)
+        assertEquals(ModelType.OCR, ocr.type)
+        assertEquals("onnx", ocr.format)
+
+        val ocrBf16 = ModelCatalog.findById("Unlimited-OCR-BF16")
+        assertNotNull(ocrBf16)
+        assertEquals("model:Unlimited-OCR-BF16", ocrBf16.lockKey)
+        assertEquals(ModelType.OCR, ocrBf16.type)
+        assertEquals("onnx", ocrBf16.format)
+
+        val ocrQ4 = ModelCatalog.findById("Unlimited-OCR-Q4_K_M")
+        assertNotNull(ocrQ4)
+        assertEquals(ModelType.OCR, ocrQ4.type)
+        assertEquals("gguf", ocrQ4.format)
+
+        val ocrIq2 = ModelCatalog.findById("Unlimited-OCR-IQ2_M")
+        assertNotNull(ocrIq2)
+        assertEquals(ModelType.OCR, ocrIq2.type)
+        assertEquals("gguf", ocrIq2.format)
+
+        assertEquals(13, ModelCatalog.ALL_MODELS.size)
+    }
+
+    @Test
+    fun testParseUnlimitedOcrBf16Yaml() {
+        val ocrYaml = """
+            name: Unlimited-OCR-BF16
+            display_name: Unlimited-OCR (BF16)
+            model_type: deepseek_ocr_decoder
+            format: onnx
+            onnx_file: Unlimited-OCR-BF16.onnx
+            data_file: Unlimited-OCR-BF16.onnx.data
+            external_data: true
+            vocab_size: 129280
+            hidden_size: 2048
+            num_layers: 24
+            dynamic_axes: true
+            classes:
+            - text
+        """.trimIndent()
+
+        val spec = ModelSpec.parseFromYaml(ocrYaml)
+        assertEquals("deepseek_ocr_decoder", spec.effectiveType)
+        assertEquals(ModelType.OCR, spec.modelType)
+        assertEquals("onnx", spec.format)
+        assertEquals("Unlimited-OCR-BF16.onnx", spec.onnxFile)
+        assertEquals("Unlimited-OCR-BF16.onnx.data", spec.dataFile)
+        assertTrue(spec.externalData)
+        assertEquals(129280, spec.vocabSize)
+        assertEquals(2048, spec.hiddenSize)
+        assertEquals(24, spec.numLayers)
+        assertTrue(spec.dynamicAxes)
+
+        val requiredFiles = spec.getRequiredFileNames("Unlimited-OCR-BF16")
+        assertEquals(listOf("Unlimited-OCR-BF16.onnx", "Unlimited-OCR-BF16.onnx.data"), requiredFiles)
+    }
+
+    @Test
+    fun testParseGgufYamlWithFilesMap() {
+        val ggufYaml = """
+            name: Unlimited-OCR-Q4_K_M
+            model_type: ocr
+            format: gguf
+            files:
+              model: Unlimited-OCR-Q4_K_M.gguf
+            vocab_size: 129280
+            hidden_size: 2048
+        """.trimIndent()
+
+        val spec = ModelSpec.parseFromYaml(ggufYaml)
+        assertEquals(ModelType.OCR, spec.modelType)
+        assertEquals("gguf", spec.format)
+        assertEquals(mapOf("model" to "Unlimited-OCR-Q4_K_M.gguf"), spec.files)
+
+        val requiredFiles = spec.getRequiredFileNames("Unlimited-OCR-Q4_K_M")
+        assertEquals(listOf("Unlimited-OCR-Q4_K_M.gguf"), requiredFiles)
     }
 
     @Test

@@ -19,4 +19,8 @@ A boolean setting (`false` by default). When enabled, the plugin draws its bound
 
 ## Usage
 
-When invoked via `buildPsdFromInputs` or `buildPsdForChapter`, the plugin handles the creation of a full PSD. It places text into a `"Testi"` folder, generates appropriate text layers with strokes/effects, and optionally applies the visual debug boxes if `debugMode` is enabled.
+When invoked via `buildPsdFromInputs`, `buildPsdFromOcrData`, `buildPsdFromAdvancedOcrData`, or `buildPsdForChapter`, the plugin handles the creation of a structured multi-layer PSD:
+- **`raw`**: Base original image layer at the bottom.
+- **`clean`**: Layer group containing the clean / inpainted image or patch layer (populated when `cleanImagePath` or `cleanFolder` is provided).
+- **`translation`**: Layer group containing all generated text layers with custom typography, auto-fitting, boundaries, and stroke effects.
+- If `debugMode` is enabled, visual debug bounding boxes are rendered directly on the base artwork.

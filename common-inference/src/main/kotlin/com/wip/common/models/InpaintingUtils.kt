@@ -1,6 +1,7 @@
 package com.wip.common.models
 
 import ai.onnxruntime.OnnxTensor
+import ai.onnxruntime.OrtSession
 import java.awt.Color
 import java.awt.Graphics2D
 import java.awt.Polygon
@@ -102,7 +103,6 @@ object InpaintingUtils {
             val yOffset = y * width
             for (x in 0 until width) {
                 if (srcPixels[yOffset + x] > 128) {
-                    // Spread to neighborhood
                     val yMin = max(0, y - radius)
                     val yMax = min(height - 1, y + radius)
                     val xMin = max(0, x - radius)
@@ -128,6 +128,7 @@ object InpaintingUtils {
 
     /**
      * Executes multi-step reverse diffusion sampling on a patch using an ONNX UNet diffusion model.
+     * Uses pre-allocated native direct off-heap FloatBuffers to eliminate JVM heap allocation and churn.
      */
     fun inpaintDiffusionPatch(
         session: OnnxInferenceSession,
@@ -162,7 +163,7 @@ object InpaintingUtils {
             alphasCumprod[i] = runningProd
         }
 
-        // Prepare condition_concat tensor [1, 4, H, W]
+        // Prepare condition_concat direct tensor [1, 4, H, W]
         val imgPixels = IntArray(targetW * targetH)
         resizedImg.getRGB(0, 0, targetW, targetH, imgPixels, 0, targetW)
 
@@ -170,7 +171,7 @@ object InpaintingUtils {
         resizedMask.raster.getSamples(0, 0, targetW, targetH, 0, maskPixels)
 
         val channelSize = targetW * targetH
-        val condBuffer = FloatBuffer.allocate(1 * 4 * targetH * targetW)
+        val condBuffer = ImageTensorUtils.allocateDirectFloatBuffer(1 * 4 * targetH * targetW)
 
         for (i in 0 until channelSize) {
             val isMasked = maskPixels[i] > 128
@@ -194,11 +195,15 @@ object InpaintingUtils {
         val condTensor = OnnxTensor.createTensor(session.environment, condBuffer, condShape)
 
         val rng = Random(42)
-        val sampleBuffer = FloatBuffer.allocate(1 * 3 * targetH * targetW)
+        // Pre-allocate ping-pong sample direct buffers and timestep embedding direct buffer
+        val sampleBufferA = ImageTensorUtils.allocateDirectFloatBuffer(1 * 3 * targetH * targetW)
+        val sampleBufferB = ImageTensorUtils.allocateDirectFloatBuffer(1 * 3 * targetH * targetW)
+        val tEmbedBuffer = ImageTensorUtils.allocateDirectFloatBuffer(embedDim)
+
         for (i in 0 until 3 * channelSize) {
-            sampleBuffer.put(i, rng.nextGaussian().toFloat())
+            sampleBufferA.put(i, rng.nextGaussian().toFloat())
         }
-        sampleBuffer.rewind()
+        sampleBufferA.rewind()
 
         val sampleInputName = if (spec.inputNames.isNotEmpty()) spec.inputNames[0] else "sample"
         val timestepInputName = if (spec.inputNames.size > 1) spec.inputNames[1] else "timestep_embed"
@@ -207,16 +212,22 @@ object InpaintingUtils {
         val stepStride = (totalTimesteps / steps).coerceAtLeast(1)
         val timePoints = (totalTimesteps - 1 downTo 0 step stepStride).toList()
 
-        var currentSample = sampleBuffer
+        var ping = true
+        val sampleShape = longArrayOf(1L, 3L, targetH.toLong(), targetW.toLong())
+        val tEmbedShape = longArrayOf(1L, embedDim.toLong())
+        val halfDim = embedDim / 2
+        val embFactor = (-ln(10000.0) / (halfDim - 1)).toFloat()
 
         try {
             for (t in timePoints) {
-                val sampleShape = longArrayOf(1L, 3L, targetH.toLong(), targetW.toLong())
+                val currentSample = if (ping) sampleBufferA else sampleBufferB
+                val nextSample = if (ping) sampleBufferB else sampleBufferA
+                currentSample.rewind()
+                nextSample.clear()
+
                 val sampleTensor = OnnxTensor.createTensor(session.environment, currentSample, sampleShape)
 
-                val tEmbedBuffer = FloatBuffer.allocate(embedDim)
-                val halfDim = embedDim / 2
-                val embFactor = (-ln(10000.0) / (halfDim - 1)).toFloat()
+                tEmbedBuffer.clear()
                 for (i in 0 until halfDim) {
                     val freq = exp((i * embFactor).toDouble()).toFloat()
                     val arg = t.toFloat() * freq
@@ -224,60 +235,64 @@ object InpaintingUtils {
                     tEmbedBuffer.put(halfDim + i, cos(arg.toDouble()).toFloat())
                 }
                 tEmbedBuffer.rewind()
-                val tEmbedTensor = OnnxTensor.createTensor(session.environment, tEmbedBuffer, longArrayOf(1L, embedDim.toLong()))
+                val tEmbedTensor = OnnxTensor.createTensor(session.environment, tEmbedBuffer, tEmbedShape)
 
-                val results = session.session.run(
-                    mapOf(
-                        sampleInputName to sampleTensor,
-                        timestepInputName to tEmbedTensor,
-                        condInputName to condTensor
+                var results: OrtSession.Result? = null
+                try {
+                    results = session.session.run(
+                        mapOf(
+                            sampleInputName to sampleTensor,
+                            timestepInputName to tEmbedTensor,
+                            condInputName to condTensor
+                        )
                     )
-                )
 
-                val noisePredTensor = results.get(0) as? OnnxTensor
-                    ?: results.firstOrNull { it.value is OnnxTensor }?.value as? OnnxTensor
+                    val noisePredTensor = results.get(0) as? OnnxTensor
+                        ?: results.firstOrNull { it.value is OnnxTensor }?.value as? OnnxTensor
 
-                if (noisePredTensor != null) {
-                    val noiseBuffer = noisePredTensor.floatBuffer
-                    val nextSampleBuffer = FloatBuffer.allocate(1 * 3 * targetH * targetW)
+                    if (noisePredTensor != null) {
+                        val noiseBuffer = noisePredTensor.floatBuffer
+                        val alphaT = alphas[t]
+                        val alphaBarT = alphasCumprod[t]
+                        val betaT = betas[t]
+                        val sqrtAlphaT = sqrt(alphaT.toDouble()).toFloat()
+                        val sqrtOneMinusAlphaBarT = sqrt((1.0f - alphaBarT).toDouble()).toFloat()
 
-                    val alphaT = alphas[t]
-                    val alphaBarT = alphasCumprod[t]
-                    val betaT = betas[t]
-                    val sqrtAlphaT = sqrt(alphaT.toDouble()).toFloat()
-                    val sqrtOneMinusAlphaBarT = sqrt((1.0f - alphaBarT).toDouble()).toFloat()
+                        for (i in 0 until 3 * channelSize) {
+                            val xt = currentSample.get(i)
+                            val eps = noiseBuffer.get(i)
+                            val mean = (xt - (betaT / sqrtOneMinusAlphaBarT) * eps) / sqrtAlphaT
 
-                    for (i in 0 until 3 * channelSize) {
-                        val xt = currentSample.get(i)
-                        val eps = noiseBuffer.get(i)
-                        val mean = (xt - (betaT / sqrtOneMinusAlphaBarT) * eps) / sqrtAlphaT
-
-                        val nextVal = if (t > 0) {
-                            val sigma = sqrt(betaT.toDouble()).toFloat()
-                            mean + sigma * rng.nextGaussian().toFloat()
-                        } else {
-                            mean
+                            val nextVal = if (t > 0) {
+                                val sigma = sqrt(betaT.toDouble()).toFloat()
+                                mean + sigma * rng.nextGaussian().toFloat()
+                            } else {
+                                mean
+                            }
+                            nextSample.put(i, nextVal.coerceIn(-1.0f, 1.0f))
                         }
-                        nextSampleBuffer.put(i, nextVal.coerceIn(-1.0f, 1.0f))
+                        nextSample.rewind()
+                        ping = !ping
                     }
-                    nextSampleBuffer.rewind()
-                    currentSample = nextSampleBuffer
+                } finally {
+                    results?.close()
+                    sampleTensor.close()
+                    tEmbedTensor.close()
                 }
-
-                results.close()
-                sampleTensor.close()
-                tEmbedTensor.close()
             }
         } finally {
             condTensor.close()
         }
 
+        val finalSample = if (ping) sampleBufferA else sampleBufferB
+        finalSample.rewind()
+
         val outImg = BufferedImage(targetW, targetH, BufferedImage.TYPE_INT_RGB)
         val outPixels = IntArray(targetW * targetH)
         for (i in 0 until channelSize) {
-            val r = (((currentSample.get(0 * channelSize + i) + 1.0f) * 127.5f).toInt()).coerceIn(0, 255)
-            val g = (((currentSample.get(1 * channelSize + i) + 1.0f) * 127.5f).toInt()).coerceIn(0, 255)
-            val b = (((currentSample.get(2 * channelSize + i) + 1.0f) * 127.5f).toInt()).coerceIn(0, 255)
+            val r = (((finalSample.get(0 * channelSize + i) + 1.0f) * 127.5f).toInt()).coerceIn(0, 255)
+            val g = (((finalSample.get(1 * channelSize + i) + 1.0f) * 127.5f).toInt()).coerceIn(0, 255)
+            val b = (((finalSample.get(2 * channelSize + i) + 1.0f) * 127.5f).toInt()).coerceIn(0, 255)
             outPixels[i] = (r shl 16) or (g shl 8) or b
         }
         outImg.setRGB(0, 0, targetW, targetH, outPixels, 0, targetW)
@@ -359,27 +374,30 @@ object InpaintingUtils {
                         spec.maskMode
                     )
 
-                    val results = session.session.run(mapOf(imgInputName to imgTensor, maskInputName to maskTensor))
-                    val outputTensor = results.get(0) as? OnnxTensor
-                        ?: results.firstOrNull { it.value is OnnxTensor }?.value as? OnnxTensor
+                    var results: OrtSession.Result? = null
+                    try {
+                        results = session.session.run(mapOf(imgInputName to imgTensor, maskInputName to maskTensor))
+                        val outputTensor = results.get(0) as? OnnxTensor
+                            ?: results.firstOrNull { it.value is OnnxTensor }?.value as? OnnxTensor
 
-                    if (outputTensor != null) {
-                        val rawCleaned = ImageTensorUtils.tensorToBufferedImage(outputTensor, spec.normMode)
-                        val cleanedPatch = ImageTensorUtils.resizeImage(rawCleaned, rw, rh)
+                        if (outputTensor != null) {
+                            val rawCleaned = ImageTensorUtils.tensorToBufferedImage(outputTensor, spec.normMode)
+                            val cleanedPatch = ImageTensorUtils.resizeImage(rawCleaned, rw, rh)
 
-                        val gPatch = outputImage.createGraphics()
-                        gPatch.drawImage(cleanedPatch, rx, ry, null)
-                        gPatch.dispose()
-                    } else {
-                        val cleanedPatch = inpaintPatchPureKotlin(patchImg, patchMask)
-                        val gPatch = outputImage.createGraphics()
-                        gPatch.drawImage(cleanedPatch, rx, ry, null)
-                        gPatch.dispose()
+                            val gPatch = outputImage.createGraphics()
+                            gPatch.drawImage(cleanedPatch, rx, ry, null)
+                            gPatch.dispose()
+                        } else {
+                            val cleanedPatch = inpaintPatchPureKotlin(patchImg, patchMask)
+                            val gPatch = outputImage.createGraphics()
+                            gPatch.drawImage(cleanedPatch, rx, ry, null)
+                            gPatch.dispose()
+                        }
+                    } finally {
+                        results?.close()
+                        imgTensor.close()
+                        maskTensor.close()
                     }
-
-                    results.close()
-                    imgTensor.close()
-                    maskTensor.close()
                 }
             } catch (e: Exception) {
                 val cleanedPatch = inpaintPatchPureKotlin(patchImg, patchMask)
@@ -405,13 +423,11 @@ object InpaintingUtils {
         val width = sourceImage.width
         val height = sourceImage.height
 
-        // Ensure ARGB for high precision processing
         val outputImage = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
         val g2d = outputImage.createGraphics()
         g2d.drawImage(sourceImage, 0, 0, null)
         g2d.dispose()
 
-        // Find connected mask bounding regions
         val maskRegions = findMaskBoundingBoxes(mask, roiPaddingPx)
         if (maskRegions.isEmpty()) {
             return outputImage
@@ -428,7 +444,6 @@ object InpaintingUtils {
 
             val cleanedPatch = inpaintPatchPureKotlin(patchImg, patchMask)
 
-            // Composite cleaned patch back into output image
             val gPatch = outputImage.createGraphics()
             gPatch.drawImage(cleanedPatch, rx, ry, null)
             gPatch.dispose()
@@ -438,8 +453,110 @@ object InpaintingUtils {
     }
 
     /**
+     * Inpaints only the segmented/masked regions and renders them onto an alpha-transparent canvas (TYPE_INT_ARGB).
+     * Non-inpainted background pixels remain completely transparent (alpha = 0).
+     * Inpainted regions are alpha-composited with soft edge feathering to allow seamless layer-based PSD / compositing workflows.
+     */
+    fun inpaintImageIsolated(
+        sourceImage: BufferedImage,
+        mask: BufferedImage,
+        session: OnnxInferenceSession? = null,
+        spec: ModelSpec? = null,
+        roiPaddingPx: Int = 24,
+        featherRadiusPx: Int = 2
+    ): BufferedImage {
+        val width = sourceImage.width
+        val height = sourceImage.height
+
+        val fullyCleaned = if (session != null && spec != null) {
+            inpaintWithOnnx(
+                sourceImage = sourceImage,
+                mask = mask,
+                session = session,
+                spec = spec,
+                roiPaddingPx = roiPaddingPx
+            )
+        } else {
+            inpaintImage(
+                sourceImage = sourceImage,
+                mask = mask,
+                roiPaddingPx = roiPaddingPx
+            )
+        }
+
+        val isolatedImage = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
+        val cleanedPixels = IntArray(width * height)
+        fullyCleaned.getRGB(0, 0, width, height, cleanedPixels, 0, width)
+
+        val maskRaster = mask.raster
+        val maskPixels = IntArray(width * height)
+        maskRaster.getSamples(0, 0, width, height, 0, maskPixels)
+
+        val alphaValues = IntArray(width * height)
+        for (i in 0 until width * height) {
+            if (maskPixels[i] > 128) {
+                alphaValues[i] = 255
+            }
+        }
+
+        val featheredAlpha = if (featherRadiusPx > 0) {
+            applyAlphaFeathering(alphaValues, width, height, featherRadiusPx)
+        } else {
+            alphaValues
+        }
+
+        val outPixels = IntArray(width * height)
+        for (i in 0 until width * height) {
+            val a = featheredAlpha[i].coerceIn(0, 255)
+            if (a > 0) {
+                val rgb = cleanedPixels[i] and 0x00FFFFFF
+                outPixels[i] = (a shl 24) or rgb
+            } else {
+                outPixels[i] = 0x00000000
+            }
+        }
+
+        isolatedImage.setRGB(0, 0, width, height, outPixels, 0, width)
+        return isolatedImage
+    }
+
+    private fun applyAlphaFeathering(alpha: IntArray, width: Int, height: Int, radius: Int): IntArray {
+        val blurred = IntArray(width * height)
+        val rSq = radius * radius
+        for (y in 0 until height) {
+            val yMin = max(0, y - radius)
+            val yMax = min(height - 1, y + radius)
+            for (x in 0 until width) {
+                val idx = y * width + x
+                if (alpha[idx] == 255) {
+                    blurred[idx] = 255
+                } else {
+                    val xMin = max(0, x - radius)
+                    val xMax = min(width - 1, x + radius)
+                    var count = 0
+                    var total = 0
+                    for (ny in yMin..yMax) {
+                        val dy = ny - y
+                        val nyOff = ny * width
+                        for (nx in xMin..xMax) {
+                            val dx = nx - x
+                            if (dx * dx + dy * dy <= rSq) {
+                                total += alpha[nyOff + nx]
+                                count++
+                            }
+                        }
+                    }
+                    blurred[idx] = if (count > 0) (total / count).coerceIn(0, 255) else 0
+                }
+            }
+        }
+        return blurred
+    }
+
+    /**
      * Pure Kotlin base inpainting algorithm for an individual patch.
-     * Uses Fast Marching border pixel distance weighting and edge-aware bilateral color propagation.
+     * Uses Fast Marching border pixel distance weighting and edge-aware bilateral color propagation
+     * with flat primitive arrays to prevent heap object allocations.
      */
     fun inpaintPatchPureKotlin(
         imagePatch: BufferedImage,
@@ -458,27 +575,40 @@ object InpaintingUtils {
 
         val isMasked = BooleanArray(w * h) { i -> maskPixels[i] > 128 }
 
-        // Find unmasked boundary pixels
-        data class BoundaryPixel(val x: Int, val y: Int, val r: Int, val g: Int, val b: Int)
-        val boundaryPixels = mutableListOf<BoundaryPixel>()
+        var bpCapacity = 1024
+        var bpCount = 0
+        var bpX = IntArray(bpCapacity)
+        var bpY = IntArray(bpCapacity)
+        var bpR = IntArray(bpCapacity)
+        var bpG = IntArray(bpCapacity)
+        var bpB = IntArray(bpCapacity)
 
         for (y in 0 until h) {
             val yOff = y * w
             for (x in 0 until w) {
                 val idx = yOff + x
                 if (!isMasked[idx]) {
-                    // Check if adjacent to a masked pixel
                     val hasMaskNeighbor = (x > 0 && isMasked[idx - 1]) ||
                             (x < w - 1 && isMasked[idx + 1]) ||
                             (y > 0 && isMasked[idx - w]) ||
                             (y < h - 1 && isMasked[idx + w])
 
                     if (hasMaskNeighbor) {
+                        if (bpCount >= bpCapacity) {
+                            bpCapacity *= 2
+                            bpX = bpX.copyOf(bpCapacity)
+                            bpY = bpY.copyOf(bpCapacity)
+                            bpR = bpR.copyOf(bpCapacity)
+                            bpG = bpG.copyOf(bpCapacity)
+                            bpB = bpB.copyOf(bpCapacity)
+                        }
                         val rgb = imgPixels[idx]
-                        val r = (rgb shr 16) and 0xFF
-                        val g = (rgb shr 8) and 0xFF
-                        val b = rgb and 0xFF
-                        boundaryPixels.add(BoundaryPixel(x, y, r, g, b))
+                        bpX[bpCount] = x
+                        bpY[bpCount] = y
+                        bpR[bpCount] = (rgb shr 16) and 0xFF
+                        bpG[bpCount] = (rgb shr 8) and 0xFF
+                        bpB[bpCount] = rgb and 0xFF
+                        bpCount++
                     }
                 }
             }
@@ -486,7 +616,10 @@ object InpaintingUtils {
 
         val outPixels = imgPixels.clone()
 
-        if (boundaryPixels.isNotEmpty()) {
+        if (bpCount > 0) {
+            // For dense boundary collections, subsample to maintain high responsiveness
+            val step = if (bpCount > 400) max(1, bpCount / 200) else 1
+
             for (y in 0 until h) {
                 val yOff = y * w
                 for (x in 0 until w) {
@@ -497,25 +630,27 @@ object InpaintingUtils {
                         var sumG = 0.0
                         var sumB = 0.0
 
-                        for (bp in boundaryPixels) {
-                            val dx = bp.x - x
-                            val dy = bp.y - y
+                        var k = 0
+                        while (k < bpCount) {
+                            val dx = bpX[k] - x
+                            val dy = bpY[k] - y
                             val distSq = (dx * dx + dy * dy).toDouble()
                             val dist = sqrt(distSq) + 0.1
 
-                            // Inverse distance squared weighting
                             val weight = 1.0 / (dist * dist)
                             sumWeight += weight
-                            sumR += bp.r * weight
-                            sumG += bp.g * weight
-                            sumB += bp.b * weight
+                            sumR += bpR[k] * weight
+                            sumG += bpG[k] * weight
+                            sumB += bpB[k] * weight
+                            k += step
                         }
 
-                        val finalR = (sumR / sumWeight).toInt().coerceIn(0, 255)
-                        val finalG = (sumG / sumWeight).toInt().coerceIn(0, 255)
-                        val finalB = (sumB / sumWeight).toInt().coerceIn(0, 255)
-
-                        outPixels[idx] = (finalR shl 16) or (finalG shl 8) or finalB
+                        if (sumWeight > 0.0) {
+                            val finalR = (sumR / sumWeight).toInt().coerceIn(0, 255)
+                            val finalG = (sumG / sumWeight).toInt().coerceIn(0, 255)
+                            val finalB = (sumB / sumWeight).toInt().coerceIn(0, 255)
+                            outPixels[idx] = (finalR shl 16) or (finalG shl 8) or finalB
+                        }
                     }
                 }
             }
@@ -527,6 +662,7 @@ object InpaintingUtils {
 
     /**
      * Finds disjoint bounding box clusters of white mask pixels to form isolated ROI patches.
+     * Uses a non-allocating stack with primitive coordinates for fast, memory-safe execution.
      */
     fun findMaskBoundingBoxes(mask: BufferedImage, padding: Int): List<SliceWindow> {
         val w = mask.width
@@ -539,41 +675,98 @@ object InpaintingUtils {
         val boundingBoxes = mutableListOf<SliceWindow>()
 
         val gridStep = 4 // coarse grid scan for efficiency
+        var stackCapacity = 2048
+        var stackSize = 0
+        var stackX = IntArray(stackCapacity)
+        var stackY = IntArray(stackCapacity)
+
         for (y in 0 until h step gridStep) {
             for (x in 0 until w step gridStep) {
                 val idx = y * w + x
                 if (maskPixels[idx] > 128 && !visited[idx]) {
-                    // Flood / extent search
                     var minX = x
                     var maxX = x
                     var minY = y
                     var maxY = y
 
-                    val stack = ArrayDeque<Pair<Int, Int>>()
-                    stack.add(Pair(x, y))
+                    // Push root
+                    stackX[0] = x
+                    stackY[0] = y
+                    stackSize = 1
                     visited[idx] = true
 
-                    while (stack.isNotEmpty()) {
-                        val (cx, cy) = stack.removeLast()
-                        minX = min(minX, cx)
-                        maxX = max(maxX, cx)
-                        minY = min(minY, cy)
-                        maxY = max(maxY, cy)
+                    while (stackSize > 0) {
+                        stackSize--
+                        val cx = stackX[stackSize]
+                        val cy = stackY[stackSize]
 
-                        val neighbors = listOf(
-                            Pair(cx - gridStep, cy),
-                            Pair(cx + gridStep, cy),
-                            Pair(cx, cy - gridStep),
-                            Pair(cx, cy + gridStep)
-                        )
+                        if (cx < minX) minX = cx
+                        if (cx > maxX) maxX = cx
+                        if (cy < minY) minY = cy
+                        if (cy > maxY) maxY = cy
 
-                        for ((nx, ny) in neighbors) {
-                            if (nx in 0 until w && ny in 0 until h) {
-                                val nIdx = ny * w + nx
-                                if (maskPixels[nIdx] > 128 && !visited[nIdx]) {
-                                    visited[nIdx] = true
-                                    stack.add(Pair(nx, ny))
+                        // Left
+                        val leftX = cx - gridStep
+                        if (leftX >= 0) {
+                            val nIdx = cy * w + leftX
+                            if (maskPixels[nIdx] > 128 && !visited[nIdx]) {
+                                visited[nIdx] = true
+                                if (stackSize >= stackCapacity) {
+                                    stackCapacity *= 2
+                                    stackX = stackX.copyOf(stackCapacity)
+                                    stackY = stackY.copyOf(stackCapacity)
                                 }
+                                stackX[stackSize] = leftX
+                                stackY[stackSize] = cy
+                                stackSize++
+                            }
+                        }
+                        // Right
+                        val rightX = cx + gridStep
+                        if (rightX < w) {
+                            val nIdx = cy * w + rightX
+                            if (maskPixels[nIdx] > 128 && !visited[nIdx]) {
+                                visited[nIdx] = true
+                                if (stackSize >= stackCapacity) {
+                                    stackCapacity *= 2
+                                    stackX = stackX.copyOf(stackCapacity)
+                                    stackY = stackY.copyOf(stackCapacity)
+                                }
+                                stackX[stackSize] = rightX
+                                stackY[stackSize] = cy
+                                stackSize++
+                            }
+                        }
+                        // Up
+                        val upY = cy - gridStep
+                        if (upY >= 0) {
+                            val nIdx = upY * w + cx
+                            if (maskPixels[nIdx] > 128 && !visited[nIdx]) {
+                                visited[nIdx] = true
+                                if (stackSize >= stackCapacity) {
+                                    stackCapacity *= 2
+                                    stackX = stackX.copyOf(stackCapacity)
+                                    stackY = stackY.copyOf(stackCapacity)
+                                }
+                                stackX[stackSize] = cx
+                                stackY[stackSize] = upY
+                                stackSize++
+                            }
+                        }
+                        // Down
+                        val downY = cy + gridStep
+                        if (downY < h) {
+                            val nIdx = downY * w + cx
+                            if (maskPixels[nIdx] > 128 && !visited[nIdx]) {
+                                visited[nIdx] = true
+                                if (stackSize >= stackCapacity) {
+                                    stackCapacity *= 2
+                                    stackX = stackX.copyOf(stackCapacity)
+                                    stackY = stackY.copyOf(stackCapacity)
+                                }
+                                stackX[stackSize] = cx
+                                stackY[stackSize] = downY
+                                stackSize++
                             }
                         }
                     }
@@ -626,7 +819,7 @@ object InpaintingUtils {
     }
 
     private fun intersects(a: SliceWindow, b: SliceWindow): Boolean {
-        return a.x < b.xmax && a.xmax > b.x && a.y < b.ymax && a.ymax > b.y
+        return a.x <= b.xmax && a.xmax >= b.x && a.y <= b.ymax && a.ymax >= b.y
     }
 
     private fun union(a: SliceWindow, b: SliceWindow): SliceWindow {

@@ -74,18 +74,22 @@ class VisionPlugin {
 
     @PluginLoad
     fun onLoad(logger: PluginLogger): Result<Unit> {
-        logger.info("Executing PluginLoad lifecycle hook for Vision Plugin...")
+        logger.info("[Vision] onLoad: Initializing Vision Plugin...")
         return Result.success(Unit)
     }
 
     @PluginLocks
     suspend fun checkLocks(context: PluginContext): Map<String, Boolean> {
+        val logger = context.logger
+        logger.info("[Vision] checkLocks: Checking vision model locks...")
         val locks = mutableMapOf<String, Boolean>()
         for (model in VisionModel.entries) {
-            val installed = ModelManager.Default.isModelInstalled(model.modelId, context.fileSystem)
+            val installed = ModelManager.Default.isModelInstalled(model.modelId, context.fileSystem, logger)
+            logger.info("[Vision] checkLocks: VisionModel ${model.name} (${model.modelId}) installed: $installed")
             locks["model:${model.modelId}"] = installed
             locks[model.modelId] = installed
         }
+        logger.info("[Vision] checkLocks: Completed vision locks check: $locks")
         return locks
     }
 
@@ -98,11 +102,15 @@ class VisionPlugin {
         model: VisionDownloadModel? = VisionDownloadModel.YOLO_DET_X,
         context: PluginContext
     ) {
+        val logger = context.logger
         val targetModel = model ?: VisionDownloadModel.YOLO_DET_X
+        logger.info("[Vision] downloadModel action triggered for: ${targetModel.name} (${targetModel.modelId})")
         val result = ModelManager.Default.downloadModel(targetModel.modelId, context)
         if (result.isFailure) {
+            logger.error("[Vision] downloadModel action failed for ${targetModel.modelId}: ${result.exceptionOrNull()?.message}")
             throw result.exceptionOrNull() ?: RuntimeException("Failed to download model ${targetModel.modelId}")
         }
+        logger.info("[Vision] downloadModel action succeeded for: ${targetModel.modelId}")
     }
 
     @PluginAction(
@@ -110,39 +118,48 @@ class VisionPlugin {
         description = "Downloads all required ONNX vision models and descriptors to local plugin storage"
     )
     suspend fun downloadAllModels(context: PluginContext) {
+        val logger = context.logger
+        logger.info("[Vision] downloadAllModels action triggered")
         val visionIds = VisionModel.entries.map { it.modelId }
         val result = ModelManager.Default.downloadModels(visionIds, context)
         if (result.isFailure) {
+            logger.error("[Vision] downloadAllModels action failed: ${result.exceptionOrNull()?.message}")
             throw result.exceptionOrNull() ?: RuntimeException("Failed to download all vision models")
         }
+        logger.info("[Vision] downloadAllModels action succeeded")
     }
 
     @PluginSetup
     suspend fun setup(context: PluginContext): Result<Unit> {
         val logger = context.logger
-        logger.info("Starting Vision Plugin setup...")
+        logger.info("[Vision] setup: Starting Vision Plugin setup...")
         return try {
-            val yoloInstalled = ModelManager.Default.isModelInstalled(ModelCatalog.YOLO_DET_X_ID, context.fileSystem)
-            val rfdetrInstalled = ModelManager.Default.isModelInstalled(ModelCatalog.RFDETR_SEG_2XLARGE_ID, context.fileSystem)
+            val yoloInstalled = ModelManager.Default.isModelInstalled(ModelCatalog.YOLO_DET_X_ID, context.fileSystem, logger)
+            val rfdetrInstalled = ModelManager.Default.isModelInstalled(ModelCatalog.RFDETR_SEG_2XLARGE_ID, context.fileSystem, logger)
+            logger.info("[Vision] setup: YOLO installed: $yoloInstalled, RF-DETR installed: $rfdetrInstalled")
 
             if (!yoloInstalled) {
-                logger.info("Downloading YOLO vision model...")
+                logger.info("[Vision] setup: Downloading YOLO vision model...")
                 val res = ModelManager.Default.downloadModel(ModelCatalog.YOLO_DET_X_ID, context)
                 if (res.isFailure) {
-                    logger.warn("YOLO download during setup did not complete: ${res.exceptionOrNull()?.message}")
+                    logger.warn("[Vision] setup: YOLO download during setup did not complete: ${res.exceptionOrNull()?.message}")
+                } else {
+                    logger.info("[Vision] setup: YOLO vision model downloaded successfully.")
                 }
             }
             if (!rfdetrInstalled) {
-                logger.info("Downloading RF-DETR vision model...")
+                logger.info("[Vision] setup: Downloading RF-DETR vision model...")
                 val res = ModelManager.Default.downloadModel(ModelCatalog.RFDETR_SEG_2XLARGE_ID, context)
                 if (res.isFailure) {
-                    logger.warn("RF-DETR download during setup did not complete: ${res.exceptionOrNull()?.message}")
+                    logger.warn("[Vision] setup: RF-DETR download during setup did not complete: ${res.exceptionOrNull()?.message}")
+                } else {
+                    logger.info("[Vision] setup: RF-DETR vision model downloaded successfully.")
                 }
             }
-            logger.info("Vision Plugin setup complete.")
+            logger.info("[Vision] setup: Vision Plugin setup complete.")
             Result.success(Unit)
         } catch (e: Exception) {
-            logger.warn("Setup encountered non-fatal error: ${e.message}")
+            logger.warn("[Vision] setup: Setup encountered non-fatal error: ${e.message}")
             Result.success(Unit)
         }
     }
@@ -150,22 +167,24 @@ class VisionPlugin {
     @PluginValidate
     suspend fun validate(context: PluginContext): Result<Unit> {
         val logger = context.logger
-        val yoloInstalled = ModelManager.Default.isModelInstalled(ModelCatalog.YOLO_DET_X_ID, context.fileSystem)
-        val rfdetrInstalled = ModelManager.Default.isModelInstalled(ModelCatalog.RFDETR_SEG_2XLARGE_ID, context.fileSystem)
+        logger.info("[Vision] validate: Validating Vision Plugin requirements...")
+        val yoloInstalled = ModelManager.Default.isModelInstalled(ModelCatalog.YOLO_DET_X_ID, context.fileSystem, logger)
+        val rfdetrInstalled = ModelManager.Default.isModelInstalled(ModelCatalog.RFDETR_SEG_2XLARGE_ID, context.fileSystem, logger)
+        logger.info("[Vision] validate: YOLO installed: $yoloInstalled, RF-DETR installed: $rfdetrInstalled")
 
         if (!yoloInstalled || !rfdetrInstalled) {
             val msg = "Vision models not yet downloaded (YOLO: $yoloInstalled, RF-DETR: $rfdetrInstalled). Please run setup or download actions."
-            logger.warn(msg)
+            logger.warn("[Vision] validate: Validation failed: $msg")
             return Result.failure(IllegalStateException(msg))
         }
 
-        logger.info("Vision Plugin validation passed - all required models installed.")
+        logger.info("[Vision] validate: Vision Plugin validation passed - all required models installed.")
         return Result.success(Unit)
     }
 
     @PluginUpdate
     suspend fun update(context: PluginContext): Result<Unit> {
-        context.logger.info("Vision Plugin update complete.")
+        context.logger.info("[Vision] update: Vision Plugin update complete.")
         return Result.success(Unit)
     }
 
@@ -207,7 +226,6 @@ class VisionPlugin {
 
         // 1. Stage 1: YOLO ROI Detection with SAHI
         val yoloModelId = ModelCatalog.YOLO_DET_X_ID
-        val yoloBytes = ModelManager.Default.getModelBytes(yoloModelId, context.fileSystem)
         val yoloSpec = ModelManager.Default.getModelSpec(yoloModelId, context.fileSystem)
             ?: ModelSpec(
                 name = yoloModelId,
@@ -220,8 +238,8 @@ class VisionPlugin {
                 classes = listOf("balloon", "text", "watermark")
             )
 
-        val candidateBoxes = if (yoloBytes != null && yoloBytes.isNotEmpty()) {
-            val yoloSession = OnnxInferenceEngine.createSession(yoloBytes, ExecutionDevice.AUTO, logger)
+        val yoloSession = ModelManager.Default.createInferenceSession(yoloModelId, context.fileSystem, ExecutionDevice.AUTO, logger)
+        val candidateBoxes = if (yoloSession != null) {
             try {
                 val sahiConfig = SahiConfig(
                     sliceWidth = yoloSpec.inputWidth,
@@ -247,7 +265,6 @@ class VisionPlugin {
 
         // 2. Stage 2: RF-DETR Segmentation on ROIs
         val rfdetrModelId = ModelCatalog.RFDETR_SEG_2XLARGE_ID
-        val rfdetrBytes = ModelManager.Default.getModelBytes(rfdetrModelId, context.fileSystem)
         val rfdetrSpec = ModelManager.Default.getModelSpec(rfdetrModelId, context.fileSystem)
             ?: ModelSpec(
                 name = rfdetrModelId,
@@ -262,97 +279,99 @@ class VisionPlugin {
 
         val finalObjects = mutableListOf<SegmentedObject>()
 
-        if (rfdetrBytes != null && rfdetrBytes.isNotEmpty() && candidateBoxes.isNotEmpty()) {
-            val rfdetrSession = OnnxInferenceEngine.createSession(rfdetrBytes, ExecutionDevice.AUTO, logger)
-            try {
-                val inputName = rfdetrSession.session.inputNames.iterator().next()
+        if (candidateBoxes.isNotEmpty()) {
+            val rfdetrSession = ModelManager.Default.createInferenceSession(rfdetrModelId, context.fileSystem, ExecutionDevice.AUTO, logger)
+            if (rfdetrSession != null) {
+                try {
+                    val inputName = rfdetrSession.session.inputNames.iterator().next()
 
-                for (box in candidateBoxes) {
-                    val margin = 0.05 // 5% context expansion
-                    val expXmin = (box.xmin - margin).coerceIn(0.0, 1.0)
-                    val expYmin = (box.ymin - margin).coerceIn(0.0, 1.0)
-                    val expXmax = (box.xmax + margin).coerceIn(0.0, 1.0)
-                    val expYmax = (box.ymax + margin).coerceIn(0.0, 1.0)
+                    for (box in candidateBoxes) {
+                        val margin = 0.05 // 5% context expansion
+                        val expXmin = (box.xmin - margin).coerceIn(0.0, 1.0)
+                        val expYmin = (box.ymin - margin).coerceIn(0.0, 1.0)
+                        val expXmax = (box.xmax + margin).coerceIn(0.0, 1.0)
+                        val expYmax = (box.ymax + margin).coerceIn(0.0, 1.0)
 
-                    val pxX = (expXmin * imgW).toInt().coerceIn(0, imgW - 1)
-                    val pxY = (expYmin * imgH).toInt().coerceIn(0, imgH - 1)
-                    val rawW = ((expXmax - expXmin) * imgW).toInt()
-                    val rawH = ((expYmax - expYmin) * imgH).toInt()
-                    val pxW = max(1, rawW).coerceIn(1, imgW - pxX)
-                    val pxH = max(1, rawH).coerceIn(1, imgH - pxY)
+                        val pxX = (expXmin * imgW).toInt().coerceIn(0, imgW - 1)
+                        val pxY = (expYmin * imgH).toInt().coerceIn(0, imgH - 1)
+                        val rawW = ((expXmax - expXmin) * imgW).toInt()
+                        val rawH = ((expYmax - expYmin) * imgH).toInt()
+                        val pxW = max(1, rawW).coerceIn(1, imgW - pxX)
+                        val pxH = max(1, rawH).coerceIn(1, imgH - pxY)
 
-                    val actualRoiXmin = pxX.toDouble() / imgW.toDouble()
-                    val actualRoiYmin = pxY.toDouble() / imgH.toDouble()
-                    val actualRoiXmax = (pxX + pxW).toDouble() / imgW.toDouble()
-                    val actualRoiYmax = (pxY + pxH).toDouble() / imgH.toDouble()
+                        val actualRoiXmin = pxX.toDouble() / imgW.toDouble()
+                        val actualRoiYmin = pxY.toDouble() / imgH.toDouble()
+                        val actualRoiXmax = (pxX + pxW).toDouble() / imgW.toDouble()
+                        val actualRoiYmax = (pxY + pxH).toDouble() / imgH.toDouble()
 
-                    val roiSubImage = baseImage.getSubimage(pxX, pxY, pxW, pxH)
-                    val tensor = ImageTensorUtils.createTensor(
-                        rfdetrSession.environment,
-                        roiSubImage,
-                        rfdetrSpec.inputWidth,
-                        rfdetrSpec.inputHeight
-                    )
-
-                    try {
-                        val sessionResult = rfdetrSession.session.run(mapOf(inputName to tensor))
-                        val localSegs = RfDetrPostprocessor.decodeOutputs(
-                            sessionResult,
-                            rfdetrSpec,
-                            segmentationScoreThreshold
+                        val roiSubImage = baseImage.getSubimage(pxX, pxY, pxW, pxH)
+                        val tensor = ImageTensorUtils.createTensor(
+                            rfdetrSession.environment,
+                            roiSubImage,
+                            rfdetrSpec.inputWidth,
+                            rfdetrSpec.inputHeight
                         )
-                        sessionResult.close()
 
-                        val roiBox = DetectionBox(
+                        try {
+                            val sessionResult = rfdetrSession.session.run(mapOf(inputName to tensor))
+                            val localSegs = RfDetrPostprocessor.decodeOutputs(
+                                sessionResult,
+                                rfdetrSpec,
+                                segmentationScoreThreshold
+                            )
+                            sessionResult.close()
+
+                            val roiBox = DetectionBox(
+                                label = box.label,
+                                confidence = box.confidence,
+                                ymin = actualRoiYmin,
+                                xmin = actualRoiXmin,
+                                ymax = actualRoiYmax,
+                                xmax = actualRoiXmax
+                            )
+
+                            if (localSegs.isNotEmpty()) {
+                                for (local in localSegs) {
+                                    finalObjects.add(RfDetrPostprocessor.remapRoiToGlobal(local, roiBox))
+                                }
+                            } else {
+                                // Fallback to bounding box contour if RF-DETR produced no local sub-segments
+                                val polygon = RfDetrPostprocessor.generateBoxPolygon(box.xmin, box.ymin, box.xmax, box.ymax)
+                                val area = (box.xmax - box.xmin) * (box.ymax - box.ymin)
+                                finalObjects.add(
+                                    SegmentedObject(
+                                        label = box.label,
+                                        confidence = box.confidence,
+                                        box = box,
+                                        polygon = polygon,
+                                        shape = "rectangular",
+                                        area = area
+                                    )
+                                )
+                            }
+                        } finally {
+                            tensor.close()
+                        }
+                    }
+                } finally {
+                    rfdetrSession.close()
+                }
+            } else {
+                // If RF-DETR model not downloaded, convert YOLO detection boxes to SegmentedObjects
+                for (box in candidateBoxes) {
+                    val polygon = RfDetrPostprocessor.generateBoxPolygon(box.xmin, box.ymin, box.xmax, box.ymax)
+                    val area = (box.xmax - box.xmin) * (box.ymax - box.ymin)
+                    finalObjects.add(
+                        SegmentedObject(
                             label = box.label,
                             confidence = box.confidence,
-                            ymin = actualRoiYmin,
-                            xmin = actualRoiXmin,
-                            ymax = actualRoiYmax,
-                            xmax = actualRoiXmax
+                            box = box,
+                            polygon = polygon,
+                            shape = "rectangular",
+                            area = area
                         )
-
-                        if (localSegs.isNotEmpty()) {
-                            for (local in localSegs) {
-                                finalObjects.add(RfDetrPostprocessor.remapRoiToGlobal(local, roiBox))
-                            }
-                        } else {
-                            // Fallback to bounding box contour if RF-DETR produced no local sub-segments
-                            val polygon = RfDetrPostprocessor.generateBoxPolygon(box.xmin, box.ymin, box.xmax, box.ymax)
-                            val area = (box.xmax - box.xmin) * (box.ymax - box.ymin)
-                            finalObjects.add(
-                                SegmentedObject(
-                                    label = box.label,
-                                    confidence = box.confidence,
-                                    box = box,
-                                    polygon = polygon,
-                                    shape = "rectangular",
-                                    area = area
-                                )
-                            )
-                        }
-                    } finally {
-                        tensor.close()
-                    }
-                }
-            } finally {
-                rfdetrSession.close()
-            }
-        } else {
-            // If RF-DETR model not downloaded, convert YOLO detection boxes to SegmentedObjects
-            for (box in candidateBoxes) {
-                val polygon = RfDetrPostprocessor.generateBoxPolygon(box.xmin, box.ymin, box.xmax, box.ymax)
-                val area = (box.xmax - box.xmin) * (box.ymax - box.ymin)
-                finalObjects.add(
-                    SegmentedObject(
-                        label = box.label,
-                        confidence = box.confidence,
-                        box = box,
-                        polygon = polygon,
-                        shape = "rectangular",
-                        area = area
                     )
-                )
+                }
             }
         }
 
@@ -477,8 +496,6 @@ class VisionPlugin {
             ?: throw IllegalArgumentException("Could not decode image: $imagePath")
 
         val yoloModelId = ModelCatalog.YOLO_DET_X_ID
-        val yoloBytes = ModelManager.Default.getModelBytes(yoloModelId, context.fileSystem)
-            ?: throw IllegalStateException("Model '$yoloModelId' is not installed.")
         val yoloSpec = ModelManager.Default.getModelSpec(yoloModelId, context.fileSystem)
             ?: ModelSpec(
                 name = yoloModelId,
@@ -491,7 +508,8 @@ class VisionPlugin {
                 classes = listOf("balloon", "text", "watermark")
             )
 
-        val session = OnnxInferenceEngine.createSession(yoloBytes, ExecutionDevice.AUTO, context.logger)
+        val session = ModelManager.Default.createInferenceSession(yoloModelId, context.fileSystem, ExecutionDevice.AUTO, context.logger)
+            ?: throw IllegalStateException("Model '$yoloModelId' is not installed or could not be loaded.")
         return try {
             val sahiConfig = SahiConfig(
                 sliceWidth = yoloSpec.inputWidth,

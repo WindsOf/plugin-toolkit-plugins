@@ -1,7 +1,9 @@
 Version: 2.6.0
-Date: 2026-08-22
+Date: 2026-08-25
 Added:
-  - Added support for local ONNX detection and segmentation models (YOLO v10 and RF-DETR).
+  - Implemented local ONNX inference runner (UnlimitedOcrRunner) for Baidu Unlimited-OCR and DeepSeek-OCR models.
+  - Added support for bounding box scaling, DeepSeek/Baidu tag parsing (<|ref|>, <|box|>, <|det|>), and JSON fallbacks.
+  - Resolved UnsupportedOperationException when selecting UNLIMITED_OCR in ocr and advanced_ocr capabilities.
   - Integrated @RequiresLock on AIModel options to unlock models when downloaded.
   - Implemented @PluginLocks checkLocks and @PluginAction downloadModel/downloadAllModels for retrieving ONNX models.
 -------------------------------------------------------------------------------------------------

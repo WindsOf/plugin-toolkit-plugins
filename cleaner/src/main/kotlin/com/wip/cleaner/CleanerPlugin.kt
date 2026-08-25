@@ -67,15 +67,18 @@ class CleanerPlugin {
 
     @PluginLoad
     fun onLoad(logger: PluginLogger): Result<Unit> {
-        logger.info("Executing PluginLoad lifecycle hook for Cleaner Plugin...")
+        logger.info("[Cleaner] onLoad: Initializing Cleaner Plugin...")
         return Result.success(Unit)
     }
 
     @PluginLocks
     suspend fun checkLocks(context: PluginContext): Map<String, Boolean> {
+        val logger = context.logger
+        logger.info("[Cleaner] checkLocks: Checking inpainting model locks...")
         val locks = mutableMapOf<String, Boolean>()
         for (model in InpaintingModel.entries) {
-            val installed = ModelManager.Default.isModelInstalled(model.modelId, context.fileSystem)
+            val installed = ModelManager.Default.isModelInstalled(model.modelId, context.fileSystem, logger)
+            logger.info("[Cleaner] checkLocks: InpaintingModel ${model.name} (${model.modelId}) installed: $installed")
             locks["model:${model.modelId}"] = installed
             locks[model.modelId] = installed
             locks["model:${model.modelId.lowercase()}"] = installed
@@ -87,39 +90,11 @@ class CleanerPlugin {
                     locks["model:big-lama"] = installed
                     locks["big-lama"] = installed
                 }
-                InpaintingModel.MAT -> {
-                    locks["model:mat"] = installed
-                    locks["mat"] = installed
-                    locks["model:Places_512_FullData_G"] = installed
-                    locks["Places_512_FullData_G"] = installed
-                    locks["model:places_512_fulldata_g"] = installed
-                    locks["places_512_fulldata_g"] = installed
-                }
                 InpaintingModel.MANGA -> {
                     locks["model:manga"] = installed
                     locks["manga"] = installed
                     locks["model:anime-manga-big-lama"] = installed
                     locks["anime-manga-big-lama"] = installed
-                }
-                InpaintingModel.LDM -> {
-                    locks["model:ldm"] = installed
-                    locks["ldm"] = installed
-                    locks["model:diffusion"] = installed
-                    locks["diffusion"] = installed
-                }
-                InpaintingModel.ZITS -> {
-                    locks["model:zits"] = installed
-                    locks["zits"] = installed
-                    locks["model:zits-inpaint-0717"] = installed
-                    locks["zits-inpaint-0717"] = installed
-                }
-                InpaintingModel.FCF -> {
-                    locks["model:fcf"] = installed
-                    locks["fcf"] = installed
-                    locks["model:places_512_G"] = installed
-                    locks["places_512_G"] = installed
-                    locks["model:places_512_g"] = installed
-                    locks["places_512_g"] = installed
                 }
                 InpaintingModel.MIGAN -> {
                     locks["model:migan"] = installed
@@ -129,6 +104,7 @@ class CleanerPlugin {
                 }
             }
         }
+        logger.info("[Cleaner] checkLocks: Completed inpainting locks check: $locks")
         return locks
     }
 
@@ -141,11 +117,15 @@ class CleanerPlugin {
         model: InpaintingDownloadModel? = InpaintingDownloadModel.LAMA,
         context: PluginContext
     ) {
+        val logger = context.logger
         val targetModel = model ?: InpaintingDownloadModel.LAMA
+        logger.info("[Cleaner] downloadModel action triggered for: ${targetModel.name} (${targetModel.modelId})")
         val result = ModelManager.Default.downloadModel(targetModel.modelId, context)
         if (result.isFailure) {
+            logger.error("[Cleaner] downloadModel action failed for ${targetModel.modelId}: ${result.exceptionOrNull()?.message}")
             throw result.exceptionOrNull() ?: RuntimeException("Failed to download model ${targetModel.modelId}")
         }
+        logger.info("[Cleaner] downloadModel action succeeded for: ${targetModel.modelId}")
     }
 
     @PluginAction(
@@ -153,30 +133,37 @@ class CleanerPlugin {
         description = "Downloads all required ONNX inpainting models to local plugin storage"
     )
     suspend fun downloadAllModels(context: PluginContext) {
+        val logger = context.logger
+        logger.info("[Cleaner] downloadAllModels action triggered")
         val inpaintingIds = InpaintingModel.entries.map { it.modelId }
         val result = ModelManager.Default.downloadModels(inpaintingIds, context)
         if (result.isFailure) {
+            logger.error("[Cleaner] downloadAllModels action failed: ${result.exceptionOrNull()?.message}")
             throw result.exceptionOrNull() ?: RuntimeException("Failed to download all inpainting models")
         }
+        logger.info("[Cleaner] downloadAllModels action succeeded")
     }
 
     @PluginSetup
     suspend fun setup(context: PluginContext): Result<Unit> {
         val logger = context.logger
-        logger.info("Starting Cleaner Plugin setup...")
+        logger.info("[Cleaner] setup: Starting Cleaner Plugin setup...")
         return try {
-            val lamaInstalled = ModelManager.Default.isModelInstalled(ModelCatalog.LAMA_ID, context.fileSystem)
+            val lamaInstalled = ModelManager.Default.isModelInstalled(ModelCatalog.LAMA_ID, context.fileSystem, logger)
+            logger.info("[Cleaner] setup: Default LaMa model installed status = $lamaInstalled")
             if (!lamaInstalled) {
-                logger.info("Downloading default LaMa inpainting model...")
+                logger.info("[Cleaner] setup: Default LaMa model not installed; downloading...")
                 val downloadRes = ModelManager.Default.downloadModel(ModelCatalog.LAMA_ID, context)
                 if (downloadRes.isFailure) {
-                    logger.warn("Model download during setup did not complete: ${downloadRes.exceptionOrNull()?.message}. Models can be retrieved via download actions.")
+                    logger.warn("[Cleaner] setup: Model download during setup did not complete: ${downloadRes.exceptionOrNull()?.message}. Models can be retrieved via download actions.")
+                } else {
+                    logger.info("[Cleaner] setup: Default LaMa model downloaded successfully.")
                 }
             }
-            logger.info("Cleaner Plugin setup complete.")
+            logger.info("[Cleaner] setup: Cleaner Plugin setup complete.")
             Result.success(Unit)
         } catch (e: Exception) {
-            logger.warn("Cleaner setup encountered non-fatal error: ${e.message}")
+            logger.warn("[Cleaner] setup: Cleaner setup encountered non-fatal error: ${e.message}")
             Result.success(Unit)
         }
     }
@@ -184,23 +171,26 @@ class CleanerPlugin {
     @PluginValidate
     suspend fun validate(context: PluginContext): Result<Unit> {
         val logger = context.logger
+        logger.info("[Cleaner] validate: Validating Cleaner Plugin requirements...")
         val anyInstalled = InpaintingModel.entries.any {
-            ModelManager.Default.isModelInstalled(it.modelId, context.fileSystem)
+            val isInst = ModelManager.Default.isModelInstalled(it.modelId, context.fileSystem, logger)
+            logger.info("[Cleaner] validate: Model ${it.name} (${it.modelId}) installed: $isInst")
+            isInst
         }
 
         if (!anyInstalled) {
-            val msg = "No inpainting models installed (LaMa, MAT, Manga, LDM, ZITS, FCF, MIGAN). Please download a model first."
-            logger.warn(msg)
+            val msg = "No inpainting models installed (LaMa, Manga, MIGAN). Please download a model first."
+            logger.warn("[Cleaner] validate: Validation failed: $msg")
             return Result.failure(IllegalStateException(msg))
         }
 
-        logger.info("Cleaner Plugin validation passed - at least one inpainting model is installed.")
+        logger.info("[Cleaner] validate: Cleaner Plugin validation passed - at least one inpainting model is installed.")
         return Result.success(Unit)
     }
 
     @PluginUpdate
     suspend fun update(context: PluginContext): Result<Unit> {
-        context.logger.info("Cleaner Plugin update complete.")
+        context.logger.info("[Cleaner] update: Cleaner Plugin update hook complete.")
         return Result.success(Unit)
     }
 
@@ -208,12 +198,6 @@ class CleanerPlugin {
         model: InpaintingModel,
         context: PluginContext
     ): Pair<OnnxInferenceSession, ModelSpec>? {
-        val bytes = ModelManager.Default.getModelBytes(model.modelId, context.fileSystem)
-        if (bytes == null || bytes.isEmpty()) {
-            context.logger.warn("ONNX model bytes not found for ${model.displayName} (${model.modelId}). Falling back to baseline pure inpainter.")
-            return null
-        }
-
         val spec = ModelManager.Default.getModelSpec(model.modelId, context.fileSystem)
             ?: ModelSpec(
                 modelTypeRaw = model.modelId,
@@ -222,15 +206,17 @@ class CleanerPlugin {
                 inputHeight = 512
             )
 
-        return try {
-            val session = OnnxInferenceEngine.createSession(
-                modelBytes = bytes,
-                preferredDevice = ExecutionDevice.AUTO,
-                logger = context.logger
-            )
+        val session = ModelManager.Default.createInferenceSession(
+            modelId = model.modelId,
+            fileSystem = context.fileSystem,
+            preferredDevice = ExecutionDevice.AUTO,
+            logger = context.logger
+        )
+
+        return if (session != null) {
             Pair(session, spec)
-        } catch (e: Exception) {
-            context.logger.warn("Failed to load ONNX inpainting session for ${model.displayName}: ${e.message}. Using baseline pure inpainter.")
+        } else {
+            context.logger.warn("ONNX model session could not be created for ${model.displayName} (${model.modelId}). Falling back to baseline pure inpainter.")
             null
         }
     }
@@ -244,6 +230,7 @@ class CleanerPlugin {
         targetClasses: List<String>,
         dilationRadius: Int,
         saveMask: Boolean,
+        isolatedRegionsOnly: Boolean,
         context: PluginContext,
         hostFs: HostFileSystem
     ): CleanerResult {
@@ -280,31 +267,45 @@ class CleanerPlugin {
             maskPath = maskFile.absolutePath
         }
 
-        // Run neural ONNX inpainting with fallback to pure Kotlin inpainting
-        val cleanedImage = if (sessionPair != null) {
-            InpaintingUtils.inpaintWithOnnx(
+        val cleanedImage = if (isolatedRegionsOnly) {
+            InpaintingUtils.inpaintImageIsolated(
                 sourceImage = baseImage,
                 mask = mask,
-                session = sessionPair.first,
-                spec = sessionPair.second,
-                roiPaddingPx = 24
+                session = sessionPair?.first,
+                spec = sessionPair?.second,
+                roiPaddingPx = 24,
+                featherRadiusPx = 2
             )
         } else {
-            InpaintingUtils.inpaintImage(baseImage, mask, roiPaddingPx = 24)
+            // Run neural ONNX inpainting with fallback to pure Kotlin inpainting
+            if (sessionPair != null) {
+                InpaintingUtils.inpaintWithOnnx(
+                    sourceImage = baseImage,
+                    mask = mask,
+                    session = sessionPair.first,
+                    spec = sessionPair.second,
+                    roiPaddingPx = 24
+                )
+            } else {
+                InpaintingUtils.inpaintImage(baseImage, mask, roiPaddingPx = 24)
+            }
         }
 
-        val outputFormat = if (inputFile.extension.lowercase() in setOf("jpg", "jpeg", "webp", "png")) {
+        val outputFormat = if (isolatedRegionsOnly) {
+            "png"
+        } else if (inputFile.extension.lowercase() in setOf("jpg", "jpeg", "webp", "png")) {
             inputFile.extension.lowercase()
         } else {
             "png"
         }
 
-        val outputFile = File(outDir, "${inputFile.nameWithoutExtension}.$outputFormat")
+        val suffix = if (isolatedRegionsOnly) "_patches" else ""
+        val outputFile = File(outDir, "${inputFile.nameWithoutExtension}$suffix.$outputFormat")
         withContext(Dispatchers.IO) {
             ImageIO.write(cleanedImage, outputFormat, outputFile)
         }
 
-        logger.info("Cleaning complete for $imagePath with ${model.displayName}. Cleaned ${textObjects.size} text instances -> ${outputFile.absolutePath}")
+        logger.info("Cleaning complete for $imagePath with ${model.displayName} (isolatedRegionsOnly=$isolatedRegionsOnly). Cleaned ${textObjects.size} text instances -> ${outputFile.absolutePath}")
 
         return CleanerResult(
             cleanedImagePath = outputFile.absolutePath,
@@ -323,7 +324,11 @@ class CleanerPlugin {
         imagePath: String,
         @CapabilityParam(description = "Segmentation result containing objects to inpaint")
         segmentationData: VisionResult,
-        @CapabilityOutput(description = "Directory to save cleaned image", semanticTypes = ["path/folder"])
+        @CapabilityOutput(
+            description = "Directory to save cleaned image",
+            autogeneratedPattern = "{imagePath}/clean_chapter/",
+            semanticTypes = ["path/folder"]
+        )
         outputDir: String,
         @CapabilityParam(description = "Inpainting model to use for background reconstruction", defaultValue = "\"LAMA\"")
         model: InpaintingModel = InpaintingModel.LAMA,
@@ -333,10 +338,12 @@ class CleanerPlugin {
         dilationRadius: Int = 3,
         @CapabilityParam(description = "Save the generated binary mask file alongside the cleaned image", defaultValue = "false")
         saveMask: Boolean = false,
+        @CapabilityParam(description = "Output only the isolated inpainted regions with transparency (PNG)", defaultValue = "false")
+        isolatedRegionsOnly: Boolean = false,
         context: PluginContext,
         hostFs: HostFileSystem
     ): CleanerResult {
-        context.logger.info("Starting Cleaner on image: $imagePath with model: ${model.displayName}. Targeting classes: $targetClasses")
+        context.logger.info("Starting Cleaner on image: $imagePath with model: ${model.displayName}. Targeting classes: $targetClasses, isolatedRegionsOnly: $isolatedRegionsOnly")
         val sessionPair = getInpaintingSession(model, context)
         return try {
             cleanImageInternal(
@@ -348,12 +355,52 @@ class CleanerPlugin {
                 targetClasses = targetClasses,
                 dilationRadius = dilationRadius,
                 saveMask = saveMask,
+                isolatedRegionsOnly = isolatedRegionsOnly,
                 context = context,
                 hostFs = hostFs
             )
         } finally {
             sessionPair?.first?.close()
         }
+    }
+
+    @Capability(
+        name = "Clean Image (Patches Only)",
+        description = "Inpaints segmented text regions and outputs only the reconstructed patches on a transparent PNG canvas"
+    )
+    @RequiresLock(locks = ["model:lama"])
+    suspend fun cleanImagePatchesOnly(
+        @CapabilityInput(description = "Path to the base image to clean", semanticTypes = ["path/file"])
+        imagePath: String,
+        @CapabilityParam(description = "Segmentation result containing objects to inpaint")
+        segmentationData: VisionResult,
+        @CapabilityOutput(
+            description = "Directory to save transparent patch image",
+            autogeneratedPattern = "{imagePath}/clean_chapter_patches/",
+            semanticTypes = ["path/folder"]
+        )
+        outputDir: String,
+        @CapabilityParam(description = "Inpainting model to use for background reconstruction", defaultValue = "\"LAMA\"")
+        model: InpaintingModel = InpaintingModel.LAMA,
+        @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
+        targetClasses: List<String> = listOf("text"),
+        @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
+        dilationRadius: Int = 3,
+        context: PluginContext,
+        hostFs: HostFileSystem
+    ): CleanerResult {
+        return cleanImage(
+            imagePath = imagePath,
+            segmentationData = segmentationData,
+            outputDir = outputDir,
+            model = model,
+            targetClasses = targetClasses,
+            dilationRadius = dilationRadius,
+            saveMask = false,
+            isolatedRegionsOnly = true,
+            context = context,
+            hostFs = hostFs
+        )
     }
 
     @Capability(
@@ -366,7 +413,11 @@ class CleanerPlugin {
         inputFolder: String,
         @CapabilityParam(description = "Chapter vision result containing segmentations for each page")
         chapterVisionResult: ChapterVisionResult,
-        @CapabilityOutput(description = "Directory to save cleaned chapter images", semanticTypes = ["path/folder"])
+        @CapabilityOutput(
+            description = "Directory to save cleaned chapter images",
+            autogeneratedPattern = "{inputFolder}/clean_chapter/",
+            semanticTypes = ["path/folder"]
+        )
         outputDir: String,
         @CapabilityParam(description = "Inpainting model to use", defaultValue = "\"LAMA\"")
         model: InpaintingModel = InpaintingModel.LAMA,
@@ -376,6 +427,8 @@ class CleanerPlugin {
         dilationRadius: Int = 3,
         @CapabilityParam(description = "Save generated binary masks", defaultValue = "false")
         saveMasks: Boolean = false,
+        @CapabilityParam(description = "Output only the isolated inpainted regions with transparency (PNG)", defaultValue = "false")
+        isolatedRegionsOnly: Boolean = false,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterCleanerResult {
@@ -399,7 +452,7 @@ class CleanerPlugin {
             throw IllegalArgumentException("No images found in folder: $inputFolder")
         }
 
-        logger.info("Starting Chapter Cleaner for ${imageFiles.size} images with model ${model.displayName}.")
+        logger.info("Starting Chapter Cleaner for ${imageFiles.size} images with model ${model.displayName} (isolatedRegionsOnly=$isolatedRegionsOnly).")
 
         val totalImages = imageFiles.size
         val results = mutableListOf<CleanerResult>()
@@ -423,6 +476,7 @@ class CleanerPlugin {
                     targetClasses = targetClasses,
                     dilationRadius = dilationRadius,
                     saveMask = saveMasks,
+                    isolatedRegionsOnly = isolatedRegionsOnly,
                     context = context,
                     hostFs = hostFs
                 )
@@ -442,6 +496,45 @@ class CleanerPlugin {
             cleanedImagePaths = cleanedPaths,
             maskPaths = maskPaths,
             totalCleanedPages = totalImages
+        )
+    }
+
+    @Capability(
+        name = "Clean Chapter (Patches Only)",
+        description = "Inpaints segmented text across an entire chapter and outputs only transparent PNG patch layers"
+    )
+    @RequiresLock(locks = ["model:lama"])
+    suspend fun cleanChapterPatchesOnly(
+        @CapabilityInput(description = "Path to folder containing original chapter images", semanticTypes = ["path/folder"])
+        inputFolder: String,
+        @CapabilityParam(description = "Chapter vision result containing segmentations for each page")
+        chapterVisionResult: ChapterVisionResult,
+        @CapabilityOutput(
+            description = "Directory to save transparent patch images",
+            autogeneratedPattern = "{inputFolder}/clean_chapter_patches/",
+            semanticTypes = ["path/folder"]
+        )
+        outputDir: String,
+        @CapabilityParam(description = "Inpainting model to use", defaultValue = "\"LAMA\"")
+        model: InpaintingModel = InpaintingModel.LAMA,
+        @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
+        targetClasses: List<String> = listOf("text"),
+        @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
+        dilationRadius: Int = 3,
+        context: PluginContext,
+        hostFs: HostFileSystem
+    ): ChapterCleanerResult {
+        return cleanChapter(
+            inputFolder = inputFolder,
+            chapterVisionResult = chapterVisionResult,
+            outputDir = outputDir,
+            model = model,
+            targetClasses = targetClasses,
+            dilationRadius = dilationRadius,
+            saveMasks = false,
+            isolatedRegionsOnly = true,
+            context = context,
+            hostFs = hostFs
         )
     }
 

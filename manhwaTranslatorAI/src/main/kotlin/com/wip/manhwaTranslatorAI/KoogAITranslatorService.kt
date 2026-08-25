@@ -124,7 +124,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
             MultiLLMPromptExecutor(wrapperClient)
         }
         else -> {
-            val key = settings.googleApiKey.ifBlank { System.getenv("API_KEY") ?: "" }
+            val key = (settings.googleApiKey ?: "").ifBlank { System.getenv("API_KEY") ?: "" }
             if (key.isBlank()) throw IllegalArgumentException("Google API Key not found.")
             MultiLLMPromptExecutor(GoogleLLMClient(apiKey = key, baseClient = createKoogHttpClient()))
         }

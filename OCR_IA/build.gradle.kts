@@ -25,7 +25,7 @@ dependencies {
     ksp(libs.plugin.api)
     implementation(libs.koog.agents)
     implementation(libs.koog.google)
-    implementation(project(":common-models"))
+    implementation(project(":common-inference"))
 
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlin.test.junit)
@@ -43,24 +43,28 @@ tasks.withType<ProcessResources> {
 }
 
 tasks.jar {
+    dependsOn(tasks.classes)
     dependsOn(configurations.runtimeClasspath)
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    isZip64 = true
 
     // Include all dependencies in the JAR except those provided by the host toolkit
     // Note: .filter is just to have a smaller jar, you can technically remove it for ease of configuration
     from(configurations.runtimeClasspath.get().filter { file ->
         val path = file.path
+        file.isFile &&
         !path.contains("plugin-api") &&
         !path.contains("kotlin-stdlib") &&
         !path.contains("kotlinx-coroutines") &&
         !path.contains("kotlinx-serialization") &&
         !path.contains("koin-core") &&
         !path.contains("slf4j")
-    }.map { if (it.isDirectory) it else zipTree(it) })
+    }.map { zipTree(it) })
 
     exclude("**/.venv/**")
     exclude("**/.env")
-    exclude("META-INF/*.RSA", "META-INF/*.SF", "META-INF/*.DSA")
+    exclude("**/*.pdb")
+    exclude("META-INF/*.RSA", "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.EC")
     exclude("META-INF/versions/**/module-info.class")
     exclude("module-info.class")
     exclude("META-INF/INDEX.LIST")

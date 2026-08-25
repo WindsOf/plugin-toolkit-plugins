@@ -110,4 +110,100 @@ class InpaintingUtilsTest {
         val boxes = InpaintingUtils.findMaskBoundingBoxes(mask, padding = 5)
         assertTrue(boxes.size in 1..2)
     }
+
+    @Test
+    fun testDenseMaskBoundingBoxesWithHundredsOfObjects() {
+        val mask = BufferedImage(800, 800, BufferedImage.TYPE_BYTE_GRAY)
+        val g = mask.createGraphics()
+        g.color = Color.BLACK
+        g.fillRect(0, 0, 800, 800)
+        g.color = Color.WHITE
+
+        // Draw 300 dense small text rectangles simulating Chapter Vision output
+        for (row in 0 until 15) {
+            for (col in 0 until 20) {
+                val x = 20 + col * 38
+                val y = 20 + row * 50
+                g.fillRect(x, y, 16, 12)
+            }
+        }
+        g.dispose()
+
+        val boxes = InpaintingUtils.findMaskBoundingBoxes(mask, padding = 4)
+        assertTrue(boxes.isNotEmpty(), "Bounding boxes should be extracted for dense objects")
+        assertTrue(boxes.size <= 300, "Boxes should be correctly clustered/merged")
+    }
+
+    @Test
+    fun testDirectFloatBufferAllocation() {
+        val buffer = ImageTensorUtils.allocateDirectFloatBuffer(1024)
+        assertTrue(buffer.isDirect, "Allocated FloatBuffer must be off-heap direct buffer")
+        assertEquals(1024, buffer.capacity())
+    }
+
+    @Test
+    fun testPureKotlinInpaintingHighDensityPatch() {
+        val patchImg = BufferedImage(150, 150, BufferedImage.TYPE_INT_RGB)
+        val gImg = patchImg.createGraphics()
+        gImg.color = Color.WHITE
+        gImg.fillRect(0, 0, 150, 150)
+        gImg.color = Color.BLACK
+        gImg.fillRect(30, 30, 90, 90)
+        gImg.dispose()
+
+        val patchMask = BufferedImage(150, 150, BufferedImage.TYPE_BYTE_GRAY)
+        val gMask = patchMask.createGraphics()
+        gMask.color = Color.BLACK
+        gMask.fillRect(0, 0, 150, 150)
+        gMask.color = Color.WHITE
+        gMask.fillRect(30, 30, 90, 90)
+        gMask.dispose()
+
+        val inpainted = InpaintingUtils.inpaintPatchPureKotlin(patchImg, patchMask)
+        assertNotNull(inpainted)
+        assertEquals(150, inpainted.width)
+        assertEquals(150, inpainted.height)
+
+        val centerRgb = inpainted.getRGB(75, 75)
+        val r = (centerRgb shr 16) and 0xFF
+        assertTrue(r > 200, "Reconstructed patch center should be restored to surrounding white color")
+    }
+
+    @Test
+    fun testInpaintImageIsolatedAlpha() {
+        val width = 100
+        val height = 100
+        val img = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+        val gImg = img.createGraphics()
+        gImg.color = Color.WHITE
+        gImg.fillRect(0, 0, width, height)
+        gImg.color = Color.RED
+        gImg.fillRect(30, 30, 40, 40)
+        gImg.dispose()
+
+        val mask = BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY)
+        val gMask = mask.createGraphics()
+        gMask.color = Color.BLACK
+        gMask.fillRect(0, 0, width, height)
+        gMask.color = Color.WHITE
+        gMask.fillRect(30, 30, 40, 40)
+        gMask.dispose()
+
+        val isolated = InpaintingUtils.inpaintImageIsolated(img, mask, roiPaddingPx = 10, featherRadiusPx = 2)
+        assertEquals(width, isolated.width)
+        assertEquals(height, isolated.height)
+
+        // Pixel outside mask (e.g. at 5, 5) -> alpha must be 0
+        val outRgb = isolated.getRGB(5, 5)
+        val outAlpha = (outRgb ushr 24) and 0xFF
+        assertEquals(0, outAlpha, "Pixel outside masked regions must have alpha = 0")
+
+        // Pixel inside mask (e.g. at 50, 50) -> alpha must be 255
+        val inRgb = isolated.getRGB(50, 50)
+        val inAlpha = (inRgb ushr 24) and 0xFF
+        assertEquals(255, inAlpha, "Pixel inside masked region must have alpha = 255")
+
+        val r = (inRgb shr 16) and 0xFF
+        assertTrue(r > 200, "Inpainted patch should be reconstructed white color")
+    }
 }

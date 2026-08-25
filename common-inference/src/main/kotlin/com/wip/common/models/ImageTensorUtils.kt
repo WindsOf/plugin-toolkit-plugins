@@ -5,12 +5,23 @@ import ai.onnxruntime.OrtEnvironment
 import java.awt.Graphics2D
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.FloatBuffer
 
 /**
  * Pure Kotlin/Java image preprocessing utilities for ONNX Runtime tensor construction.
  */
 object ImageTensorUtils {
+
+    /**
+     * Allocates a native direct [FloatBuffer] off-heap for zero-copy ONNX tensor transfer.
+     */
+    fun allocateDirectFloatBuffer(capacity: Int): FloatBuffer {
+        return ByteBuffer.allocateDirect(capacity * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+    }
 
     /**
      * Resizes a [BufferedImage] to the specified target dimensions.
@@ -29,12 +40,12 @@ object ImageTensorUtils {
     }
 
     /**
-     * Converts a [BufferedImage] into a planar FloatBuffer in NCHW format [1, 3, targetHeight, targetWidth]
+     * Converts a [BufferedImage] into a planar direct FloatBuffer in NCHW format [1, 3, targetHeight, targetWidth]
      * with RGB values normalized to [0.0f, 1.0f].
      */
     fun imageToFloatBuffer(source: BufferedImage, targetWidth: Int, targetHeight: Int): FloatBuffer {
         val resized = resizeImage(source, targetWidth, targetHeight)
-        val buffer = FloatBuffer.allocate(1 * 3 * targetHeight * targetWidth)
+        val buffer = allocateDirectFloatBuffer(1 * 3 * targetHeight * targetWidth)
 
         val pixels = IntArray(targetWidth * targetHeight)
         resized.getRGB(0, 0, targetWidth, targetHeight, pixels, 0, targetWidth)
@@ -84,7 +95,7 @@ object ImageTensorUtils {
         normMode: String = "zero_to_one"
     ): OnnxTensor {
         val resized = resizeImage(image, targetWidth, targetHeight)
-        val buffer = FloatBuffer.allocate(1 * 3 * targetHeight * targetWidth)
+        val buffer = allocateDirectFloatBuffer(1 * 3 * targetHeight * targetWidth)
         val pixels = IntArray(targetWidth * targetHeight)
         resized.getRGB(0, 0, targetWidth, targetHeight, pixels, 0, targetWidth)
 
@@ -126,7 +137,7 @@ object ImageTensorUtils {
         maskMode: String = "zero_to_one"
     ): OnnxTensor {
         val resized = resizeImage(mask, targetWidth, targetHeight)
-        val buffer = FloatBuffer.allocate(1 * 1 * targetHeight * targetWidth)
+        val buffer = allocateDirectFloatBuffer(1 * 1 * targetHeight * targetWidth)
         val pixels = IntArray(targetWidth * targetHeight)
         val raster = resized.raster
         raster.getSamples(0, 0, targetWidth, targetHeight, 0, pixels)

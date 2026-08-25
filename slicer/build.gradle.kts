@@ -23,7 +23,7 @@ dependencies {
     implementation(libs.kotlinx.io.core)
     implementation(libs.plugin.api)
     ksp(libs.plugin.api)
-    implementation(project(":common-models"))
+    implementation(project(":common-inference"))
     implementation("com.twelvemonkeys.imageio:imageio-webp:3.10.1")
 
     testImplementation(libs.kotlin.test)
@@ -35,9 +35,15 @@ tasks.test {
     useJUnit()
 }
 
+tasks.withType<ProcessResources> {
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+}
+
 tasks.jar {
+    dependsOn(tasks.classes)
     dependsOn(configurations.runtimeClasspath)
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    isZip64 = true
 
     from(configurations.runtimeClasspath.get().filter { file ->
         val path = file.path
@@ -49,14 +55,10 @@ tasks.jar {
         !path.contains("slf4j")
     }.map { if (it.isDirectory) it else zipTree(it) })
 
-    exclude("META-INF/*.RSA", "META-INF/*.SF", "META-INF/*.DSA")
+    exclude("**/*.pdb")
+    exclude("META-INF/*.RSA", "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.EC")
     exclude("META-INF/versions/**/module-info.class")
     exclude("module-info.class")
     exclude("META-INF/INDEX.LIST")
     exclude("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*")
-}
-
-
-tasks.withType<ProcessResources> {
-    duplicatesStrategy = DuplicatesStrategy.INCLUDE
 }

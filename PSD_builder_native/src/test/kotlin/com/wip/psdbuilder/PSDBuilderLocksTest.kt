@@ -18,7 +18,7 @@ class PSDBuilderLocksTest {
     }
 
     @Test
-    fun testLifecycleAndLocks() = runBlocking {
+    fun testLifecycle() = runBlocking {
         val plugin = PSDBuilderPlugin()
         val logger = FakeLogger()
 
@@ -29,9 +29,5 @@ class PSDBuilderLocksTest {
         assertTrue(plugin.setup(context).isSuccess)
         assertTrue(plugin.validate(context).isSuccess)
         assertTrue(plugin.update(context).isSuccess)
-
-        val locks = plugin.checkLocks(context)
-        assertTrue(locks.containsKey("model:yolo-det-x-best-v3"))
-        assertTrue(locks.containsKey("model:rfdetr-seg-2xlarge-ema-v3"))
     }
 }

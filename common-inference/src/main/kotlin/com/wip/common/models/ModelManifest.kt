@@ -15,6 +15,7 @@ enum class ModelType {
     YOLO_V10,
     RFDETR_SEG,
     INPAINTING,
+    OCR,
     UNKNOWN;
 
     companion object {
@@ -23,6 +24,7 @@ enum class ModelType {
                 "yolov10", "yolo_v10", "yolo" -> YOLO_V10
                 "rfdetr_seg", "rfdetr-seg", "rfdetr" -> RFDETR_SEG
                 "inpainting", "lama", "mat", "manga_inpainting" -> INPAINTING
+                "ocr", "deepseek_ocr", "deepseek_ocr_decoder", "unlimited_ocr", "unlimited-ocr" -> OCR
                 else -> UNKNOWN
             }
         }
@@ -54,9 +56,14 @@ data class TensorIoSpec(
     val shape: List<String> = emptyList(),
     @SerialName("type")
     val type: String = "float32",
+    @SerialName("dtype")
+    val dtype: String = "float32",
     @SerialName("description")
     val description: String = ""
-)
+) {
+    val effectiveType: String
+        get() = if (type.isNotBlank() && type != "float32") type else dtype
+}
 
 @Serializable
 data class ComponentSpec(
@@ -77,6 +84,8 @@ data class ModelSpec(
     val type: String = "",
     @SerialName("model_type")
     val modelTypeRaw: String = "",
+    @SerialName("format")
+    val format: String = "onnx",
     @SerialName("pipeline_type")
     val pipelineType: String = "single_pass",
     @SerialName("name")
@@ -85,10 +94,24 @@ data class ModelSpec(
     val displayName: String = "",
     @SerialName("model_path")
     val modelPath: String = "",
+    @SerialName("onnx_file")
+    val onnxFile: String = "",
+    @SerialName("data_file")
+    val dataFile: String = "",
+    @SerialName("gguf_file")
+    val ggufFile: String = "",
+    @SerialName("external_data")
+    val externalData: Boolean = false,
     @SerialName("description")
     val description: String = "",
     @SerialName("repo")
     val repo: String = "",
+    @SerialName("vocab_size")
+    val vocabSize: Int = 0,
+    @SerialName("hidden_size")
+    val hiddenSize: Int = 0,
+    @SerialName("num_layers")
+    val numLayers: Int = 0,
     @SerialName("input_width")
     val inputWidth: Int = 640,
     @SerialName("input_height")
@@ -97,6 +120,8 @@ data class ModelSpec(
     val inputResolution: List<Int> = emptyList(),
     @SerialName("dynamic_shape")
     val dynamicShape: Boolean = false,
+    @SerialName("dynamic_axes")
+    val dynamicAxes: Boolean = false,
     @SerialName("norm_mode")
     val normMode: String = "",
     @SerialName("mask_mode")
@@ -138,6 +163,29 @@ data class ModelSpec(
     val effectiveHeight: Int
         get() = if (inputResolution.size >= 2) inputResolution[1] else inputHeight
 
+    fun getRequiredFileNames(defaultModelId: String): List<String> {
+        val list = mutableListOf<String>()
+        if (files.isNotEmpty()) {
+            list.addAll(files.values)
+        } else {
+            if (onnxFile.isNotBlank()) list.add(onnxFile)
+            if (dataFile.isNotBlank()) list.add(dataFile)
+            if (ggufFile.isNotBlank()) list.add(ggufFile)
+            if (modelPath.isNotBlank()) list.add(modelPath)
+            if (list.isEmpty()) {
+                if (format.equals("gguf", ignoreCase = true)) {
+                    list.add("$defaultModelId.gguf")
+                } else {
+                    list.add("$defaultModelId.onnx")
+                    if (externalData) {
+                        list.add("$defaultModelId.onnx.data")
+                    }
+                }
+            }
+        }
+        return list.distinct()
+    }
+
     companion object {
         private val yamlParser = Yaml(
             configuration = YamlConfiguration(
@@ -162,14 +210,16 @@ data class ModelCatalogEntry(
     val id: String,
     val displayName: String,
     val yamlUrl: String,
-    val onnxUrl: String,
+    val onnxUrl: String = "",
     val lockKey: String,
     val description: String,
-    val type: ModelType
+    val type: ModelType,
+    val format: String = "onnx",
+    val extraFileUrls: Map<String, String> = emptyMap()
 )
 
 /**
- * Built-in catalog of known remote ONNX models.
+ * Built-in catalog of known remote models.
  */
 object ModelCatalog {
     const val YOLO_DET_X_ID = "yolo-det-x-best-v3"
@@ -181,6 +231,10 @@ object ModelCatalog {
     const val ZITS_ID = "zits-inpaint-0717"
     const val FCF_ID = "places_512_G"
     const val MIGAN_ID = "migan_traced"
+    const val UNLIMITED_OCR_ID = "Unlimited-OCR"
+    const val UNLIMITED_OCR_BF16_ID = "Unlimited-OCR-BF16"
+    const val UNLIMITED_OCR_Q4_K_M_ID = "Unlimited-OCR-Q4_K_M"
+    const val UNLIMITED_OCR_IQ2_M_ID = "Unlimited-OCR-IQ2_M"
 
     val YOLO_DET_X = ModelCatalogEntry(
         id = YOLO_DET_X_ID,
@@ -272,6 +326,50 @@ object ModelCatalog {
         type = ModelType.INPAINTING
     )
 
+    val UNLIMITED_OCR = ModelCatalogEntry(
+        id = UNLIMITED_OCR_ID,
+        displayName = "Unlimited-OCR",
+        yamlUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR.onnx",
+        lockKey = "model:$UNLIMITED_OCR_ID",
+        description = "Baidu Unlimited-OCR high-precision Vision-Language text extraction ONNX model with external data",
+        type = ModelType.OCR,
+        format = "onnx"
+    )
+
+    val UNLIMITED_OCR_BF16 = ModelCatalogEntry(
+        id = UNLIMITED_OCR_BF16_ID,
+        displayName = "Unlimited-OCR (BF16)",
+        yamlUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR-BF16.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR-BF16.onnx",
+        lockKey = "model:$UNLIMITED_OCR_BF16_ID",
+        description = "Baidu Unlimited-OCR high-precision Vision-Language text extraction model with external data",
+        type = ModelType.OCR,
+        format = "onnx"
+    )
+
+    val UNLIMITED_OCR_Q4_K_M = ModelCatalogEntry(
+        id = UNLIMITED_OCR_Q4_K_M_ID,
+        displayName = "Unlimited-OCR (Q4_K_M)",
+        yamlUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR-Q4_K_M.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR-Q4_K_M.gguf",
+        lockKey = "model:$UNLIMITED_OCR_Q4_K_M_ID",
+        description = "Baidu Unlimited-OCR 4-bit quantized GGUF model for low-VRAM environments",
+        type = ModelType.OCR,
+        format = "gguf"
+    )
+
+    val UNLIMITED_OCR_IQ2_M = ModelCatalogEntry(
+        id = UNLIMITED_OCR_IQ2_M_ID,
+        displayName = "Unlimited-OCR (IQ2_M)",
+        yamlUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR-IQ2_M.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR-IQ2_M.gguf",
+        lockKey = "model:$UNLIMITED_OCR_IQ2_M_ID",
+        description = "Baidu Unlimited-OCR 2-bit quantized GGUF model for ultra low-spec systems",
+        type = ModelType.OCR,
+        format = "gguf"
+    )
+
     val ALL_MODELS: List<ModelCatalogEntry> = listOf(
         YOLO_DET_X,
         RFDETR_SEG_2XLARGE,
@@ -281,7 +379,11 @@ object ModelCatalog {
         LDM,
         ZITS,
         FCF,
-        MIGAN
+        MIGAN,
+        UNLIMITED_OCR,
+        UNLIMITED_OCR_BF16,
+        UNLIMITED_OCR_Q4_K_M,
+        UNLIMITED_OCR_IQ2_M
     )
 
     fun findById(id: String): ModelCatalogEntry? {
@@ -301,7 +403,11 @@ object ModelCatalog {
             (clean == "zits-inpaint-0717" && it.id == ZITS_ID) ||
             (clean == "big-lama" && it.id == LAMA_ID) ||
             (clean == "anime-manga-big-lama" && it.id == MANGA_ID) ||
-            (clean == "migan_traced" && it.id == MIGAN_ID)
+            (clean == "migan_traced" && it.id == MIGAN_ID) ||
+            (clean == "unlimited-ocr" && it.id == UNLIMITED_OCR_ID) ||
+            (clean == "unlimited-ocr-bf16" && it.id == UNLIMITED_OCR_BF16_ID) ||
+            (clean == "unlimited-ocr-q4_k_m" && it.id == UNLIMITED_OCR_Q4_K_M_ID) ||
+            (clean == "unlimited-ocr-iq2_m" && it.id == UNLIMITED_OCR_IQ2_M_ID)
         }
     }
 
@@ -315,20 +421,8 @@ enum class InpaintingModel(val modelId: String, val displayName: String) {
     @RequiresLock(locks = ["model:lama"])
     LAMA("lama", "LaMa"),
 
-    @RequiresLock(locks = ["model:mat"])
-    MAT("mat", "MAT"),
-
     @RequiresLock(locks = ["model:manga"])
     MANGA("manga", "Manga"),
-
-    @RequiresLock(locks = ["model:ldm"])
-    LDM("ldm", "LDM"),
-
-    @RequiresLock(locks = ["model:zits"])
-    ZITS("zits", "ZITS"),
-
-    @RequiresLock(locks = ["model:fcf"])
-    FCF("fcf", "FCF"),
 
     @RequiresLock(locks = ["model:migan"])
     MIGAN("migan", "MIGAN")
@@ -344,42 +438,3 @@ enum class VisionModel(val modelId: String, val displayName: String) {
     @RequiresLock(locks = ["model:rfdetr-seg-2xlarge-ema-v3"])
     RFDETR_SEG_2XLARGE("rfdetr-seg-2xlarge-ema-v3", "RF-DETR Seg 2XLarge EMA v3")
 }
-
-/**
- * Detection result for a single detected bounding box.
- */
-@ComplexObject(
-    id = "com.wip.common.models.DetectionBox",
-    description = "A single detected box with label and confidence score",
-    version = 1
-)
-@Serializable
-data class DetectionBox(
-    @CapabilityResult(name = "label", description = "Class label of the detection")
-    val label: String,
-    @CapabilityResult(name = "confidence", description = "Detection confidence score between 0.0 and 1.0")
-    val confidence: Double,
-    @CapabilityResult(name = "ymin", description = "Normalized top coordinate")
-    val ymin: Double,
-    @CapabilityResult(name = "xmin", description = "Normalized left coordinate")
-    val xmin: Double,
-    @CapabilityResult(name = "ymax", description = "Normalized bottom coordinate")
-    val ymax: Double,
-    @CapabilityResult(name = "xmax", description = "Normalized right coordinate")
-    val xmax: Double
-)
-
-/**
- * Result collection of object detections for an image.
- */
-@ComplexObject(
-    id = "com.wip.common.models.DetectionResult",
-    description = "List of detections with coordinates and classes",
-    version = 1
-)
-@Serializable
-data class DetectionResult(
-    val boxes: List<DetectionBox>,
-    val imageWidth: Int,
-    val imageHeight: Int
-)

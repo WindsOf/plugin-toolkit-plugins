@@ -43,8 +43,10 @@ tasks.withType<ProcessResources> {
 }
 
 tasks.jar {
+    dependsOn(tasks.classes)
     dependsOn(configurations.runtimeClasspath)
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    isZip64 = true
 
     // Include all dependencies in the JAR except those provided by the host toolkit
     // Note: .filter is just to have a smaller jar, you can technically remove it for ease of configuration
@@ -60,7 +62,7 @@ tasks.jar {
 
     exclude("**/.venv/**")
     exclude("**/.env")
-    exclude("META-INF/*.RSA", "META-INF/*.SF", "META-INF/*.DSA")
+    exclude("META-INF/*.RSA", "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.EC")
     exclude("META-INF/versions/**/module-info.class")
     exclude("module-info.class")
     exclude("META-INF/INDEX.LIST")

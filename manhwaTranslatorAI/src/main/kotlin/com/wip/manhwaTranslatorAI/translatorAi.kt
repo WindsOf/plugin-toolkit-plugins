@@ -73,7 +73,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
 
     @PluginLoad
     fun onLoad(logger: PluginLogger): Result<Unit> {
-        logger.info("Executing PluginLoad lifecycle hook for Manhwa Translator AI...")
+        logger.info("[TranslatorAI] onLoad: Initializing Manhwa Translator AI (has googleApiKey: ${settings.googleApiKey.isNotBlank()}, useStructuredOutput: ${settings.useStructuredOutput}, lmStudioUrl: ${settings.lmStudioUrl})")
         return Result.success(Unit)
     }
 
@@ -337,19 +337,24 @@ class TranslatorAI(val settings: TranslatorAISettings) {
 
     @PluginSetup
     suspend fun setup(context: PluginContext): Result<Unit> {
-        context.logger.info("Manhwa Translator AI setup complete.")
+        val logger = context.logger
+        logger.info("[TranslatorAI] setup: Starting Manhwa Translator AI setup...")
+        logger.info("[TranslatorAI] setup: Setup completed successfully.")
         return Result.success(Unit)
     }
 
     @PluginUpdate
     suspend fun update(context: PluginContext): Result<Unit> {
-        context.logger.info("Manhwa Translator AI update complete.")
+        context.logger.info("[TranslatorAI] update: Manhwa Translator AI update complete.")
         return Result.success(Unit)
     }
 
     @PluginValidate
     suspend fun validate(context: PluginContext): Result<Unit> {
-        context.logger.info("Manhwa Translator AI validation passed.")
+        val logger = context.logger
+        logger.info("[TranslatorAI] validate: Validating Manhwa Translator AI requirements...")
+        logger.info("[TranslatorAI] validate: Google API Key configured: ${settings.googleApiKey.isNotBlank()}")
+        logger.info("[TranslatorAI] validate: Validation passed successfully.")
         return Result.success(Unit)
     }
 }

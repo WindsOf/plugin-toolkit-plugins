@@ -59,23 +59,15 @@ class CleanerPluginTest {
             val locks = cleaner.checkLocks(context)
             assertTrue(locks.containsKey("model:big-lama"))
             assertTrue(locks.containsKey("model:lama"))
-            assertTrue(locks.containsKey("model:Places_512_FullData_G"))
-            assertTrue(locks.containsKey("model:mat"))
             assertTrue(locks.containsKey("model:anime-manga-big-lama"))
             assertTrue(locks.containsKey("model:manga"))
-            assertTrue(locks.containsKey("model:diffusion"))
-            assertTrue(locks.containsKey("model:ldm"))
-            assertTrue(locks.containsKey("model:zits-inpaint-0717"))
-            assertTrue(locks.containsKey("model:zits"))
-            assertTrue(locks.containsKey("model:places_512_G"))
-            assertTrue(locks.containsKey("model:fcf"))
             assertTrue(locks.containsKey("model:migan_traced"))
             assertTrue(locks.containsKey("model:migan"))
         }
 
-        // Test validation failure when no models exist
         val missingFs = mockk<PluginFileSystem>(relaxed = true) {
             coEvery { exists(any()) } returns false
+            coEvery { readTextFile(any()) } returns null
         }
         val missingContext = mockk<PluginContext>(relaxed = true) {
             every { this@mockk.fileSystem } returns missingFs
@@ -263,6 +255,86 @@ class CleanerPluginTest {
             assertEquals(2, result.cleanedImagePaths.size)
             assertTrue(File(result.cleanedImagePaths[0]).exists())
             assertTrue(File(result.cleanedImagePaths[1]).exists())
+        }
+    }
+
+    @Test
+    fun testCleanImagePatchesOnly() {
+        val cleaner = CleanerPlugin()
+        val tempDir = File("build/tmp/test_clean_patches").apply {
+            if (exists()) deleteRecursively()
+            mkdirs()
+        }
+        val outDir = File(tempDir, "patches").apply { mkdirs() }
+
+        val testImage = File(tempDir, "page_001.png")
+        val img = BufferedImage(100, 100, BufferedImage.TYPE_INT_RGB)
+        val g = img.createGraphics()
+        g.color = Color.WHITE
+        g.fillRect(0, 0, 100, 100)
+        g.color = Color.RED
+        g.fillRect(20, 20, 30, 30) // Text region
+        g.dispose()
+        ImageIO.write(img, "png", testImage)
+
+        val textObj = SegmentedObject(
+            label = "text",
+            confidence = 0.98,
+            box = DetectionBox("text", 0.98, 0.2, 0.2, 0.5, 0.5),
+            polygon = listOf(
+                PolygonPoint(0.2, 0.2),
+                PolygonPoint(0.5, 0.2),
+                PolygonPoint(0.5, 0.5),
+                PolygonPoint(0.2, 0.5)
+            )
+        )
+
+        val vResult = VisionResult(
+            objects = listOf(textObj),
+            imageWidth = 100,
+            imageHeight = 100,
+            pageName = "page_001.png"
+        )
+
+        val logger = FakeLogger()
+        val progress = FakeProgress()
+        val pluginFs = mockk<PluginFileSystem>(relaxed = true) {
+            coEvery { readFile(any()) } returns null
+            coEvery { exists(any()) } returns false
+        }
+        val hostFs = mockk<HostFileSystem>(relaxed = true)
+
+        val context = mockk<PluginContext>(relaxed = true) {
+            every { this@mockk.logger } returns logger
+            every { this@mockk.progress } returns progress
+            every { this@mockk.fileSystem } returns pluginFs
+        }
+
+        runBlocking {
+            val result = cleaner.cleanImagePatchesOnly(
+                imagePath = testImage.absolutePath,
+                segmentationData = vResult,
+                outputDir = outDir.absolutePath,
+                targetClasses = listOf("text"),
+                dilationRadius = 2,
+                context = context,
+                hostFs = hostFs
+            )
+
+            assertTrue(File(result.cleanedImagePath).exists())
+            val patchImg = ImageIO.read(File(result.cleanedImagePath))
+            assertEquals(100, patchImg.width)
+            assertEquals(100, patchImg.height)
+
+            // Outside the text region (e.g. at 5, 5), pixel must be fully transparent (alpha == 0)
+            val outsidePixel = patchImg.getRGB(5, 5)
+            val outsideAlpha = (outsidePixel ushr 24) and 0xFF
+            assertEquals(0, outsideAlpha, "Outside pixel should be fully transparent")
+
+            // Inside the text region (e.g. at 30, 30), pixel must be non-transparent (alpha > 0)
+            val insidePixel = patchImg.getRGB(30, 30)
+            val insideAlpha = (insidePixel ushr 24) and 0xFF
+            assertTrue(insideAlpha > 0, "Inpainted patch pixel should be visible (alpha > 0)")
         }
     }
 }

@@ -55,9 +55,9 @@ class VisionPluginTest {
             assertTrue(locks.containsKey("model:rfdetr-seg-2xlarge-ema-v3"))
         }
 
-        // Test validation failure when models missing
         val missingFs = mockk<PluginFileSystem>(relaxed = true) {
             coEvery { exists(any()) } returns false
+            coEvery { readTextFile(any()) } returns null
         }
         val missingContext = mockk<PluginContext>(relaxed = true) {
             every { this@mockk.fileSystem } returns missingFs

@@ -192,7 +192,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
                 }
                 MultiLLMPromptExecutor(wrapperClient)
             }
-            AIModel.ONNX_YOLO_DET_X, AIModel.ONNX_RFDETR_SEG_2XLARGE -> {
+            AIModel.UNLIMITED_OCR -> {
                 throw UnsupportedOperationException("Local ONNX models are handled via OnnxInferenceEngine.")
             }
         }
@@ -202,7 +202,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
             AIModel.GEMMA_26B, AIModel.GEMMA_31B, AIModel.GEMINI_1_5_PRO, AIModel.GEMINI_2_5_PRO, AIModel.GEMINI_3_1_FLASH_LITE -> LLMProvider.Google
             AIModel.CLAUDE_3_5_SONNET -> LLMProvider.Anthropic
             AIModel.GPT_4O, AIModel.LM_STUDIO -> LLMProvider.OpenAI
-            AIModel.ONNX_YOLO_DET_X, AIModel.ONNX_RFDETR_SEG_2XLARGE -> LLMProvider.Google
+            AIModel.UNLIMITED_OCR -> LLMProvider.Google
         }
     }
 
@@ -241,6 +241,12 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
         saveThinking: Boolean,
         aiModel: AIModel
     ): OcrServiceResult {
+        if (aiModel == AIModel.UNLIMITED_OCR) {
+            val runner = UnlimitedOcrRunner(context, hostFs)
+            val res = runner.performOcr(input, save, outputDir, useStructuredOutput, saveThinking)
+            return OcrServiceResult(res.texts, res.bb, res.pageNumbers, res.pageNames, res.failedFiles)
+        }
+
         val files = resolveFiles(input)
         if (files.isEmpty()) {
             return OcrServiceResult(emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
@@ -382,6 +388,27 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
         saveThinking: Boolean,
         aiModel: AIModel
     ): AdvancedOcrServiceResult {
+        if (aiModel == AIModel.UNLIMITED_OCR) {
+            val runner = UnlimitedOcrRunner(context, hostFs)
+            val res = runner.performAdvancedOcr(input, save, outputDir, useStructuredOutput, saveThinking)
+            return AdvancedOcrServiceResult(
+                texts = res.texts,
+                balloonBoxes = res.balloonBoxes,
+                textBoxes = res.textBoxes,
+                shapes = res.shapes,
+                fontStyles = res.fontStyles,
+                fontFamilies = res.fontFamilies,
+                textAngles = res.textAngles,
+                isSparse = res.isSparse,
+                textColors = res.textColors,
+                hasBorder = res.hasBorder,
+                borderColors = res.borderColors,
+                pageNumbers = res.pageNumbers,
+                pageNames = res.pageNames,
+                failedFiles = res.failedFiles
+            )
+        }
+
         val files = resolveFiles(input)
         if (files.isEmpty()) {
             return AdvancedOcrServiceResult(

@@ -102,4 +102,88 @@ class ModelManagerTest {
         val path = manager.getModelAbsolutePath(ModelCatalog.YOLO_DET_X_ID, fs)
         assertTrue(path.endsWith("models/yolo-det-x-best-v3.onnx"))
     }
+
+    @Test
+    fun testCreateInferenceSessionReturnsNullForMissingModel() = runBlocking {
+        val fs = FakePluginFileSystem()
+        val manager = ModelManager.Default
+        val session = manager.createInferenceSession("non-existent-model", fs)
+        assertNull(session)
+    }
+
+    @Test
+    fun testMultiFileModelInstallation() = runBlocking {
+        val fs = FakePluginFileSystem()
+        val manager = ModelManager.Default
+
+        val yamlContent = """
+            name: Unlimited-OCR-BF16
+            model_type: ocr
+            format: onnx
+            onnx_file: Unlimited-OCR-BF16.onnx
+            data_file: Unlimited-OCR-BF16.onnx.data
+            external_data: true
+        """.trimIndent()
+
+        val yamlRelPath = ModelManager.getModelYamlRelativePath(ModelCatalog.UNLIMITED_OCR_BF16_ID)
+        val onnxRelPath = ModelManager.getModelFileRelativePath("Unlimited-OCR-BF16.onnx")
+        val dataRelPath = ModelManager.getModelFileRelativePath("Unlimited-OCR-BF16.onnx.data")
+
+        fs.writeTextFile(yamlRelPath, yamlContent)
+        fs.writeFile(onnxRelPath, byteArrayOf(1, 2, 3))
+
+        // When only .onnx exists but .onnx.data is missing, isModelInstalled should be false
+        assertFalse(manager.isModelInstalled(ModelCatalog.UNLIMITED_OCR_BF16_ID, fs))
+
+        // When .onnx.data is also created, isModelInstalled should become true
+        fs.writeFile(dataRelPath, byteArrayOf(4, 5, 6))
+        assertTrue(manager.isModelInstalled(ModelCatalog.UNLIMITED_OCR_BF16_ID, fs))
+    }
+
+    @Test
+    fun testGgufModelInstallation() = runBlocking {
+        val fs = FakePluginFileSystem()
+        val manager = ModelManager.Default
+
+        val yamlContent = """
+            name: Unlimited-OCR-Q4_K_M
+            model_type: ocr
+            format: gguf
+            gguf_file: Unlimited-OCR-Q4_K_M.gguf
+        """.trimIndent()
+
+        val yamlRelPath = ModelManager.getModelYamlRelativePath(ModelCatalog.UNLIMITED_OCR_Q4_K_M_ID)
+        val ggufRelPath = ModelManager.getModelFileRelativePath("Unlimited-OCR-Q4_K_M.gguf")
+
+        fs.writeTextFile(yamlRelPath, yamlContent)
+        fs.writeFile(ggufRelPath, byteArrayOf(10, 20, 30))
+        assertTrue(manager.isModelInstalled(ModelCatalog.UNLIMITED_OCR_Q4_K_M_ID, fs))
+    }
+
+    @Test
+    fun testDownloadModelSkipsIfAlreadyInstalled() = runBlocking {
+        val fs = FakePluginFileSystem()
+        val manager = ModelManager.Default
+
+        val yamlContent = """
+            type: yolov10
+            name: yolo-det-x-best-v3
+            display_name: Yolo-Det-X-Best-V3
+            model_path: yolo-det-x-best-v3.onnx
+            input_width: 640
+            input_height: 640
+            classes:
+            - balloon
+        """.trimIndent()
+
+        fs.writeTextFile(ModelManager.getModelYamlRelativePath(ModelCatalog.YOLO_DET_X_ID), yamlContent)
+        fs.writeFile(ModelManager.getModelOnnxRelativePath(ModelCatalog.YOLO_DET_X_ID), byteArrayOf(1, 2, 3, 4))
+
+        val context = io.mockk.mockk<org.wip.plugintoolkit.api.PluginContext>(relaxed = true)
+        io.mockk.every { context.fileSystem } returns fs
+
+        val result = manager.downloadModel(ModelCatalog.YOLO_DET_X_ID, context)
+        assertTrue(result.isSuccess)
+        assertEquals("yolo-det-x-best-v3", result.getOrNull()?.name)
+    }
 }
