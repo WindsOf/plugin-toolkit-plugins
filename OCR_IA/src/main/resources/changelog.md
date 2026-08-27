@@ -1,3 +1,13 @@
+Version: 2.7.0
+Date: 2026-08-27
+Added:
+  - Added 'Check Installed Models' action to scan plugin storage and report the exact installation status of all OCR models.
+  - Added 'Install Llama Server' action to download and install precompiled llama-server binaries (CUDA, Vulkan, CPU) locally and to the system PATH.
+  - Added 'Detect Llama Server' action to automatically discover existing llama-server installations across system PATH, standard directories, and plugin storage.
+  - Updated AIModel capability dropdown to cleanly expose individual GGUF quantized models (UNLIMITED_OCR_BF16, UNLIMITED_OCR_Q8_0, UNLIMITED_OCR_Q4_K_M, UNLIMITED_OCR_IQ2_M) and removed obsolete UNLIMITED_OCR entry.
+  - Fixed model lock evaluation in ModelManager to strictly inspect plugin storage, preventing external LM Studio models from unlocking uninstalled plugin models.
+  - Enhanced lock resolution in checkLocks to populate all casing variants ensuring UI unlocks trigger reliably upon model download.
+-------------------------------------------------------------------------------------------------
 Version: 2.6.0
 Date: 2026-08-25
 Added:

@@ -100,6 +100,12 @@ data class ModelSpec(
     val dataFile: String = "",
     @SerialName("gguf_file")
     val ggufFile: String = "",
+    @SerialName("mmproj")
+    val mmproj: String = "",
+    @SerialName("mmproj_file")
+    val mmprojFile: String = "",
+    @SerialName("extra_files")
+    val extraFiles: List<String> = emptyList(),
     @SerialName("external_data")
     val externalData: Boolean = false,
     @SerialName("description")
@@ -183,6 +189,9 @@ data class ModelSpec(
                 }
             }
         }
+        if (mmproj.isNotBlank()) list.add(mmproj)
+        if (mmprojFile.isNotBlank()) list.add(mmprojFile)
+        if (extraFiles.isNotEmpty()) list.addAll(extraFiles)
         return list.distinct()
     }
 

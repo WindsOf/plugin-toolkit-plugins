@@ -38,6 +38,10 @@ class LlamaServerProcess(
 
         val command = mutableListOf<String>()
         command.add(executablePath)
+        val exeName = exeFile.nameWithoutExtension.lowercase()
+        if (exeName == "llama" || exeName == "llama-cli") {
+            command.add("serve")
+        }
         command.add("-m")
         command.add(modelPath)
         if (!config.mmprojPath.isNullOrBlank()) {

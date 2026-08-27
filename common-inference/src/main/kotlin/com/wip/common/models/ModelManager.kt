@@ -103,21 +103,7 @@ class ModelManager(
         val lowerGgufExists = lowerGguf != null && fileSystem.exists(lowerGguf)
         val fallbackResult = lowerYamlExists && (lowerOnnxExists || lowerGgufExists)
         logger?.info("[ModelManager] Model '$modelId' lowercase fallback result = $fallbackResult (yaml=$lowerYamlExists, onnx=$lowerOnnxExists, gguf=$lowerGgufExists)")
-        if (fallbackResult) return true
-
-        // LM Studio local directory detection
-        val catalogEntry = ModelCatalog.findById(modelId)
-        if (catalogEntry?.format == "gguf" || modelId.contains("unlimited-ocr", ignoreCase = true)) {
-            val lmStudioModel = findLmStudioModelFile(modelId)
-            if (lmStudioModel != null && lmStudioModel.exists()) {
-                val mmproj = getMmprojAbsolutePath(modelId, fileSystem)
-                if (mmproj != null && File(mmproj).exists()) {
-                    logger?.info("[ModelManager] Model '$modelId' detected in LM Studio at '${lmStudioModel.absolutePath}' with mmproj at '$mmproj'")
-                    return true
-                }
-            }
-        }
-        return false
+        return fallbackResult
     }
 
     /**
@@ -371,18 +357,21 @@ class ModelManager(
         }
         progress.report(0.15f)
 
-        // 2. Resolve all required companion files (.onnx, .onnx.data, .gguf, etc.)
-        val requiredFiles = modelSpec.getRequiredFileNames(catalogEntry.id)
+        // 2. Resolve all required companion files (.onnx, .onnx.data, .gguf, mmproj, etc.)
+        val requiredFiles = mutableListOf<String>()
+        requiredFiles.addAll(modelSpec.getRequiredFileNames(catalogEntry.id))
+        for (extra in catalogEntry.extraFileUrls.keys) {
+            if (!requiredFiles.contains(extra)) {
+                requiredFiles.add(extra)
+            }
+        }
         val totalFiles = requiredFiles.size
         var totalBytesDownloaded: Long = 0
 
         for ((fileIdx, fileName) in requiredFiles.withIndex()) {
             val fileUrl = if (catalogEntry.extraFileUrls.containsKey(fileName)) {
                 catalogEntry.extraFileUrls[fileName]!!
-            } else if (fileName == catalogEntry.onnxUrl.substringAfterLast('/') ||
-                (fileName.endsWith(".onnx") && catalogEntry.onnxUrl.endsWith(".onnx")) ||
-                (fileName.endsWith(".gguf") && catalogEntry.onnxUrl.endsWith(".gguf"))
-            ) {
+            } else if (fileName.equals(catalogEntry.onnxUrl.substringAfterLast('/'), ignoreCase = true)) {
                 catalogEntry.onnxUrl
             } else {
                 val baseUrl = if (catalogEntry.onnxUrl.isNotBlank()) catalogEntry.onnxUrl else catalogEntry.yamlUrl

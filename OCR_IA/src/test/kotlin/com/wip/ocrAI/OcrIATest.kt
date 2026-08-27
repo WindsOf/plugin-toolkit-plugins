@@ -54,7 +54,6 @@ class OcrIATest {
         assertEquals("claude-3-5-sonnet-20241022", AIModel.CLAUDE_3_5_SONNET.id)
         assertEquals("gpt-4o", AIModel.GPT_4O.id)
         assertEquals("lm-studio", AIModel.LM_STUDIO.id)
-        assertEquals("Unlimited-OCR", AIModel.UNLIMITED_OCR.id)
         assertEquals("Unlimited-OCR-BF16", AIModel.UNLIMITED_OCR_BF16.id)
         assertEquals("Unlimited-OCR-Q8_0", AIModel.UNLIMITED_OCR_Q8_0.id)
         assertEquals("Unlimited-OCR-Q4_K_M", AIModel.UNLIMITED_OCR_Q4_K_M.id)
@@ -81,8 +80,18 @@ class OcrIATest {
             assertTrue(validateResult.isSuccess)
 
             val locks = plugin.checkLocks(context)
-            assertTrue(locks.containsKey("model:Unlimited-OCR-Q4_K_M") || locks.containsKey("Unlimited-OCR-Q4_K_M"))
+            assertTrue(locks.containsKey("model:Unlimited-OCR-Q4_K_M"))
+            assertTrue(locks.containsKey("model:unlimited-ocr-q4_k_m"))
+            assertTrue(locks.containsKey("Unlimited-OCR-Q4_K_M"))
         }
+    }
+
+    @Test
+    fun testActions() = kotlinx.coroutines.runBlocking {
+        val plugin = OCR_IA(OcrIASettings())
+        val context = io.mockk.mockk<PluginContext>(relaxed = true)
+        plugin.detectLlamaServer(context)
+        plugin.checkInstalledModels(context)
     }
     
     @Test
@@ -131,7 +140,7 @@ class OcrIATest {
     }
 
     @Test
-    fun testOcrIAWithUnlimitedOcrModelReturnsEmptyForNonExistentFiles() = kotlinx.coroutines.runBlocking {
+    fun testOcrIAWithGgufModelReturnsEmptyForNonExistentFiles() = kotlinx.coroutines.runBlocking {
         val plugin = OCR_IA(OcrIASettings())
         val context = io.mockk.mockk<PluginContext>(relaxed = true)
         val hostFs = io.mockk.mockk<HostFileSystem>(relaxed = true)
@@ -142,7 +151,7 @@ class OcrIATest {
             outputDir = "",
             useStructuredOutput = false,
             saveThinking = false,
-            model = AIModel.UNLIMITED_OCR,
+            model = AIModel.UNLIMITED_OCR_Q4_K_M,
             context = context,
             hostFs = hostFs
         )
@@ -156,7 +165,7 @@ class OcrIATest {
             outputDir = "",
             useStructuredOutput = false,
             saveThinking = false,
-            model = AIModel.UNLIMITED_OCR,
+            model = AIModel.UNLIMITED_OCR_Q4_K_M,
             context = context,
             hostFs = hostFs
         )

@@ -202,6 +202,31 @@ class ModelManifestTest {
     }
 
     @Test
+    fun testParseUnlimitedOcrIq2YamlWithMmproj() {
+        val ggufYaml = """
+            name: Unlimited-OCR-IQ2_M
+            display_name: "Unlimited-OCR (IQ2_M)"
+            model_type: ocr
+            format: gguf
+            description: "Baidu Unlimited-OCR 2-bit quantized GGUF model for ultra low-spec systems with mmproj multimodal projector"
+            files:
+              model: Unlimited-OCR-IQ2_M.gguf
+              mmproj: mmproj-Unlimited-OCR-F16.gguf
+            context_size: 8192
+        """.trimIndent()
+
+        val spec = ModelSpec.parseFromYaml(ggufYaml)
+        assertEquals(ModelType.OCR, spec.modelType)
+        assertEquals("gguf", spec.format)
+        assertEquals("Unlimited-OCR-IQ2_M", spec.name)
+        assertEquals(mapOf("model" to "Unlimited-OCR-IQ2_M.gguf", "mmproj" to "mmproj-Unlimited-OCR-F16.gguf"), spec.files)
+
+        val requiredFiles = spec.getRequiredFileNames("Unlimited-OCR-IQ2_M")
+        assertTrue(requiredFiles.contains("Unlimited-OCR-IQ2_M.gguf"))
+        assertTrue(requiredFiles.contains("mmproj-Unlimited-OCR-F16.gguf"))
+    }
+
+    @Test
     fun testParseInpaintingYaml() {
         val lamaYaml = """
             model_type: lama

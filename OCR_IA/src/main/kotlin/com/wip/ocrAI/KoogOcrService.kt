@@ -192,7 +192,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
                 }
                 MultiLLMPromptExecutor(wrapperClient)
             }
-            AIModel.UNLIMITED_OCR, AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M -> {
+            AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M -> {
                 throw UnsupportedOperationException("Unlimited-OCR GGUF models are handled via UnlimitedOcrRunner / llama-server.")
             }
         }
@@ -202,7 +202,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
             AIModel.GEMMA_26B, AIModel.GEMMA_31B, AIModel.GEMINI_1_5_PRO, AIModel.GEMINI_2_5_PRO, AIModel.GEMINI_3_1_FLASH_LITE -> LLMProvider.Google
             AIModel.CLAUDE_3_5_SONNET -> LLMProvider.Anthropic
             AIModel.GPT_4O, AIModel.LM_STUDIO -> LLMProvider.OpenAI
-            AIModel.UNLIMITED_OCR, AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M -> LLMProvider.Google
+            AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M -> LLMProvider.Google
         }
     }
 
@@ -241,9 +241,9 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
         saveThinking: Boolean,
         aiModel: AIModel
     ): OcrServiceResult {
-        if (aiModel == AIModel.UNLIMITED_OCR) {
+        if (aiModel in setOf(AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M)) {
             val runner = UnlimitedOcrRunner(context, hostFs, settings)
-            val res = runner.performOcr(input, save, outputDir, useStructuredOutput, saveThinking)
+            val res = runner.performOcr(input, save, outputDir, useStructuredOutput, saveThinking, targetModelId = aiModel.id)
             return OcrServiceResult(res.texts, res.bb, res.pageNumbers, res.pageNames, res.failedFiles)
         }
 
@@ -388,9 +388,9 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
         saveThinking: Boolean,
         aiModel: AIModel
     ): AdvancedOcrServiceResult {
-        if (aiModel == AIModel.UNLIMITED_OCR) {
+        if (aiModel in setOf(AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M)) {
             val runner = UnlimitedOcrRunner(context, hostFs, settings)
-            val res = runner.performAdvancedOcr(input, save, outputDir, useStructuredOutput, saveThinking)
+            val res = runner.performAdvancedOcr(input, save, outputDir, useStructuredOutput, saveThinking, targetModelId = aiModel.id)
             return AdvancedOcrServiceResult(
                 texts = res.texts,
                 balloonBoxes = res.balloonBoxes,

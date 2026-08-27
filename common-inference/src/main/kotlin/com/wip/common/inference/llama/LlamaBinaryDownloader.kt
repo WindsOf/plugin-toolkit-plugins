@@ -123,31 +123,175 @@ class LlamaBinaryDownloader(
         if (!targetDir.exists()) targetDir.mkdirs()
 
         try {
-            ZipInputStream(ByteArrayInputStream(zipBytes)).use { zis ->
-                var entry = zis.nextEntry
-                while (entry != null) {
-                    val destFile = File(targetDir, entry.name)
-                    if (entry.isDirectory) {
-                        destFile.mkdirs()
-                    } else {
-                        destFile.parentFile?.mkdirs()
-                        FileOutputStream(destFile).use { fos ->
-                            zis.copyTo(fos)
-                        }
-                        if (!isWindows() && (destFile.name == "llama-server" || destFile.name.endsWith(".so"))) {
-                            destFile.setExecutable(true, false)
-                        }
-                    }
-                    zis.closeEntry()
-                    entry = zis.nextEntry
-                }
-            }
+            extractZip(zipBytes, targetDir)
             progress?.report(1.0f)
             val exePath = getExecutablePath(fileSystem, backend)
             logger?.info("[LlamaBinaryDownloader] Successfully extracted llama-server to: $exePath")
             Result.success(exePath)
         } catch (e: Exception) {
             logger?.error("[LlamaBinaryDownloader] Error extracting llama-server archive: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Resolves the standard system installation directory for llama-server.
+     */
+    fun getSystemInstallDirectory(): File {
+        val userHome = System.getProperty("user.home", ".")
+        return if (isWindows()) {
+            val localAppData = System.getenv("LOCALAPPDATA") ?: "$userHome/AppData/Local"
+            File(localAppData, "Programs/llama.cpp")
+        } else {
+            File(userHome, ".local/bin")
+        }
+    }
+
+    /**
+     * Extracts zip archive bytes into a target directory.
+     */
+    fun extractZip(zipBytes: ByteArray, targetDir: File) {
+        if (!targetDir.exists()) targetDir.mkdirs()
+        ZipInputStream(ByteArrayInputStream(zipBytes)).use { zis ->
+            var entry = zis.nextEntry
+            while (entry != null) {
+                val destFile = File(targetDir, entry.name)
+                if (entry.isDirectory) {
+                    destFile.mkdirs()
+                } else {
+                    destFile.parentFile?.mkdirs()
+                    FileOutputStream(destFile).use { fos ->
+                        zis.copyTo(fos)
+                    }
+                    if (!isWindows() && (destFile.name == "llama-server" || destFile.name.endsWith(".so"))) {
+                        destFile.setExecutable(true, false)
+                    }
+                }
+                zis.closeEntry()
+                entry = zis.nextEntry
+            }
+        }
+    }
+
+    /**
+     * Registers a directory to the User PATH environment variable (Windows/Linux/macOS).
+     */
+    fun addDirectoryToUserPath(directory: File, logger: PluginLogger? = null): Boolean {
+        val dirPath = directory.absolutePath
+        if (isWindows()) {
+            return try {
+                val script = """
+                    ${'$'}currentPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+                    if (-not ${'$'}currentPath) { ${'$'}currentPath = "" }
+                    ${'$'}entries = ${'$'}currentPath.Split(';', [System.StringSplitOptions]::RemoveEmptyEntries)
+                    if (${'$'}entries -notcontains '$dirPath') {
+                        ${'$'}newPath = if (${'$'}currentPath) { "${'$'}currentPath;$dirPath" } else { '$dirPath' }
+                        [Environment]::SetEnvironmentVariable('Path', ${'$'}newPath, 'User')
+                        Write-Output "ADDED"
+                    } else {
+                        Write-Output "ALREADY_PRESENT"
+                    }
+                """.trimIndent()
+                val pb = ProcessBuilder("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+                val proc = pb.start()
+                val output = proc.inputStream.bufferedReader().readText().trim()
+                proc.waitFor()
+                logger?.info("[LlamaBinaryDownloader] PATH update result: $output for $dirPath")
+                true
+            } catch (e: Exception) {
+                logger?.error("[LlamaBinaryDownloader] Failed to add $dirPath to Windows User PATH: ${e.message}", e)
+                false
+            }
+        } else {
+            // Linux/macOS ~/.profile, ~/.bashrc, ~/.zshrc handling
+            return try {
+                val userHome = System.getProperty("user.home", ".")
+                val exportLine = "\nexport PATH=\"\$PATH:$dirPath\"\n"
+                val profileFiles = listOf(
+                    File(userHome, ".bashrc"),
+                    File(userHome, ".zshrc"),
+                    File(userHome, ".profile")
+                )
+                for (pf in profileFiles) {
+                    if (pf.exists()) {
+                        val text = pf.readText()
+                        if (!text.contains(dirPath)) {
+                            pf.appendText(exportLine)
+                            logger?.info("[LlamaBinaryDownloader] Appended PATH export to ${pf.absolutePath}")
+                        }
+                    }
+                }
+                true
+            } catch (e: Exception) {
+                logger?.error("[LlamaBinaryDownloader] Failed to register PATH on Unix: ${e.message}", e)
+                false
+            }
+        }
+    }
+
+    /**
+     * Downloads and installs llama-server system-wide and in local plugin storage.
+     */
+    suspend fun downloadAndInstallSystem(
+        backend: LlamaBackend = LlamaBackend.AUTO,
+        fileSystem: PluginFileSystem? = null,
+        addToUserPath: Boolean = true,
+        logger: PluginLogger? = null,
+        progress: ProgressReporter? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val archiveName = resolveArchiveName(backend)
+        val url = "$BASE_DOWNLOAD_URL/$archiveName"
+        logger?.info("[LlamaBinaryDownloader] Downloading system llama-server package ($backend): $url")
+        progress?.report(0.05f)
+
+        val response: HttpResponse = try {
+            httpClient.get(url) {
+                onDownload { bytesSentTotal, contentLength ->
+                    if (contentLength != null && contentLength > 0L) {
+                        val pct = 0.05f + (bytesSentTotal.toFloat() / contentLength.toFloat()) * 0.75f
+                        progress?.report(pct.coerceIn(0.05f, 0.80f))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            logger?.error("[LlamaBinaryDownloader] Network error downloading from $url: ${e.message}", e)
+            return@withContext Result.failure(e)
+        }
+
+        if (response.status != HttpStatusCode.OK) {
+            val err = "Server responded with status ${response.status} when downloading $url"
+            logger?.error("[LlamaBinaryDownloader] $err")
+            return@withContext Result.failure(RuntimeException(err))
+        }
+
+        val zipBytes = response.readRawBytes()
+        logger?.info("[LlamaBinaryDownloader] Download complete (${zipBytes.size} bytes). Extracting...")
+        progress?.report(0.85f)
+
+        val sysDir = getSystemInstallDirectory()
+        try {
+            extractZip(zipBytes, sysDir)
+            val sysExe = File(sysDir, getExecutableName())
+            if (!isWindows()) {
+                sysExe.setExecutable(true, false)
+            }
+            logger?.info("[LlamaBinaryDownloader] Extracted system binary to: ${sysExe.absolutePath}")
+
+            if (addToUserPath) {
+                addDirectoryToUserPath(sysDir, logger)
+            }
+
+            if (fileSystem != null) {
+                val basePath = fileSystem.getBasePath().trimEnd('/', '\\')
+                val pluginTargetDir = File("$basePath/$BINARIES_DIR")
+                extractZip(zipBytes, pluginTargetDir)
+                logger?.info("[LlamaBinaryDownloader] Also extracted to local plugin directory: $pluginTargetDir")
+            }
+
+            progress?.report(1.0f)
+            Result.success(sysExe.absolutePath)
+        } catch (e: Exception) {
+            logger?.error("[LlamaBinaryDownloader] Error installing system llama-server: ${e.message}", e)
             Result.failure(e)
         }
     }

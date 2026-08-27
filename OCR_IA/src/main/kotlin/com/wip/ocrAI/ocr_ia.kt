@@ -1,5 +1,8 @@
 package com.wip.ocrAI
 
+import com.wip.common.inference.llama.LlamaBackend
+import com.wip.common.inference.llama.LlamaBinaryDownloader
+import com.wip.common.inference.llama.LlamaServerManager
 import com.wip.common.models.AdvancedOCRResult
 import com.wip.common.models.ModelCatalog
 import com.wip.common.models.ModelManager
@@ -26,7 +29,7 @@ import org.wip.plugintoolkit.api.annotations.PluginValidate
 @PluginInfo(
     id = "com.wip.ocr_ia",
     name = "OCR IA",
-    version = "2.6.0",
+    version = "2.7.0",
     description = "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog",
     supportedOs = [OS.WINDOWS]
 )
@@ -46,8 +49,11 @@ class OCR_IA(val settings: OcrIASettings) {
         for (m in OcrDownloadModel.entries) {
             val installed = ModelManager.Default.isModelInstalled(m.modelId, context.fileSystem, logger)
             logger.info("[OCR_IA] checkLocks: Model ${m.name} (${m.modelId}) installed: $installed")
-            locks[ModelCatalog.getLockKey(m.modelId)] = installed
+            locks["model:${m.modelId}"] = installed
             locks[m.modelId] = installed
+            locks["model:${m.modelId.lowercase()}"] = installed
+            locks[m.modelId.lowercase()] = installed
+            locks[ModelCatalog.getLockKey(m.modelId)] = installed
         }
         logger.info("[OCR_IA] checkLocks: Completed OCR locks check: $locks")
         return locks
@@ -84,6 +90,93 @@ class OCR_IA(val settings: OcrIASettings) {
             throw result.exceptionOrNull() ?: RuntimeException("Failed to download all models")
         }
     }
+
+    @PluginAction(
+        name = "Check Installed Models",
+        description = "Scans plugin storage to verify and report the installation and lock status of all OCR models"
+    )
+    suspend fun checkInstalledModels(context: PluginContext) {
+        val logger = context.logger
+        logger.info("[OCR_IA] checkInstalledModels action triggered. Rechecking plugin storage...")
+        val locks = checkLocks(context)
+        logger.info("[OCR_IA] ===========================================")
+        logger.info("[OCR_IA]       OCR INSTALLED MODELS REPORT          ")
+        logger.info("[OCR_IA] ===========================================")
+        for (m in OcrDownloadModel.entries) {
+            val isInstalled = locks[m.modelId] == true || locks["model:${m.modelId}"] == true
+            val status = if (isInstalled) "[INSTALLED - UNLOCKED]" else "[NOT INSTALLED - LOCKED]"
+            logger.info("[OCR_IA] • ${m.name.padEnd(20)} ($status)")
+        }
+        logger.info("[OCR_IA] ===========================================")
+    }
+
+    @PluginAction(
+        name = "Install Llama Server",
+        description = "Downloads and installs precompiled llama-server binaries (CUDA, Vulkan, or CPU) locally and to the system PATH"
+    )
+    suspend fun installLlamaServer(
+        @CapabilityParam(description = "Select hardware acceleration backend", defaultValue = "\"AUTO\"")
+        backend: LlamaBackend? = LlamaBackend.AUTO,
+        @CapabilityParam(description = "Install system-wide and register directory to User PATH", defaultValue = "true")
+        systemWide: Boolean? = true,
+        context: PluginContext
+    ) {
+        val logger = context.logger
+        val progress = context.progress
+        val targetBackend = backend ?: settings.llamaServerBackend ?: LlamaBackend.AUTO
+        val isSystemWide = systemWide ?: true
+        logger.info("[OCR_IA] installLlamaServer action triggered (backend=$targetBackend, systemWide=$isSystemWide)")
+
+        val result = if (isSystemWide) {
+            LlamaBinaryDownloader.Default.downloadAndInstallSystem(
+                backend = targetBackend,
+                fileSystem = context.fileSystem,
+                addToUserPath = true,
+                logger = logger,
+                progress = progress
+            )
+        } else {
+            LlamaBinaryDownloader.Default.downloadAndInstall(
+                fileSystem = context.fileSystem,
+                backend = targetBackend,
+                logger = logger,
+                progress = progress
+            )
+        }
+
+        if (result.isFailure) {
+            val err = result.exceptionOrNull()
+            logger.error("[OCR_IA] installLlamaServer failed: ${err?.message}", err)
+            throw err ?: RuntimeException("Failed to install llama-server")
+        }
+        logger.info("[OCR_IA] installLlamaServer succeeded: ${result.getOrNull()}")
+    }
+
+    @PluginAction(
+        name = "Detect Llama Server",
+        description = "Scans system PATH, standard directories, and local storage to automatically detect existing llama-server installations"
+    )
+    suspend fun detectLlamaServer(context: PluginContext) {
+        val logger = context.logger
+        logger.info("[OCR_IA] detectLlamaServer action triggered. Scanning system and plugin storage...")
+        val detection = LlamaServerManager.Default.detectInstallation(
+            fileSystem = context.fileSystem,
+            customPath = settings.llamaServerCustomPath?.ifBlank { null },
+            logger = logger
+        )
+        if (detection.found) {
+            logger.info("[OCR_IA] === LLAMA SERVER DETECTED ===")
+            logger.info("[OCR_IA] Executable: ${detection.executablePath}")
+            logger.info("[OCR_IA] Source:     ${detection.source}")
+            logger.info("[OCR_IA] Details:    ${detection.details}")
+            if (!detection.version.isNullOrBlank()) {
+                logger.info("[OCR_IA] Version:    ${detection.version}")
+            }
+            logger.info("[OCR_IA] ===============================")
+        } else {
+            logger.warn("[OCR_IA] llama-server was not detected on this system or plugin storage. Use the 'Install Llama Server' action to download and configure it.")
+        }
+    }
     
     @Capability(
         name = "ocr",
@@ -117,7 +210,7 @@ class OCR_IA(val settings: OcrIASettings) {
         logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput")
 
         return try {
-            if (model in setOf(AIModel.UNLIMITED_OCR, AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M)) {
+            if (model in setOf(AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M)) {
                 val runner = UnlimitedOcrRunner(context, hostFs, settings)
                 return runner.performOcr(input, save, outputDir, useStructuredOutput, saveThinking, targetModelId = model.id)
             }
@@ -166,7 +259,7 @@ class OCR_IA(val settings: OcrIASettings) {
         logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput")
 
         return try {
-            if (model in setOf(AIModel.UNLIMITED_OCR, AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M)) {
+            if (model in setOf(AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M)) {
                 val runner = UnlimitedOcrRunner(context, hostFs, settings)
                 return runner.performAdvancedOcr(input, save, outputDir, useStructuredOutput, saveThinking, targetModelId = model.id)
             }

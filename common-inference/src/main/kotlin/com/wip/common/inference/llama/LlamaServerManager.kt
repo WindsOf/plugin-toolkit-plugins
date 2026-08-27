@@ -27,6 +27,17 @@ data class LlamaServerSession(
 }
 
 /**
+ * Result metadata from detecting a llama-server binary.
+ */
+data class LlamaDetectionResult(
+    val found: Boolean,
+    val executablePath: String? = null,
+    val source: String? = null,
+    val version: String? = null,
+    val details: String? = null
+)
+
+/**
  * Central manager for discovering, downloading, starting, and stopping llama-server instances.
  */
 class LlamaServerManager(
@@ -44,23 +55,236 @@ class LlamaServerManager(
         }
 
         /**
-         * Searches system PATH for the llama-server executable.
+         * Returns all possible binary names for llama-server or llama.
+         */
+        fun getExecutableCandidates(): List<String> {
+            return if (LlamaBinaryDownloader.isWindows()) {
+                listOf("llama-server.exe", "llama.exe", "llama-cli.exe")
+            } else {
+                listOf("llama-server", "llama", "llama-cli")
+            }
+        }
+
+        /**
+         * Searches system PATH for the llama-server or llama executable.
          */
         fun findInSystemPath(): String? {
-            val exeName = LlamaBinaryDownloader.getExecutableName()
             val pathEnv = System.getenv("PATH") ?: return null
+            val exeCandidates = getExecutableCandidates()
             for (dir in pathEnv.split(File.pathSeparator)) {
-                val candidate = File(dir.trim(), exeName)
-                if (candidate.exists() && candidate.canExecute()) {
-                    return candidate.absolutePath
+                for (exeName in exeCandidates) {
+                    val candidate = File(dir.trim(), exeName)
+                    if (candidate.exists() && candidate.canExecute()) {
+                        return candidate.absolutePath
+                    }
                 }
             }
             return null
+        }
+
+        /**
+         * Searches common standard installation paths for the llama-server or llama executable.
+         */
+        fun findInCommonPaths(): String? {
+            val exeCandidates = getExecutableCandidates()
+            val userHome = System.getProperty("user.home", ".")
+            val localAppData = System.getenv("LOCALAPPDATA") ?: "$userHome/AppData/Local"
+            val programFiles = System.getenv("ProgramFiles") ?: "C:\\Program Files"
+
+            val candidateDirs = listOf(
+                File(localAppData, "Microsoft/WindowsApps"),
+                File(localAppData, "Microsoft/WindowsApps/llama.cpp"),
+                File(localAppData, "Programs/llama.cpp"),
+                File(localAppData, "llama.cpp"),
+                File(userHome, ".llama/bin"),
+                File(userHome, ".llama"),
+                File(userHome, ".local/bin"),
+                File(userHome, "llama.cpp"),
+                File(userHome, "llama-server"),
+                File("C:/llama.cpp"),
+                File("C:/llama"),
+                File(programFiles, "llama.cpp"),
+                File(programFiles, "llama"),
+                File("/usr/local/bin"),
+                File("/usr/bin"),
+                File("/opt/llama.cpp/bin"),
+                File("/opt/llama/bin"),
+                File("/opt/homebrew/bin"),
+                File("/usr/local/opt/llama.cpp/bin")
+            )
+
+            for (dir in candidateDirs) {
+                if (dir.exists()) {
+                    for (exeName in exeCandidates) {
+                        val directExe = File(dir, exeName)
+                        if (directExe.exists() && directExe.canExecute()) {
+                            return directExe.absolutePath
+                        }
+                    }
+                }
+            }
+            return null
+        }
+
+        /**
+         * Verifies whether an executable at [path] can run and returns execution metadata (version, build, backend).
+         */
+        fun verifyExecutable(path: String): Pair<Boolean, String?> {
+            val file = File(path)
+            if (!file.exists() || !file.canExecute()) {
+                return false to null
+            }
+            val exeName = file.nameWithoutExtension.lowercase()
+            val versionArgs = if (exeName == "llama" || exeName == "llama-cli") {
+                listOf(file.absolutePath, "serve", "--version")
+            } else {
+                listOf(file.absolutePath, "--version")
+            }
+            return try {
+                val pb = ProcessBuilder(versionArgs)
+                pb.redirectErrorStream(true)
+                val proc = pb.start()
+                val reader = proc.inputStream.bufferedReader()
+                val output = StringBuilder()
+                var line: String? = reader.readLine()
+                var linesRead = 0
+                while (line != null && linesRead < 10) {
+                    output.append(line).append(" ")
+                    linesRead++
+                    line = reader.readLine()
+                }
+                proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
+                if (proc.isAlive) {
+                    proc.destroyForcibly()
+                }
+                val info = output.toString().trim()
+                true to (if (info.isNotBlank()) info else "Executable OK")
+            } catch (e: Exception) {
+                try {
+                    val helpArgs = if (exeName == "llama" || exeName == "llama-cli") {
+                        listOf(file.absolutePath, "serve", "--help")
+                    } else {
+                        listOf(file.absolutePath, "--help")
+                    }
+                    val pb = ProcessBuilder(helpArgs)
+                    pb.redirectErrorStream(true)
+                    val proc = pb.start()
+                    proc.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
+                    if (proc.isAlive) proc.destroyForcibly()
+                    true to "Executable OK"
+                } catch (ex: Exception) {
+                    true to "Executable present"
+                }
+            }
         }
     }
 
     private val mutex = Mutex()
     private var activeSession: LlamaServerSession? = null
+
+    /**
+     * Proactively detects any existing llama-server installations on the system, in plugin storage, or at a custom path.
+     */
+    fun detectInstallation(
+        fileSystem: PluginFileSystem? = null,
+        customPath: String? = null,
+        logger: PluginLogger? = null
+    ): LlamaDetectionResult {
+        // 1. Custom path check
+        if (!customPath.isNullOrBlank()) {
+            val customFile = File(customPath)
+            if (customFile.exists() && customFile.canExecute()) {
+                val (valid, ver) = verifyExecutable(customFile.absolutePath)
+                if (valid) {
+                    logger?.info("[LlamaServerManager] Detected llama-server in custom path: ${customFile.absolutePath} ($ver)")
+                    return LlamaDetectionResult(
+                        found = true,
+                        executablePath = customFile.absolutePath,
+                        source = "CUSTOM_PATH",
+                        version = ver,
+                        details = "Detected from configured custom path"
+                    )
+                }
+            }
+            if (customFile.isDirectory) {
+                val inDir = File(customFile, LlamaBinaryDownloader.getExecutableName())
+                if (inDir.exists() && inDir.canExecute()) {
+                    val (valid, ver) = verifyExecutable(inDir.absolutePath)
+                    if (valid) {
+                        logger?.info("[LlamaServerManager] Detected llama-server in custom directory: ${inDir.absolutePath} ($ver)")
+                        return LlamaDetectionResult(
+                            found = true,
+                            executablePath = inDir.absolutePath,
+                            source = "CUSTOM_DIRECTORY",
+                            version = ver,
+                            details = "Detected from configured custom directory"
+                        )
+                    }
+                }
+            }
+        }
+
+        // 2. System PATH check
+        val systemExe = findInSystemPath()
+        if (systemExe != null) {
+            val (valid, ver) = verifyExecutable(systemExe)
+            if (valid) {
+                logger?.info("[LlamaServerManager] Detected llama-server in system PATH: $systemExe ($ver)")
+                return LlamaDetectionResult(
+                    found = true,
+                    executablePath = systemExe,
+                    source = "SYSTEM_PATH",
+                    version = ver,
+                    details = "Detected in system PATH environment variable"
+                )
+            }
+        }
+
+        // 3. Common installation paths check
+        val commonExe = findInCommonPaths()
+        if (commonExe != null) {
+            val (valid, ver) = verifyExecutable(commonExe)
+            if (valid) {
+                logger?.info("[LlamaServerManager] Detected llama-server in standard path: $commonExe ($ver)")
+                return LlamaDetectionResult(
+                    found = true,
+                    executablePath = commonExe,
+                    source = "STANDARD_DIRECTORY",
+                    version = ver,
+                    details = "Detected in standard application directory"
+                )
+            }
+        }
+
+        // 4. Local plugin storage check
+        if (fileSystem != null) {
+            for (backend in listOf(LlamaBackend.CUDA, LlamaBackend.VULKAN, LlamaBackend.CPU, LlamaBackend.AUTO)) {
+                if (downloader.isInstalled(fileSystem, backend)) {
+                    val localExe = downloader.getExecutablePath(fileSystem, backend)
+                    val (valid, ver) = verifyExecutable(localExe)
+                    if (valid) {
+                        logger?.info("[LlamaServerManager] Detected llama-server in plugin storage: $localExe ($ver)")
+                        return LlamaDetectionResult(
+                            found = true,
+                            executablePath = localExe,
+                            source = "PLUGIN_STORAGE",
+                            version = ver,
+                            details = "Detected in local plugin storage ($backend backend)"
+                        )
+                    }
+                }
+            }
+        }
+
+        logger?.info("[LlamaServerManager] No existing llama-server installation found.")
+        return LlamaDetectionResult(
+            found = false,
+            executablePath = null,
+            source = null,
+            version = null,
+            details = "llama-server not found in PATH, standard paths, or plugin storage."
+        )
+    }
 
     /**
      * Resolves the executable path to use for llama-server according to configuration and system state.
@@ -98,8 +322,13 @@ class LlamaServerManager(
                 logger?.info("[LlamaServerManager] Found llama-server in system PATH: $systemExe")
                 return systemExe
             }
+            val commonExe = findInCommonPaths()
+            if (commonExe != null) {
+                logger?.info("[LlamaServerManager] Found llama-server in standard system directory: $commonExe")
+                return commonExe
+            }
             if (config.mode == LlamaServerMode.SYSTEM) {
-                throw IllegalStateException("llama-server not found in system PATH.")
+                throw IllegalStateException("llama-server not found in system PATH or standard directories.")
             }
         }
 

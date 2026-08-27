@@ -6,6 +6,7 @@ import io.mockk.mockk
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import org.wip.plugintoolkit.api.PluginFileSystem
@@ -75,5 +76,41 @@ class LlamaServerManagerTest {
         assertTrue(session.isRemote)
         assertEquals("http://localhost:1234", session.baseUrl)
         assertEquals("test-model.gguf", session.modelPath)
+    }
+
+    @Test
+    fun testSystemInstallDirectory() {
+        val sysDir = LlamaBinaryDownloader.Default.getSystemInstallDirectory()
+        assertNotNull(sysDir)
+        assertTrue(sysDir.path.isNotEmpty())
+    }
+
+    @Test
+    fun testDetectInstallationWithCustomPath() {
+        val tempExe = File.createTempFile("detect-llama-server", ".exe")
+        tempExe.setExecutable(true)
+        tempExe.deleteOnExit()
+
+        val manager = LlamaServerManager()
+        val detection = manager.detectInstallation(customPath = tempExe.absolutePath)
+
+        assertTrue(detection.found)
+        assertEquals(tempExe.absolutePath, detection.executablePath)
+        assertEquals("CUSTOM_PATH", detection.source)
+    }
+
+    @Test
+    fun testDetectInstallationNotFound() {
+        val manager = LlamaServerManager()
+        val detection = manager.detectInstallation(customPath = "C:/non/existent/path/llama-server.exe")
+        assertNotNull(detection)
+    }
+
+    @Test
+    fun testExecutableCandidates() {
+        val candidates = LlamaServerManager.getExecutableCandidates()
+        assertTrue(candidates.isNotEmpty())
+        assertTrue(candidates.any { it.contains("llama-server") })
+        assertTrue(candidates.any { it.contains("llama") })
     }
 }
