@@ -20,7 +20,7 @@ PRIVATE_KEY_B64 = os.getenv("PLUGIN_PRIVATE_SIGNING_KEY")
 PUBLIC_KEY_B64 = os.getenv("PLUGIN_PUBLIC_SIGNING_KEY")
 
 # Set of plugins that utilize ONNX runtime and support both GPU+CPU and CPU-only variants
-AI_INFERENCE_PLUGINS = {"vision", "cleaner", "slicer", "ocr_ia"}
+AI_INFERENCE_PLUGINS = {"vision", "cleaner", "slicer"}
 
 # Modules that are shared libraries and should not be published as standalone plugins
 EXCLUDED_DIRS = {"build", "dist", "dist_backup", "gradle", "common-models", "common-inference", "commonMain", "ag-psd", "runs"}
@@ -113,9 +113,10 @@ def run_command(command, cwd=None):
                 command[0] = p
                 break
 
-    print(f"  [EXEC] {' '.join(command)}")
+    cmd_str = subprocess.list2cmdline(command)
+    print(f"  [EXEC] {cmd_str}")
     result = subprocess.run(
-        command, cwd=cwd, shell=True, capture_output=True, text=True, env=env
+        cmd_str, cwd=cwd, shell=True, capture_output=True, text=True, env=env
     )
     if result.returncode != 0:
         print(f"  [ERROR] Command failed with code {result.returncode}:\n{result.stdout}\n{result.stderr}")
@@ -178,9 +179,28 @@ def sign_jar(jar_path, private_key_b64):
             return False
 
         # 4. Sign the JAR using jarsigner
+        sig_file_temp = Path(f"{jar_path}.sig")
+        if sig_file_temp.exists():
+            try:
+                sig_file_temp.unlink()
+            except Exception:
+                pass
+
         jarsigner_tool = find_jdk_tool("jarsigner")
         cmd = [jarsigner_tool, "-keystore", str(p12_file), "-storetype", "PKCS12", "-storepass", "password", "-sigalg", "SHA256withRSA", "-digestalg", "SHA-256", str(jar_path), "plugin-key"]
         if not run_command(cmd):
+            sig_file_temp = Path(f"{jar_path}.sig")
+            if sig_file_temp.exists():
+                import time
+                time.sleep(0.5)
+                try:
+                    if jar_path.exists():
+                        jar_path.unlink()
+                    sig_file_temp.replace(jar_path)
+                    print(f"  [SIGN] Successfully recovered signed {jar_path.name}")
+                    return True
+                except Exception as e:
+                    print(f"  [WARN] Failed to recover .sig file: {e}")
             return False
             
         print(f"  [SIGN] Successfully signed {jar_path.name}")
@@ -237,88 +257,19 @@ def find_jdk_tool(tool_name):
 
 def inject_manifest_into_jar(jar_path, manifest_data):
     """
-    Updates or inserts META-INF/manifest.json inside an existing JAR file safely,
-    sanitizing any mismatched central directory counts or Zip64 headers from Gradle.
+    Updates META-INF/manifest.json inside an existing JAR file safely using the JDK jar tool.
     """
-    manifest_bytes = json.dumps(manifest_data, indent=2).encode("utf-8")
-    tmp_jar = jar_path.with_suffix(".tmp_sanitized.jar")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        meta_inf = Path(tmp_dir) / "META-INF"
+        meta_inf.mkdir(parents=True, exist_ok=True)
+        manifest_file = meta_inf / "manifest.json"
+        with open(manifest_file, "w", encoding="utf-8") as f:
+            json.dump(manifest_data, f, indent=2)
 
-    try:
-        with open(jar_path, "rb") as f:
-            file_size = jar_path.stat().st_size
-            f.seek(max(0, file_size - 1024), 0)
-            tail = f.read()
-            eocd_idx = tail.rfind(b"PK\x05\x06")
-            if eocd_idx == -1:
-                raise ValueError(f"Could not find End of Central Directory in {jar_path.name}")
-
-            f.seek(max(0, file_size - 1024) + eocd_idx, 0)
-            eocd = f.read(22)
-            sig, disk, cd_disk, disk_entries, total_entries, cd_size, cd_offset, clen = struct.unpack("<IHHHHIIH", eocd)
-
-            # Search for real central directory start if offset is slightly shifted
-            if cd_offset >= file_size:
-                cd_offset = file_size - 22 - cd_size
-            f.seek(cd_offset)
-            if f.read(4) != b"PK\x01\x02":
-                for delta in range(-256, 257):
-                    f.seek(max(0, cd_offset + delta))
-                    if f.read(4) == b"PK\x01\x02":
-                        cd_offset = max(0, cd_offset + delta)
-                        break
-
-            f.seek(cd_offset)
-            entries = []
-            while True:
-                sig = f.read(4)
-                if sig != b"PK\x01\x02":
-                    break
-                rest = f.read(42)
-                if len(rest) < 42:
-                    break
-                ver_made, ver_need, flag, comp, mtime, mdate, crc, csize, usize, nlen, elen, clen, dnum, iattr, eattr, offset = struct.unpack("<HHHHHHIIIHHHHHII", rest)
-                fname = f.read(nlen).decode("utf-8", errors="ignore")
-                extra = f.read(elen)
-                comment = f.read(clen)
-                entries.append((fname, offset, csize, usize, comp, crc))
-
-            with zipfile.ZipFile(tmp_jar, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as zout:
-                for fname, offset, csize, usize, comp, crc in entries:
-                    if fname == "META-INF/manifest.json":
-                        continue
-                    f.seek(offset)
-                    loc_hdr = f.read(30)
-                    if len(loc_hdr) < 30:
-                        continue
-                    lsig, lver, lflag, lcomp, lmtime, lmdate, lcrc, lcsize, lusize, lnlen, lelen = struct.unpack("<IHHHHHIIIHH", loc_hdr)
-                    f.seek(offset + 30 + lnlen + lelen)
-                    raw_bytes = f.read(csize if comp != 0 else usize)
-                    if comp == 8:
-                        try:
-                            data = zlib.decompress(raw_bytes, -15)
-                        except Exception:
-                            data = raw_bytes
-                    else:
-                        data = raw_bytes
-                    zout.writestr(fname, data)
-                zout.writestr("META-INF/manifest.json", manifest_bytes)
-
-        # Replace target jar with sanitized jar
-        tmp_jar.replace(jar_path)
-    except Exception as e:
-        print(f"  [WARN] Python ZIP sanitization failed ({e}), falling back to JDK jar tool.")
-        if tmp_jar.exists():
-            tmp_jar.unlink()
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_meta_inf = Path(tmp_dir) / "META-INF"
-            tmp_meta_inf.mkdir(parents=True, exist_ok=True)
-            manifest_file = tmp_meta_inf / "manifest.json"
-            with open(manifest_file, "w", encoding="utf-8") as f:
-                json.dump(manifest_data, f, indent=2)
-
-            jar_tool = find_jdk_tool("jar")
-            cmd = [jar_tool, "uf", str(jar_path), "-C", str(tmp_dir), "META-INF/manifest.json"]
-            run_command(cmd)
+        jar_tool = find_jdk_tool("jar")
+        cmd = [jar_tool, "uf", str(jar_path), "-C", str(tmp_dir), "META-INF/manifest.json"]
+        if not run_command(cmd):
+            raise RuntimeError(f"Failed to update manifest in {jar_path.name}")
 
 
 def find_assets(plugin_path):
@@ -537,12 +488,15 @@ def generate_repo(name, url, output_dir, clean=False, target_plugin=None, varian
 
             # Find built JAR
             jar_dir = plugin_dir / "build" / "libs"
-            jars = list(jar_dir.glob("*.jar"))
-            if not jars:
-                print(f"  [ERROR] No JAR found in {jar_dir}, skipping.")
-                continue
-
-            source_jar = jars[0]
+            primary_jar = jar_dir / f"{plugin_dir.name}.jar"
+            if primary_jar.exists():
+                source_jar = primary_jar
+            else:
+                jars = [j for j in jar_dir.glob("*.jar") if not "tmp" in j.name and not "sanitized" in j.name]
+                if not jars:
+                    print(f"  [ERROR] No JAR found in {jar_dir}, skipping.")
+                    continue
+                source_jar = jars[0]
 
             # Prepare dist directory for this package
             pkg_dist_path = plugins_dist_path / target_pkg

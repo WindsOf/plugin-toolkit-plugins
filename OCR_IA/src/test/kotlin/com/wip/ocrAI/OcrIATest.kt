@@ -1,6 +1,9 @@
 package com.wip.ocrAI
 
+import com.wip.common.inference.llama.LlamaBackend
+import com.wip.common.inference.llama.LlamaServerMode
 import com.wip.ocrAI.models.AIModel
+import com.wip.ocrAI.models.OcrDownloadModel
 import com.wip.ocrAI.models.OcrIASettings
 import org.junit.Test
 import org.wip.plugintoolkit.api.HostFileSystem
@@ -27,6 +30,18 @@ class OcrIATest {
         assertEquals("test-api-key", settings.googleApiKey)
         assertEquals("http://localhost:1234/v1", settings.lmStudioUrl)
         assertEquals("lm-studio", settings.lmStudioApiKey)
+        assertEquals(LlamaServerMode.AUTO, settings.llamaServerMode)
+        assertEquals(LlamaBackend.AUTO, settings.llamaServerBackend)
+        assertEquals(99, settings.llamaServerGpuLayers)
+        assertEquals(8080, settings.llamaServerPort)
+    }
+
+    @Test
+    fun testOcrDownloadModelEnumIdentifiers() {
+        assertEquals("Unlimited-OCR-BF16", OcrDownloadModel.UNLIMITED_OCR_BF16.modelId)
+        assertEquals("Unlimited-OCR-Q8_0", OcrDownloadModel.UNLIMITED_OCR_Q8_0.modelId)
+        assertEquals("Unlimited-OCR-Q4_K_M", OcrDownloadModel.UNLIMITED_OCR_Q4_K_M.modelId)
+        assertEquals("Unlimited-OCR-IQ2_M", OcrDownloadModel.UNLIMITED_OCR_IQ2_M.modelId)
     }
 
     @Test
@@ -35,10 +50,15 @@ class OcrIATest {
         assertEquals("gemma-4-31b-it", AIModel.GEMMA_31B.id)
         assertEquals("gemini-1.5-pro", AIModel.GEMINI_1_5_PRO.id)
         assertEquals("gemini-2.5-pro", AIModel.GEMINI_2_5_PRO.id)
+        assertEquals("gemini-3.1-flash-lite", AIModel.GEMINI_3_1_FLASH_LITE.id)
         assertEquals("claude-3-5-sonnet-20241022", AIModel.CLAUDE_3_5_SONNET.id)
         assertEquals("gpt-4o", AIModel.GPT_4O.id)
         assertEquals("lm-studio", AIModel.LM_STUDIO.id)
         assertEquals("Unlimited-OCR", AIModel.UNLIMITED_OCR.id)
+        assertEquals("Unlimited-OCR-BF16", AIModel.UNLIMITED_OCR_BF16.id)
+        assertEquals("Unlimited-OCR-Q8_0", AIModel.UNLIMITED_OCR_Q8_0.id)
+        assertEquals("Unlimited-OCR-Q4_K_M", AIModel.UNLIMITED_OCR_Q4_K_M.id)
+        assertEquals("Unlimited-OCR-IQ2_M", AIModel.UNLIMITED_OCR_IQ2_M.id)
     }
 
     @Test
@@ -61,7 +81,7 @@ class OcrIATest {
             assertTrue(validateResult.isSuccess)
 
             val locks = plugin.checkLocks(context)
-            assertTrue(locks.containsKey("model:Unlimited-OCR") || locks.containsKey("Unlimited-OCR"))
+            assertTrue(locks.containsKey("model:Unlimited-OCR-Q4_K_M") || locks.containsKey("Unlimited-OCR-Q4_K_M"))
         }
     }
     
@@ -112,7 +132,7 @@ class OcrIATest {
 
     @Test
     fun testOcrIAWithUnlimitedOcrModelReturnsEmptyForNonExistentFiles() = kotlinx.coroutines.runBlocking {
-        val plugin = OCR_IA()
+        val plugin = OCR_IA(OcrIASettings())
         val context = io.mockk.mockk<PluginContext>(relaxed = true)
         val hostFs = io.mockk.mockk<HostFileSystem>(relaxed = true)
 
@@ -143,6 +163,20 @@ class OcrIATest {
 
         assertEquals(0, advancedResult.texts.size)
         assertEquals(0, advancedResult.balloonBoxes.size)
+
+        for (m in listOf(AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M)) {
+            val res = plugin.ocr(
+                input = "non_existent_folder",
+                save = false,
+                outputDir = "",
+                useStructuredOutput = false,
+                saveThinking = false,
+                model = m,
+                context = context,
+                hostFs = hostFs
+            )
+            assertEquals(0, res.texts.size)
+        }
     }
 }
 

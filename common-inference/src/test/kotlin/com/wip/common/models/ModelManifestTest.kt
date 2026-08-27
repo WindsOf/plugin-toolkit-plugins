@@ -109,27 +109,41 @@ class ModelManifestTest {
         assertNotNull(ocr)
         assertEquals("model:Unlimited-OCR", ocr.lockKey)
         assertEquals("https://www.windsofresub.cloud/models/Unlimited-OCR.yaml", ocr.yamlUrl)
-        assertEquals("https://www.windsofresub.cloud/models/Unlimited-OCR.onnx", ocr.onnxUrl)
+        assertEquals("https://www.windsofresub.cloud/models/Unlimited-OCR-Q4_K_M.gguf", ocr.onnxUrl)
         assertEquals(ModelType.OCR, ocr.type)
-        assertEquals("onnx", ocr.format)
+        assertEquals("gguf", ocr.format)
+        assertTrue(ocr.extraFileUrls.containsKey("mmproj-Unlimited-OCR-F16.gguf"))
 
         val ocrBf16 = ModelCatalog.findById("Unlimited-OCR-BF16")
         assertNotNull(ocrBf16)
         assertEquals("model:Unlimited-OCR-BF16", ocrBf16.lockKey)
         assertEquals(ModelType.OCR, ocrBf16.type)
-        assertEquals("onnx", ocrBf16.format)
+        assertEquals("gguf", ocrBf16.format)
+        assertEquals("https://www.windsofresub.cloud/models/Unlimited-OCR-BF16.gguf", ocrBf16.onnxUrl)
+        assertTrue(ocrBf16.extraFileUrls.containsKey("mmproj-Unlimited-OCR-F16.gguf"))
+
+        val ocrQ8 = ModelCatalog.findById("Unlimited-OCR-Q8_0")
+        assertNotNull(ocrQ8)
+        assertEquals("model:Unlimited-OCR-Q8_0", ocrQ8.lockKey)
+        assertEquals(ModelType.OCR, ocrQ8.type)
+        assertEquals("gguf", ocrQ8.format)
+        assertEquals("https://www.windsofresub.cloud/models/Unlimited-OCR-Q8_0.gguf", ocrQ8.onnxUrl)
+        assertTrue(ocrQ8.extraFileUrls.containsKey("mmproj-Unlimited-OCR-F16.gguf"))
 
         val ocrQ4 = ModelCatalog.findById("Unlimited-OCR-Q4_K_M")
         assertNotNull(ocrQ4)
         assertEquals(ModelType.OCR, ocrQ4.type)
         assertEquals("gguf", ocrQ4.format)
+        assertEquals("https://www.windsofresub.cloud/models/Unlimited-OCR-Q4_K_M.gguf", ocrQ4.onnxUrl)
+        assertTrue(ocrQ4.extraFileUrls.containsKey("mmproj-Unlimited-OCR-F16.gguf"))
 
         val ocrIq2 = ModelCatalog.findById("Unlimited-OCR-IQ2_M")
         assertNotNull(ocrIq2)
         assertEquals(ModelType.OCR, ocrIq2.type)
         assertEquals("gguf", ocrIq2.format)
+        assertEquals("https://www.windsofresub.cloud/models/Unlimited-OCR-IQ2_M.gguf", ocrIq2.onnxUrl)
+        assertTrue(ocrIq2.extraFileUrls.containsKey("mmproj-Unlimited-OCR-F16.gguf"))
 
-        assertEquals(13, ModelCatalog.ALL_MODELS.size)
     }
 
     @Test

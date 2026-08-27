@@ -48,18 +48,17 @@ tasks.jar {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     isZip64 = true
 
-    // Include all dependencies in the JAR except those provided by the host toolkit
-    // Note: .filter is just to have a smaller jar, you can technically remove it for ease of configuration
+    // Include all dependencies in the JAR except host toolkit and onnxruntime
     from(configurations.runtimeClasspath.get().filter { file ->
         val path = file.path
-        file.isFile &&
         !path.contains("plugin-api") &&
         !path.contains("kotlin-stdlib") &&
         !path.contains("kotlinx-coroutines") &&
         !path.contains("kotlinx-serialization") &&
         !path.contains("koin-core") &&
-        !path.contains("slf4j")
-    }.map { zipTree(it) })
+        !path.contains("slf4j") &&
+        !path.contains("onnxruntime")
+    }.map { if (it.isDirectory) it else zipTree(it) })
 
     exclude("**/.venv/**")
     exclude("**/.env")

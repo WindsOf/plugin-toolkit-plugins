@@ -233,6 +233,7 @@ object ModelCatalog {
     const val MIGAN_ID = "migan_traced"
     const val UNLIMITED_OCR_ID = "Unlimited-OCR"
     const val UNLIMITED_OCR_BF16_ID = "Unlimited-OCR-BF16"
+    const val UNLIMITED_OCR_Q8_0_ID = "Unlimited-OCR-Q8_0"
     const val UNLIMITED_OCR_Q4_K_M_ID = "Unlimited-OCR-Q4_K_M"
     const val UNLIMITED_OCR_IQ2_M_ID = "Unlimited-OCR-IQ2_M"
 
@@ -330,22 +331,42 @@ object ModelCatalog {
         id = UNLIMITED_OCR_ID,
         displayName = "Unlimited-OCR",
         yamlUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR.yaml",
-        onnxUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR.onnx",
+        onnxUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR-Q4_K_M.gguf",
         lockKey = "model:$UNLIMITED_OCR_ID",
-        description = "Baidu Unlimited-OCR high-precision Vision-Language text extraction ONNX model with external data",
+        description = "Baidu Unlimited-OCR high-precision Vision-Language text extraction GGUF model with mmproj multimodal projector",
         type = ModelType.OCR,
-        format = "onnx"
+        format = "gguf",
+        extraFileUrls = mapOf(
+            "mmproj-Unlimited-OCR-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Unlimited-OCR-F16.gguf"
+        )
     )
 
     val UNLIMITED_OCR_BF16 = ModelCatalogEntry(
         id = UNLIMITED_OCR_BF16_ID,
         displayName = "Unlimited-OCR (BF16)",
         yamlUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR-BF16.yaml",
-        onnxUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR-BF16.onnx",
+        onnxUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR-BF16.gguf",
         lockKey = "model:$UNLIMITED_OCR_BF16_ID",
-        description = "Baidu Unlimited-OCR high-precision Vision-Language text extraction model with external data",
+        description = "Baidu Unlimited-OCR high-precision Vision-Language text extraction BF16 GGUF model with mmproj multimodal projector",
         type = ModelType.OCR,
-        format = "onnx"
+        format = "gguf",
+        extraFileUrls = mapOf(
+            "mmproj-Unlimited-OCR-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Unlimited-OCR-F16.gguf"
+        )
+    )
+
+    val UNLIMITED_OCR_Q8_0 = ModelCatalogEntry(
+        id = UNLIMITED_OCR_Q8_0_ID,
+        displayName = "Unlimited-OCR (Q8_0)",
+        yamlUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR-Q8_0.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR-Q8_0.gguf",
+        lockKey = "model:$UNLIMITED_OCR_Q8_0_ID",
+        description = "Baidu Unlimited-OCR 8-bit quantized GGUF model with mmproj multimodal projector",
+        type = ModelType.OCR,
+        format = "gguf",
+        extraFileUrls = mapOf(
+            "mmproj-Unlimited-OCR-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Unlimited-OCR-F16.gguf"
+        )
     )
 
     val UNLIMITED_OCR_Q4_K_M = ModelCatalogEntry(
@@ -354,9 +375,12 @@ object ModelCatalog {
         yamlUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR-Q4_K_M.yaml",
         onnxUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR-Q4_K_M.gguf",
         lockKey = "model:$UNLIMITED_OCR_Q4_K_M_ID",
-        description = "Baidu Unlimited-OCR 4-bit quantized GGUF model for low-VRAM environments",
+        description = "Baidu Unlimited-OCR 4-bit quantized GGUF model for low-VRAM environments with mmproj multimodal projector",
         type = ModelType.OCR,
-        format = "gguf"
+        format = "gguf",
+        extraFileUrls = mapOf(
+            "mmproj-Unlimited-OCR-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Unlimited-OCR-F16.gguf"
+        )
     )
 
     val UNLIMITED_OCR_IQ2_M = ModelCatalogEntry(
@@ -365,9 +389,12 @@ object ModelCatalog {
         yamlUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR-IQ2_M.yaml",
         onnxUrl = "https://www.windsofresub.cloud/models/Unlimited-OCR-IQ2_M.gguf",
         lockKey = "model:$UNLIMITED_OCR_IQ2_M_ID",
-        description = "Baidu Unlimited-OCR 2-bit quantized GGUF model for ultra low-spec systems",
+        description = "Baidu Unlimited-OCR 2-bit quantized GGUF model for ultra low-spec systems with mmproj multimodal projector",
         type = ModelType.OCR,
-        format = "gguf"
+        format = "gguf",
+        extraFileUrls = mapOf(
+            "mmproj-Unlimited-OCR-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Unlimited-OCR-F16.gguf"
+        )
     )
 
     val ALL_MODELS: List<ModelCatalogEntry> = listOf(
@@ -382,6 +409,7 @@ object ModelCatalog {
         MIGAN,
         UNLIMITED_OCR,
         UNLIMITED_OCR_BF16,
+        UNLIMITED_OCR_Q8_0,
         UNLIMITED_OCR_Q4_K_M,
         UNLIMITED_OCR_IQ2_M
     )
@@ -406,6 +434,7 @@ object ModelCatalog {
             (clean == "migan_traced" && it.id == MIGAN_ID) ||
             (clean == "unlimited-ocr" && it.id == UNLIMITED_OCR_ID) ||
             (clean == "unlimited-ocr-bf16" && it.id == UNLIMITED_OCR_BF16_ID) ||
+            (clean == "unlimited-ocr-q8_0" && it.id == UNLIMITED_OCR_Q8_0_ID) ||
             (clean == "unlimited-ocr-q4_k_m" && it.id == UNLIMITED_OCR_Q4_K_M_ID) ||
             (clean == "unlimited-ocr-iq2_m" && it.id == UNLIMITED_OCR_IQ2_M_ID)
         }

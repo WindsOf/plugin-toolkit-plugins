@@ -3,8 +3,10 @@ package com.wip.psdbuilder
 import com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi
 import com.wip.common.models.AdvancedOCRResult
 import com.wip.common.models.ChapterCleanerResult
+import com.wip.common.models.ChapterVisionResult
 import com.wip.common.models.CleanerResult
 import com.wip.common.models.OCRResult
+import com.wip.common.models.VisionResult
 import com.wip.kpsd.Justification
 import com.wip.kpsd.KPsd
 import com.wip.kpsd.Layer
@@ -244,6 +246,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         @CapabilityParam(description = "Shapes of the balloons") shapes: List<String>? = null,
         @CapabilityParam(description = "Desired height of the final PSD. 0 to disable merging", defaultValue = "0") desiredHeight: Int? = 0,
         @CapabilityParam(description = "Optional Cleaner result containing the cleaned image path") cleanResult: CleanerResult? = null,
+        @CapabilityParam(description = "Optional Vision segmentation result for polygon-based balloon text centering") visionResult: VisionResult? = null,
         context: PluginContext,
         hostFs: HostFileSystem
     ): PSDBuildResult {
@@ -282,7 +285,8 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             textColors = textColors,
             hasBorder = hasBorder,
             borderColors = borderColors,
-            shapes = shapes
+            shapes = shapes,
+            visionResult = visionResult
         )
         val psdBytes = withContext(Dispatchers.Default) {
             KPsd.write(psd, compress = false)
@@ -320,6 +324,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         outputDir: String,
         @CapabilityParam(description = "Keep intermediate JSON and temp image files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
         @CapabilityParam(description = "Optional Cleaner result containing the cleaned image path") cleanResult: CleanerResult? = null,
+        @CapabilityParam(description = "Optional Vision segmentation result for polygon-based balloon text centering") visionResult: VisionResult? = null,
         context: PluginContext,
         hostFs: HostFileSystem
     ): PSDBuildResult {
@@ -341,6 +346,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             borderColors = ocrData.borderColors,
             shapes = ocrData.shapes,
             cleanResult = cleanResult,
+            visionResult = visionResult,
             context = context,
             hostFs = hostFs
         )
@@ -371,6 +377,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         outputDir: String,
         @CapabilityParam(description = "Keep intermediate JSON and temp image files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
         @CapabilityParam(description = "Optional Cleaner result containing the cleaned image path") cleanResult: CleanerResult? = null,
+        @CapabilityParam(description = "Optional Vision segmentation result for polygon-based balloon text centering") visionResult: VisionResult? = null,
         context: PluginContext,
         hostFs: HostFileSystem
     ): PSDBuildResult {
@@ -386,6 +393,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             outputDir = outputDir,
             leaveIntermediateFiles = leaveIntermediateFiles,
             cleanResult = cleanResult,
+            visionResult = visionResult,
             context = context,
             hostFs = hostFs
         )
@@ -443,6 +451,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         @CapabilityParam(description = "Shapes of the balloons") shapes: List<String>? = null,
         @CapabilityParam(description = "Desired height of the final PSD. 0 to disable merging", defaultValue = "0") desiredHeight: Int? = 0,
         @CapabilityParam(description = "Optional Chapter Cleaner result containing cleaned image paths") cleanChapterResult: ChapterCleanerResult? = null,
+        @CapabilityParam(description = "Optional Chapter Vision segmentation result for polygon-based balloon text centering") chapterVisionResult: ChapterVisionResult? = null,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterPSDBuildResult {
@@ -673,6 +682,13 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                         val fontNames = List(pageTexts.size) { psdFontString }
                         val borderSizes = List(pageTexts.size) { borderSize ?: 3 }
 
+                        val pageVisionResult = chapterVisionResult?.results?.firstOrNull { r ->
+                            val cleanBase = r.pageName.replace(".png", "").replace(".jpg", "").replace(".jpeg", "").replace(".webp", "")
+                            cleanBase.equals(group.files.first().nameWithoutExtension, ignoreCase = true) ||
+                            cleanBase.equals(group.files.first().name, ignoreCase = true) ||
+                            r.pageName.equals(group.files.first().name, ignoreCase = true)
+                        }
+
                         val psd = buildPsdObject(
                             imagePath = if (mergedBmp == null) group.files.first().absolutePath else null,
                             baseImageBmp = mergedBmp,
@@ -689,7 +705,8 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                             shapes = if (shapes != null) pageShapes else null,
                             textColors = if (safeTextColors != null) pageTextColors else null,
                             hasBorder = if (safeHasBorder != null) pageHasBorder else null,
-                            borderColors = if (safeBorderColors != null) pageBorderColors else null
+                            borderColors = if (safeBorderColors != null) pageBorderColors else null,
+                            visionResult = pageVisionResult
                         )
                         val psdBytes = withContext(Dispatchers.Default) {
                             KPsd.write(psd, compress = false)
@@ -739,6 +756,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         @CapabilityParam(description = "Keep intermediate JSON and temp image files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
         @CapabilityParam(description = "Desired height of the final PSD. 0 to disable merging", defaultValue = "0") desiredHeight: Int? = 0,
         @CapabilityParam(description = "Optional Chapter Cleaner result containing cleaned image paths") cleanChapterResult: ChapterCleanerResult? = null,
+        @CapabilityParam(description = "Optional Chapter Vision segmentation result for polygon-based balloon text centering") chapterVisionResult: ChapterVisionResult? = null,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterPSDBuildResult {
@@ -761,6 +779,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             desiredHeight = desiredHeight,
             cleanFolder = cleanFolder,
             cleanChapterResult = cleanChapterResult,
+            chapterVisionResult = chapterVisionResult,
             context = context,
             hostFs = hostFs
         )
@@ -792,6 +811,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         @CapabilityParam(description = "Keep intermediate JSON and temp image files for debugging", defaultValue = "false") leaveIntermediateFiles: Boolean? = false,
         @CapabilityParam(description = "Desired height of the final PSD. 0 to disable merging", defaultValue = "0") desiredHeight: Int? = 0,
         @CapabilityParam(description = "Optional Chapter Cleaner result containing cleaned image paths") cleanChapterResult: ChapterCleanerResult? = null,
+        @CapabilityParam(description = "Optional Chapter Vision segmentation result for polygon-based balloon text centering") chapterVisionResult: ChapterVisionResult? = null,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterPSDBuildResult {
@@ -808,6 +828,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             desiredHeight = desiredHeight,
             cleanFolder = cleanFolder,
             cleanChapterResult = cleanChapterResult,
+            chapterVisionResult = chapterVisionResult,
             context = context,
             hostFs = hostFs
         )
@@ -997,7 +1018,8 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         textColors: List<String?>? = null,
         hasBorder: List<Boolean?>? = null,
         borderColors: List<String?>? = null,
-        customBoundaries: List<com.wip.kpsd.TextBoundary>? = null
+        customBoundaries: List<com.wip.kpsd.TextBoundary>? = null,
+        visionResult: VisionResult? = null
     ): Psd {
         val originalBaseImage = if (baseImageBmp != null) {
             baseImageBmp
@@ -1070,6 +1092,19 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             PixelData(width, height, bgCopy)
         }
 
+        val matchedResults = if (visionResult != null && visionResult.objects.isNotEmpty()) {
+            VisionOcrMatcher.match(
+                texts = texts,
+                ocrBoxes = if (textBoxes != null && textBoxes.isNotEmpty()) textBoxes else balloonBoxes,
+                ocrBalloonBoxes = balloonBoxes,
+                visionObjects = visionResult.objects,
+                imageWidth = width.toDouble(),
+                imageHeight = height.toDouble()
+            )
+        } else {
+            null
+        }
+
         val boxDataList = mutableListOf<BoxData>()
         for ((index, text) in texts.withIndex()) {
             val balloonBox = if (index < balloonBoxes.size) balloonBoxes[index] else emptyList()
@@ -1094,7 +1129,16 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             var cx: Double
             var cy: Double
 
-            if (tBox.size >= 4 && bBox.size >= 4) {
+            val matched = matchedResults?.getOrNull(index)
+            if (matched?.matchedBalloon != null && matched.polygonBounds != null && matched.visualCenter != null) {
+                val segBounds = matched.polygonBounds
+                ibx0 = segBounds.left.toDouble()
+                iby0 = segBounds.top.toDouble()
+                ibx1 = segBounds.right.toDouble()
+                iby1 = segBounds.bottom.toDouble()
+                cx = matched.visualCenter.x
+                cy = matched.visualCenter.y
+            } else if (tBox.size >= 4 && bBox.size >= 4) {
                 val t_ymin = tBox[0]
                 val t_xmin = tBox[1]
                 val t_ymax = tBox[2]
@@ -1293,6 +1337,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                 group(name = "translation") {
                     for ((index, text) in texts.withIndex()) {
                         val box = boxDataList[index]
+                        val matched = matchedResults?.getOrNull(index)
 
                         val ibTop = box.iby0.toInt()
                         val ibLeft = box.ibx0.toInt()
@@ -1344,6 +1389,13 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
                         val bPadding = minOf(boxWidth, boxHeight) * settings.paddingPercentage
                         var boundaryShape = customBoundaries?.getOrNull(index)
+                        if (boundaryShape == null && matched?.polygonPixels != null) {
+                            boundaryShape = PolygonTextBoundary(
+                                polygon = matched.polygonPixels,
+                                padding = bPadding,
+                                visualCenter = matched.visualCenter
+                            )
+                        }
                         if (boundaryShape == null) {
                             boundaryShape = if (shape.equals("rectangular", ignoreCase = true)) {
                                 com.wip.kpsd.RectangleBoundary(padding = bPadding)

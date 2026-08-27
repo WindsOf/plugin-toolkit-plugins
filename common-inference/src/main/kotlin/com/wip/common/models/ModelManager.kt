@@ -103,7 +103,94 @@ class ModelManager(
         val lowerGgufExists = lowerGguf != null && fileSystem.exists(lowerGguf)
         val fallbackResult = lowerYamlExists && (lowerOnnxExists || lowerGgufExists)
         logger?.info("[ModelManager] Model '$modelId' lowercase fallback result = $fallbackResult (yaml=$lowerYamlExists, onnx=$lowerOnnxExists, gguf=$lowerGgufExists)")
-        return fallbackResult
+        if (fallbackResult) return true
+
+        // LM Studio local directory detection
+        val catalogEntry = ModelCatalog.findById(modelId)
+        if (catalogEntry?.format == "gguf" || modelId.contains("unlimited-ocr", ignoreCase = true)) {
+            val lmStudioModel = findLmStudioModelFile(modelId)
+            if (lmStudioModel != null && lmStudioModel.exists()) {
+                val mmproj = getMmprojAbsolutePath(modelId, fileSystem)
+                if (mmproj != null && File(mmproj).exists()) {
+                    logger?.info("[ModelManager] Model '$modelId' detected in LM Studio at '${lmStudioModel.absolutePath}' with mmproj at '$mmproj'")
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    /**
+     * Searches standard LM Studio directories for local GGUF model weights.
+     */
+    fun findLmStudioModelFile(modelId: String): File? {
+        val userHome = System.getProperty("user.home") ?: return null
+        val candidates = mutableListOf<File>()
+        val catalogEntry = ModelCatalog.findById(modelId)
+        val targetName = catalogEntry?.id ?: modelId.trim()
+
+        val lmStudioSpecific = File(userHome, ".lmstudio/models/sahilchachra/Unlimited-OCR-GGUF")
+        if (lmStudioSpecific.exists() && lmStudioSpecific.isDirectory) {
+            lmStudioSpecific.listFiles()?.forEach { candidates.add(it) }
+        }
+
+        val lmStudioGeneral = File(userHome, ".lmstudio/models")
+        if (lmStudioGeneral.exists() && lmStudioGeneral.isDirectory) {
+            lmStudioGeneral.walkTopDown().maxDepth(3).filter { it.isFile && it.extension.equals("gguf", ignoreCase = true) }.forEach {
+                candidates.add(it)
+            }
+        }
+
+        return candidates.firstOrNull { file ->
+            val nameWithoutExt = file.nameWithoutExtension
+            file.name.equals("$targetName.gguf", ignoreCase = true) ||
+            nameWithoutExt.equals(targetName, ignoreCase = true) ||
+            (targetName.contains("bf16", ignoreCase = true) && nameWithoutExt.contains("bf16", ignoreCase = true)) ||
+            (targetName.contains("q8_0", ignoreCase = true) && nameWithoutExt.contains("q8_0", ignoreCase = true)) ||
+            (targetName.contains("q4_k_m", ignoreCase = true) && nameWithoutExt.contains("q4_k_m", ignoreCase = true)) ||
+            (targetName.contains("iq2_m", ignoreCase = true) && nameWithoutExt.contains("iq2_m", ignoreCase = true))
+        }
+    }
+
+    /**
+     * Searches standard LM Studio directories or local plugin storage for the multimodal projector (mmproj).
+     */
+    fun findLmStudioMmprojFile(): File? {
+        val userHome = System.getProperty("user.home") ?: return null
+        val lmStudioSpecific = File(userHome, ".lmstudio/models/sahilchachra/Unlimited-OCR-GGUF")
+        if (lmStudioSpecific.exists() && lmStudioSpecific.isDirectory) {
+            val direct = File(lmStudioSpecific, "mmproj-Unlimited-OCR-F16.gguf")
+            if (direct.exists()) return direct
+            val anyMmproj = lmStudioSpecific.listFiles()?.firstOrNull { it.name.startsWith("mmproj", ignoreCase = true) && it.extension.equals("gguf", ignoreCase = true) }
+            if (anyMmproj != null) return anyMmproj
+        }
+
+        val lmStudioGeneral = File(userHome, ".lmstudio/models")
+        if (lmStudioGeneral.exists() && lmStudioGeneral.isDirectory) {
+            return lmStudioGeneral.walkTopDown().maxDepth(3).firstOrNull {
+                it.isFile && it.name.startsWith("mmproj", ignoreCase = true) && it.extension.equals("gguf", ignoreCase = true)
+            }
+        }
+        return null
+    }
+
+    /**
+     * Resolves the absolute path to the multimodal projector (.gguf) file.
+     */
+    fun getMmprojAbsolutePath(modelId: String, fileSystem: PluginFileSystem): String? {
+        val basePath = fileSystem.getBasePath().trimEnd('/', '\\')
+        val catalogEntry = ModelCatalog.findById(modelId)
+        val extraFiles = catalogEntry?.extraFileUrls?.keys ?: emptySet()
+        for (extra in extraFiles) {
+            if (extra.startsWith("mmproj", ignoreCase = true)) {
+                val candidate = File("$basePath/$MODELS_DIR/$extra")
+                if (candidate.exists()) return candidate.absolutePath
+            }
+        }
+        val defaultMmproj = File("$basePath/$MODELS_DIR/mmproj-Unlimited-OCR-F16.gguf")
+        if (defaultMmproj.exists()) return defaultMmproj.absolutePath
+
+        return findLmStudioMmprojFile()?.absolutePath
     }
 
     /**
@@ -183,6 +270,11 @@ class ModelManager(
         if (File(lowerOnnx).exists()) return lowerOnnx
         val lowerGguf = "$basePath/$MODELS_DIR/${modelId.trim().lowercase()}.gguf"
         if (File(lowerGguf).exists()) return lowerGguf
+
+        val lmStudioModel = findLmStudioModelFile(modelId)
+        if (lmStudioModel != null && lmStudioModel.exists()) {
+            return lmStudioModel.absolutePath
+        }
         return onnxPath
     }
 

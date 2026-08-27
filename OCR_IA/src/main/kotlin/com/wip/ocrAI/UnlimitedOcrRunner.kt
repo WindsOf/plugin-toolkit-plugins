@@ -1,18 +1,24 @@
 package com.wip.ocrAI
 
-import ai.onnxruntime.OnnxJavaType
-import ai.onnxruntime.OnnxTensor
-import ai.onnxruntime.OrtSession
-import ai.onnxruntime.TensorInfo
+import com.wip.common.inference.llama.LlamaBackend
+import com.wip.common.inference.llama.LlamaInferenceClient
+import com.wip.common.inference.llama.LlamaServerConfig
+import com.wip.common.inference.llama.LlamaServerManager
+import com.wip.common.inference.llama.LlamaServerMode
+import com.wip.common.inference.llama.LlamaServerSession
 import com.wip.common.models.AdvancedOCRResult
 import com.wip.common.models.BalloonsResponse
-import com.wip.common.models.ExecutionDevice
-import com.wip.common.models.ImageTensorUtils
 import com.wip.common.models.ModelCatalog
 import com.wip.common.models.ModelManager
-import com.wip.common.models.ModelSpec
 import com.wip.common.models.OCRResult
-import com.wip.common.models.OnnxInferenceSession
+import com.wip.ocrAI.models.OcrIASettings
+import java.awt.image.BufferedImage
+import java.io.File
+import java.nio.file.Files
+import java.util.regex.Pattern
+import javax.imageio.ImageIO
+import kotlin.math.max
+import kotlin.math.min
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -25,20 +31,11 @@ import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.PluginLogger
 import org.wip.plugintoolkit.api.PluginSignal
-import java.awt.image.BufferedImage
-import java.io.File
-import java.nio.FloatBuffer
-import java.nio.IntBuffer
-import java.nio.LongBuffer
-import java.nio.file.Files
-import java.util.regex.Pattern
-import javax.imageio.ImageIO
-import kotlin.math.max
-import kotlin.math.min
 
 class UnlimitedOcrRunner(
     private val context: PluginContext,
-    private val hostFs: HostFileSystem
+    private val hostFs: HostFileSystem,
+    private val settings: OcrIASettings = OcrIASettings()
 ) {
     private val logger: PluginLogger = context.logger
     private val progressReporter = context.progress
@@ -80,179 +77,60 @@ class UnlimitedOcrRunner(
         return files
     }
 
-    private suspend fun getSession(): Pair<OnnxInferenceSession, ModelSpec>? {
-        val modelId = ModelCatalog.UNLIMITED_OCR_ID
-        val isInstalled = ModelManager.Default.isModelInstalled(modelId, context.fileSystem, logger)
-        val candidateId = if (isInstalled) {
-            modelId
-        } else if (ModelManager.Default.isModelInstalled(ModelCatalog.UNLIMITED_OCR_BF16_ID, context.fileSystem, logger)) {
-            ModelCatalog.UNLIMITED_OCR_BF16_ID
-        } else {
-            logger.warn("Unlimited-OCR model '$modelId' is not installed in plugin storage. Please download it via the 'Download Model' action.")
+    private suspend fun getLlamaServerSession(targetModelId: String? = null): LlamaServerSession? {
+        val candidateGgufIds = listOfNotNull(
+            targetModelId.takeIf { !it.isNullOrBlank() && it != ModelCatalog.UNLIMITED_OCR_ID },
+            ModelCatalog.UNLIMITED_OCR_BF16_ID,
+            ModelCatalog.UNLIMITED_OCR_Q8_0_ID,
+            ModelCatalog.UNLIMITED_OCR_Q4_K_M_ID,
+            ModelCatalog.UNLIMITED_OCR_IQ2_M_ID,
+            ModelCatalog.UNLIMITED_OCR_ID
+        ).distinct()
+
+        val installedId = candidateGgufIds.firstOrNull {
+            ModelManager.Default.isModelInstalled(it, context.fileSystem, logger)
+        }
+
+        if (installedId == null) {
+            logger.warn("Unlimited-OCR model is not installed in plugin storage or LM Studio. Please download it via the 'Download Model' action.")
             return null
         }
 
-        val spec = ModelManager.Default.getModelSpec(candidateId, context.fileSystem, logger)
-            ?: ModelSpec(
-                name = candidateId,
-                type = "deepseek_ocr_decoder",
-                inputWidth = 1024,
-                inputHeight = 1024
-            )
+        val modelPath = ModelManager.Default.getModelAbsolutePath(installedId, context.fileSystem)
+        if (!File(modelPath).exists() || !modelPath.endsWith(".gguf", ignoreCase = true)) {
+            logger.warn("Model path '$modelPath' is invalid or not a .gguf file.")
+            return null
+        }
 
-        val session = ModelManager.Default.createInferenceSession(
-            modelId = candidateId,
-            fileSystem = context.fileSystem,
-            preferredDevice = ExecutionDevice.AUTO,
-            logger = logger
+        val mmprojPath = ModelManager.Default.getMmprojAbsolutePath(installedId, context.fileSystem)
+        if (mmprojPath != null) {
+            logger.info("Found multimodal projector (mmproj) for Unlimited-OCR: $mmprojPath")
+        } else {
+            logger.warn("No multimodal projector (mmproj) found for Unlimited-OCR. Multimodal vision parsing may fail without --mmproj.")
+        }
+
+        val llamaConfig = LlamaServerConfig(
+            mode = settings.llamaServerMode ?: LlamaServerMode.AUTO,
+            backend = settings.llamaServerBackend ?: LlamaBackend.AUTO,
+            customPath = settings.llamaServerCustomPath?.ifBlank { null },
+            gpuLayers = settings.llamaServerGpuLayers ?: 99,
+            port = settings.llamaServerPort ?: 8080,
+            contextSize = settings.llamaServerContextSize ?: 8192,
+            mmprojPath = mmprojPath
         )
 
-        return if (session != null) {
-            Pair(session, spec)
-        } else {
-            logger.warn("Failed to create ONNX session for '$candidateId'.")
+        return try {
+            LlamaServerManager.Default.getOrStartServer(
+                modelPath = modelPath,
+                config = llamaConfig,
+                fileSystem = context.fileSystem,
+                logger = logger,
+                progress = progressReporter
+            )
+        } catch (e: Exception) {
+            logger.warn("Failed to start llama-server for '$modelPath': ${e.message}")
             null
         }
-    }
-
-    private fun runInferenceOnImage(
-        session: OnnxInferenceSession,
-        spec: ModelSpec,
-        image: BufferedImage
-    ): String {
-        val inputNames = session.session.inputNames
-        val inputInfo = session.session.inputInfo
-        val targetW = spec.effectiveWidth.takeIf { it > 0 } ?: 1024
-        val targetH = spec.effectiveHeight.takeIf { it > 0 } ?: 1024
-
-        logger.info("[UnlimitedOcrRunner] Model input signatures: ${inputNames.map { "$it -> ${inputInfo[it]?.info}" }}")
-
-        val tensorMap = mutableMapOf<String, OnnxTensor>()
-        try {
-            for (name in inputNames) {
-                val nodeInfo = inputInfo[name]
-                val tensorInfo = nodeInfo?.info as? TensorInfo
-                val tensorType = tensorInfo?.type ?: OnnxJavaType.FLOAT
-                val shape = tensorInfo?.shape
-
-                when (tensorType) {
-                    OnnxJavaType.FLOAT -> {
-                        val isImage = name.contains("image", ignoreCase = true) ||
-                                name.contains("pixel", ignoreCase = true) ||
-                                name == "x" ||
-                                (shape != null && shape.size == 4 && (shape[1] == 3L || shape[3] == 3L)) ||
-                                (tensorMap.none { it.value.info.type == OnnxJavaType.FLOAT })
-
-                        if (isImage) {
-                            tensorMap[name] = ImageTensorUtils.createTensor(session.environment, image, targetW, targetH)
-                        } else {
-                            val dummy = floatArrayOf(0.0f)
-                            tensorMap[name] = OnnxTensor.createTensor(
-                                session.environment,
-                                FloatBuffer.wrap(dummy),
-                                longArrayOf(1L, 1L)
-                            )
-                        }
-                    }
-                    OnnxJavaType.INT64 -> {
-                        val tensor = if (name.contains("mask", ignoreCase = true)) {
-                            val mask = longArrayOf(1L)
-                            OnnxTensor.createTensor(
-                                session.environment,
-                                LongBuffer.wrap(mask),
-                                longArrayOf(1L, mask.size.toLong())
-                            )
-                        } else if (name.contains("grid", ignoreCase = true) || name.contains("thw", ignoreCase = true)) {
-                            val grid = longArrayOf(1L, (targetH / 14).toLong(), (targetW / 14).toLong())
-                            OnnxTensor.createTensor(
-                                session.environment,
-                                LongBuffer.wrap(grid),
-                                longArrayOf(1L, 3L)
-                            )
-                        } else {
-                            // input_ids / prompt token IDs (default 0L)
-                            val promptIds = longArrayOf(0L)
-                            OnnxTensor.createTensor(
-                                session.environment,
-                                LongBuffer.wrap(promptIds),
-                                longArrayOf(1L, promptIds.size.toLong())
-                            )
-                        }
-                        tensorMap[name] = tensor
-                    }
-                    OnnxJavaType.INT32 -> {
-                        val dummy = intArrayOf(0)
-                        tensorMap[name] = OnnxTensor.createTensor(
-                            session.environment,
-                            IntBuffer.wrap(dummy),
-                            longArrayOf(1L, 1L)
-                        )
-                    }
-                    else -> {
-                        logger.warn("[UnlimitedOcrRunner] Unsupported input tensor type for '$name': $tensorType")
-                    }
-                }
-            }
-
-            if (tensorMap.isEmpty() && inputNames.isNotEmpty()) {
-                val firstInput = inputNames.first()
-                tensorMap[firstInput] = ImageTensorUtils.createTensor(session.environment, image, targetW, targetH)
-            }
-
-            val result = session.run(tensorMap)
-            return parseSessionResult(result)
-        } finally {
-            tensorMap.values.forEach { tensor ->
-                try {
-                    tensor.close()
-                } catch (e: Exception) {
-                    // Ignore tensor close exception
-                }
-            }
-        }
-    }
-
-    private fun parseSessionResult(result: OrtSession.Result): String {
-        val sb = StringBuilder()
-        for (output in result) {
-            val value = output.value
-            if (value is OnnxTensor) {
-                logger.info("[UnlimitedOcrRunner] Model output '${output.key}': type=${value.info.type}, shape=${value.info.shape.contentToString()}")
-                when (value.info.type) {
-                    OnnxJavaType.STRING -> {
-                        val stringData = value.value
-                        if (stringData is Array<*>) {
-                            for (item in stringData) {
-                                if (item is Array<*>) {
-                                    sb.append(item.filterNotNull().joinToString(" ")).append("\n")
-                                } else if (item != null) {
-                                    sb.append(item.toString()).append("\n")
-                                }
-                            }
-                        } else if (stringData is String) {
-                            sb.append(stringData).append("\n")
-                        }
-                    }
-                    OnnxJavaType.INT64 -> {
-                        val tensorVal = value.value
-                        if (tensorVal is Array<*>) {
-                            for (row in tensorVal) {
-                                if (row is LongArray) {
-                                    val chars = row.asSequence().mapNotNull { if (it in 32..126 || it == 10L || it == 13L) it.toInt().toChar() else null }.toList()
-                                    if (chars.isNotEmpty()) {
-                                        sb.append(chars.toCharArray().concatToString()).append("\n")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    else -> {}
-                }
-            }
-        }
-        val outText = sb.toString().trim()
-        logger.info("[UnlimitedOcrRunner] Raw model output: $outText")
-        return outText
     }
 
     data class ExtractedTextRegion(
@@ -420,15 +298,17 @@ class UnlimitedOcrRunner(
         save: Boolean,
         outputDir: String,
         useStructuredOutput: Boolean,
-        saveThinking: Boolean
+        saveThinking: Boolean,
+        targetModelId: String? = null
     ): OCRResult {
         val files = resolveFiles(input)
         if (files.isEmpty()) {
             return OCRResult(emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
         }
-        logger.info("[UnlimitedOcrRunner] Starting OCR for ${files.size} image(s)...")
+        logger.info("[UnlimitedOcrRunner] Starting OCR for ${files.size} image(s) with model '$targetModelId'...")
 
-        val sessionPair = getSession()
+        val llamaSession = getLlamaServerSession(targetModelId)
+
         val allTexts = mutableListOf<String>()
         val allBoxes = mutableListOf<List<Double>>()
         val allPageNumbers = mutableListOf<Int>()
@@ -436,51 +316,53 @@ class UnlimitedOcrRunner(
         val failedFiles = mutableListOf<String>()
         val total = files.size
 
-        try {
-            for ((index, file) in files.withIndex()) {
-                if (isCancelled) {
-                    logger.info("[UnlimitedOcrRunner] Execution cancelled.")
-                    break
-                }
-
-                try {
-                    val image = withContext(Dispatchers.IO) {
-                        ImageIO.read(file)
-                    } ?: throw IllegalArgumentException("Failed to decode image from path: ${file.absolutePath}")
-
-                    val imgW = image.width.toDouble()
-                    val imgH = image.height.toDouble()
-
-                    val rawOutput = if (sessionPair != null) {
-                        runInferenceOnImage(sessionPair.first, sessionPair.second, image)
-                    } else {
-                        throw IllegalStateException("Unlimited-OCR model session is unavailable. Make sure model is installed.")
-                    }
-
-                    val regions = parseOcrOutput(rawOutput, imgW, imgH)
-                    for (r in regions) {
-                        allTexts.add(r.text)
-                        allBoxes.add(listOf(r.ymin, r.xmin, r.ymax, r.xmax))
-                        allPageNumbers.add(index + 1)
-                        allPageNames.add(file.name)
-                    }
-
-                    saveJsonResult(save, outputDir, file, regions, rawOutput)
-                } catch (e: Throwable) {
-                    logger.error("[UnlimitedOcrRunner] Failed to process '${file.name}': ${e.message}")
-                    failedFiles.add(file.name)
-                    if (save) {
-                        val outDir = File(outputDir)
-                        if (!outDir.exists()) outDir.mkdirs()
-                        val errorFile = File(outDir, "${file.name}_ERROR.txt")
-                        errorFile.writeText("Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}", Charsets.UTF_8)
-                    }
-                }
-
-                progressReporter.report((index + 1).toFloat() / total.toFloat())
+        for ((index, file) in files.withIndex()) {
+            if (isCancelled) {
+                logger.info("[UnlimitedOcrRunner] Execution cancelled.")
+                break
             }
-        } finally {
-            sessionPair?.first?.close()
+
+            try {
+                val image = withContext(Dispatchers.IO) {
+                    ImageIO.read(file)
+                } ?: throw IllegalArgumentException("Failed to decode image from path: ${file.absolutePath}")
+
+                val imgW = image.width.toDouble()
+                val imgH = image.height.toDouble()
+
+                val rawOutput = if (llamaSession != null) {
+                    val prompt = "Locate all speech bubbles and text in this image. Provide text transcriptions and bounding boxes."
+                    LlamaInferenceClient.Default.executeVisionChat(
+                        baseUrl = llamaSession.baseUrl,
+                        imageFile = file,
+                        promptInstructions = prompt,
+                        logger = logger
+                    )
+                } else {
+                    throw IllegalStateException("No Unlimited-OCR GGUF model or llama-server session is available.")
+                }
+
+                val regions = parseOcrOutput(rawOutput, imgW, imgH)
+                for (r in regions) {
+                    allTexts.add(r.text)
+                    allBoxes.add(listOf(r.ymin, r.xmin, r.ymax, r.xmax))
+                    allPageNumbers.add(index + 1)
+                    allPageNames.add(file.name)
+                }
+
+                saveJsonResult(save, outputDir, file, regions, rawOutput)
+            } catch (e: Throwable) {
+                logger.error("[UnlimitedOcrRunner] Failed to process '${file.name}': ${e.message}")
+                failedFiles.add(file.name)
+                if (save) {
+                    val outDir = File(outputDir)
+                    if (!outDir.exists()) outDir.mkdirs()
+                    val errorFile = File(outDir, "${file.name}_ERROR.txt")
+                    errorFile.writeText("Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}", Charsets.UTF_8)
+                }
+            }
+
+            progressReporter.report((index + 1).toFloat() / total.toFloat())
         }
 
         return OCRResult(allTexts, allBoxes, allPageNumbers, allPageNames, failedFiles)
@@ -491,7 +373,8 @@ class UnlimitedOcrRunner(
         save: Boolean,
         outputDir: String,
         useStructuredOutput: Boolean,
-        saveThinking: Boolean
+        saveThinking: Boolean,
+        targetModelId: String? = null
     ): AdvancedOCRResult {
         val files = resolveFiles(input)
         if (files.isEmpty()) {
@@ -501,9 +384,10 @@ class UnlimitedOcrRunner(
                 emptyList(), emptyList(), emptyList(), emptyList()
             )
         }
-        logger.info("[UnlimitedOcrRunner] Starting Advanced OCR for ${files.size} image(s)...")
+        logger.info("[UnlimitedOcrRunner] Starting Advanced OCR for ${files.size} image(s) with model '$targetModelId'...")
 
-        val sessionPair = getSession()
+        val llamaSession = getLlamaServerSession(targetModelId)
+
         val allTexts = mutableListOf<String>()
         val allBalloonBoxes = mutableListOf<List<Double>>()
         val allTextBoxes = mutableListOf<List<Double>>()
@@ -520,61 +404,63 @@ class UnlimitedOcrRunner(
         val failedFiles = mutableListOf<String>()
         val total = files.size
 
-        try {
-            for ((index, file) in files.withIndex()) {
-                if (isCancelled) {
-                    logger.info("[UnlimitedOcrRunner] Execution cancelled.")
-                    break
-                }
-
-                try {
-                    val image = withContext(Dispatchers.IO) {
-                        ImageIO.read(file)
-                    } ?: throw IllegalArgumentException("Failed to decode image from path: ${file.absolutePath}")
-
-                    val imgW = image.width.toDouble()
-                    val imgH = image.height.toDouble()
-
-                    val rawOutput = if (sessionPair != null) {
-                        runInferenceOnImage(sessionPair.first, sessionPair.second, image)
-                    } else {
-                        throw IllegalStateException("Unlimited-OCR model session is unavailable. Make sure model is installed.")
-                    }
-
-                    val regions = parseOcrOutput(rawOutput, imgW, imgH)
-                    for (r in regions) {
-                        allTexts.add(r.text)
-                        val box = listOf(r.ymin, r.xmin, r.ymax, r.xmax)
-                        allBalloonBoxes.add(box)
-                        allTextBoxes.add(box)
-                        allShapes.add(r.shape)
-                        allFontStyles.add(r.fontStyle)
-                        allFontFamilies.add(r.fontFamily)
-                        allAngles.add(r.textAngle)
-                        allIsSparse.add(r.isSparse)
-                        allTextColors.add(r.textColor)
-                        allHasBorder.add(r.hasBorder)
-                        allBorderColors.add(r.borderColor)
-                        allPageNumbers.add(index + 1)
-                        allPageNames.add(file.name)
-                    }
-
-                    saveJsonResult(save, outputDir, file, regions, rawOutput)
-                } catch (e: Throwable) {
-                    logger.error("[UnlimitedOcrRunner] Failed to process '${file.name}': ${e.message}")
-                    failedFiles.add(file.name)
-                    if (save) {
-                        val outDir = File(outputDir)
-                        if (!outDir.exists()) outDir.mkdirs()
-                        val errorFile = File(outDir, "${file.name}_ERROR.txt")
-                        errorFile.writeText("Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}", Charsets.UTF_8)
-                    }
-                }
-
-                progressReporter.report((index + 1).toFloat() / total.toFloat())
+        for ((index, file) in files.withIndex()) {
+            if (isCancelled) {
+                logger.info("[UnlimitedOcrRunner] Execution cancelled.")
+                break
             }
-        } finally {
-            sessionPair?.first?.close()
+
+            try {
+                val image = withContext(Dispatchers.IO) {
+                    ImageIO.read(file)
+                } ?: throw IllegalArgumentException("Failed to decode image from path: ${file.absolutePath}")
+
+                val imgW = image.width.toDouble()
+                val imgH = image.height.toDouble()
+
+                val rawOutput = if (llamaSession != null) {
+                    val prompt = "Locate all speech bubbles and text in this image. For each text area provide balloon_box_2d [ymin, xmin, ymax, xmax], text_box_2d [ymin, xmin, ymax, xmax], shape, and transcribed text."
+                    LlamaInferenceClient.Default.executeVisionChat(
+                        baseUrl = llamaSession.baseUrl,
+                        imageFile = file,
+                        promptInstructions = prompt,
+                        logger = logger
+                    )
+                } else {
+                    throw IllegalStateException("No Unlimited-OCR GGUF model or llama-server session is available.")
+                }
+
+                val regions = parseOcrOutput(rawOutput, imgW, imgH)
+                for (r in regions) {
+                    allTexts.add(r.text)
+                    val box = listOf(r.ymin, r.xmin, r.ymax, r.xmax)
+                    allBalloonBoxes.add(box)
+                    allTextBoxes.add(box)
+                    allShapes.add(r.shape)
+                    allFontStyles.add(r.fontStyle)
+                    allFontFamilies.add(r.fontFamily)
+                    allAngles.add(r.textAngle)
+                    allIsSparse.add(r.isSparse)
+                    allTextColors.add(r.textColor)
+                    allHasBorder.add(r.hasBorder)
+                    allBorderColors.add(r.borderColor)
+                    allPageNumbers.add(index + 1)
+                    allPageNames.add(file.name)
+                }
+
+                saveJsonResult(save, outputDir, file, regions, rawOutput)
+            } catch (e: Throwable) {
+                logger.error("[UnlimitedOcrRunner] Failed to process '${file.name}': ${e.message}")
+                failedFiles.add(file.name)
+                if (save) {
+                    val outDir = File(outputDir)
+                    if (!outDir.exists()) outDir.mkdirs()
+                    val errorFile = File(outDir, "${file.name}_ERROR.txt")
+                    errorFile.writeText("Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}", Charsets.UTF_8)
+                }
+            }
+
+            progressReporter.report((index + 1).toFloat() / total.toFloat())
         }
 
         return AdvancedOCRResult(

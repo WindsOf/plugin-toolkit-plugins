@@ -30,7 +30,7 @@ import org.wip.plugintoolkit.api.annotations.PluginValidate
     description = "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog",
     supportedOs = [OS.WINDOWS]
 )
-class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
+class OCR_IA(val settings: OcrIASettings) {
 
     @PluginLoad
     fun onLoad(logger: PluginLogger): Result<Unit> {
@@ -55,15 +55,15 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
 
     @PluginAction(
         name = "Download Model",
-        description = "Downloads a specific ONNX OCR model and descriptor to local plugin storage"
+        description = "Downloads a specific OCR model and descriptor to local plugin storage"
     )
     suspend fun downloadModel(
-        @CapabilityParam(description = "Select OCR model to download", defaultValue = "\"UNLIMITED_OCR\"")
-        model: OcrDownloadModel? = OcrDownloadModel.UNLIMITED_OCR,
+        @CapabilityParam(description = "Select OCR model to download", defaultValue = "\"UNLIMITED_OCR_Q4_K_M\"")
+        model: OcrDownloadModel? = OcrDownloadModel.UNLIMITED_OCR_Q4_K_M,
         context: PluginContext
     ) {
         val logger = context.logger
-        val targetModel = model ?: OcrDownloadModel.UNLIMITED_OCR
+        val targetModel = model ?: OcrDownloadModel.UNLIMITED_OCR_Q4_K_M
         logger.info("[OCR_IA] downloadModel action triggered for: ${targetModel.name} (${targetModel.modelId})")
         val result = ModelManager.Default.downloadModel(targetModel.modelId, context)
         if (result.isFailure) {
@@ -75,7 +75,7 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
 
     @PluginAction(
         name = "Download All Models",
-        description = "Downloads all required ONNX OCR models and descriptors to local plugin storage"
+        description = "Downloads all required ONNX or GGUF OCR models and descriptors to local plugin storage"
     )
     suspend fun downloadAllModels(context: PluginContext) {
         val ocrIds = OcrDownloadModel.entries.map { it.modelId }
@@ -117,9 +117,9 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
         logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput")
 
         return try {
-            if (model == AIModel.UNLIMITED_OCR) {
-                val runner = UnlimitedOcrRunner(context, hostFs)
-                return runner.performOcr(input, save, outputDir, useStructuredOutput, saveThinking)
+            if (model in setOf(AIModel.UNLIMITED_OCR, AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M)) {
+                val runner = UnlimitedOcrRunner(context, hostFs, settings)
+                return runner.performOcr(input, save, outputDir, useStructuredOutput, saveThinking, targetModelId = model.id)
             }
             val service = KoogOcrService(context, settings, hostFs)
             val ocrResult = service.performOcr(input, save, outputDir, useStructuredOutput, saveThinking, model)
@@ -166,9 +166,9 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
         logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput")
 
         return try {
-            if (model == AIModel.UNLIMITED_OCR) {
-                val runner = UnlimitedOcrRunner(context, hostFs)
-                return runner.performAdvancedOcr(input, save, outputDir, useStructuredOutput, saveThinking)
+            if (model in setOf(AIModel.UNLIMITED_OCR, AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M)) {
+                val runner = UnlimitedOcrRunner(context, hostFs, settings)
+                return runner.performAdvancedOcr(input, save, outputDir, useStructuredOutput, saveThinking, targetModelId = model.id)
             }
             val service = KoogOcrService(context, settings, hostFs)
             val ocrResult = service.performAdvancedOcr(input, save, outputDir, useStructuredOutput, saveThinking, model)

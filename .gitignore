@@ -12,6 +12,8 @@ local.properties
 captures
 .externalNativeBuild
 .cxx
+/remote
+__pycache__
 *.xcodeproj/*
 !*.xcodeproj/project.pbxproj
 !*.xcodeproj/xcshareddata/
@@ -30,3 +32,5 @@ PluginDevelopment.md
 /.venv/Scripts
 .agents
 /dist/
+temp_test.jar
+test_sign.jar
