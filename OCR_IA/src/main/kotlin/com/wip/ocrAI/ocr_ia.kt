@@ -4,6 +4,7 @@ import com.wip.common.inference.llama.LlamaBackend
 import com.wip.common.inference.llama.LlamaBinaryDownloader
 import com.wip.common.inference.llama.LlamaServerManager
 import com.wip.common.models.AdvancedOCRResult
+import com.wip.common.models.ChapterVisionResult
 import com.wip.common.models.ModelCatalog
 import com.wip.common.models.ModelManager
 import com.wip.common.models.OCRResult
@@ -177,6 +178,17 @@ class OCR_IA(val settings: OcrIASettings) {
             logger.warn("[OCR_IA] llama-server was not detected on this system or plugin storage. Use the 'Install Llama Server' action to download and configure it.")
         }
     }
+
+    @PluginAction(
+        name = "Stop Llama Server",
+        description = "Gracefully stops any active local llama-server instance"
+    )
+    suspend fun stopLlamaServer(context: PluginContext) {
+        val logger = context.logger
+        logger.info("[OCR_IA] stopLlamaServer action triggered.")
+        LlamaServerManager.Default.stopActiveServer(logger)
+        logger.info("[OCR_IA] Any active llama-server has been stopped.")
+    }
     
     @Capability(
         name = "ocr",
@@ -202,20 +214,24 @@ class OCR_IA(val settings: OcrIASettings) {
         saveThinking: Boolean,
         @CapabilityParam(description = "The AI Model to use", defaultValue = "GEMMA_26B")
         model: AIModel,
+        @CapabilityParam(description = "Optional Chapter Vision segmentation result to run OCR on cropped regions of interest")
+        chapterVisionResult: ChapterVisionResult? = null,
+        @CapabilityParam(description = "Padding in pixels around detected regions for cutout OCR", defaultValue = "100")
+        cropPadding: Int = 100,
         context: PluginContext,
         hostFs: HostFileSystem
     ): OCRResult {
         val logger = context.logger
         logger.info("OCR IA (Basic) v2.4.0 started. Model: ${model.id}")
-        logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput")
+        logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput | VisionAssisted: ${chapterVisionResult != null}")
 
         return try {
             if (model in setOf(AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M)) {
                 val runner = UnlimitedOcrRunner(context, hostFs, settings)
-                return runner.performOcr(input, save, outputDir, useStructuredOutput, saveThinking, targetModelId = model.id)
+                return runner.performOcr(input, save, outputDir, useStructuredOutput, saveThinking, targetModelId = model.id, chapterVisionResult = chapterVisionResult, cropPadding = cropPadding)
             }
             val service = KoogOcrService(context, settings, hostFs)
-            val ocrResult = service.performOcr(input, save, outputDir, useStructuredOutput, saveThinking, model)
+            val ocrResult = service.performOcr(input, save, outputDir, useStructuredOutput, saveThinking, model, chapterVisionResult = chapterVisionResult, cropPadding = cropPadding)
             OCRResult(ocrResult.texts, ocrResult.bb, ocrResult.pageNumbers, ocrResult.pageNames, ocrResult.failedFiles)
         } catch (e: Throwable) {
             val msg = "OCR failed: ${e::class.simpleName}: ${e.message}"
@@ -251,20 +267,24 @@ class OCR_IA(val settings: OcrIASettings) {
         saveThinking: Boolean,
         @CapabilityParam(description = "The AI Model to use", defaultValue = "GEMMA_31B")
         model: AIModel,
+        @CapabilityParam(description = "Optional Chapter Vision segmentation result to run OCR on cropped regions of interest")
+        chapterVisionResult: ChapterVisionResult? = null,
+        @CapabilityParam(description = "Padding in pixels around detected regions for cutout OCR", defaultValue = "100")
+        cropPadding: Int = 100,
         context: PluginContext,
         hostFs: HostFileSystem
     ): AdvancedOCRResult {
         val logger = context.logger
         logger.info("OCR IA (Advanced) v2.4.0 started. Model: ${model.id}")
-        logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput")
+        logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput | VisionAssisted: ${chapterVisionResult != null}")
 
         return try {
             if (model in setOf(AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M)) {
                 val runner = UnlimitedOcrRunner(context, hostFs, settings)
-                return runner.performAdvancedOcr(input, save, outputDir, useStructuredOutput, saveThinking, targetModelId = model.id)
+                return runner.performAdvancedOcr(input, save, outputDir, useStructuredOutput, saveThinking, targetModelId = model.id, chapterVisionResult = chapterVisionResult, cropPadding = cropPadding)
             }
             val service = KoogOcrService(context, settings, hostFs)
-            val ocrResult = service.performAdvancedOcr(input, save, outputDir, useStructuredOutput, saveThinking, model)
+            val ocrResult = service.performAdvancedOcr(input, save, outputDir, useStructuredOutput, saveThinking, model, chapterVisionResult = chapterVisionResult, cropPadding = cropPadding)
             AdvancedOCRResult(
                 texts = ocrResult.texts,
                 balloonBoxes = ocrResult.balloonBoxes,

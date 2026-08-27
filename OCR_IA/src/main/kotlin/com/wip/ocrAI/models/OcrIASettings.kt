@@ -87,7 +87,14 @@ data class OcrIASettings(
         defaultValue = "8192",
         required = false
     )
-    val llamaServerContextSize: Int? = 8192
+    val llamaServerContextSize: Int? = 8192,
+
+    @PluginSetting(
+        description = "Automatically stop local llama-server and unload model from memory after OCR capability finishes",
+        defaultValue = "true",
+        required = false
+    )
+    val llamaServerAutoStop: Boolean? = true
 )
 
 enum class AIModel(val id: String) {

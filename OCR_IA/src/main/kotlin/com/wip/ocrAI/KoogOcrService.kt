@@ -21,6 +21,7 @@ import ai.koog.prompt.params.LLMParams
 import com.wip.common.models.AdvancedBalloonsResponse
 import com.wip.common.models.AdvancedOcrServiceResult
 import com.wip.common.models.BalloonsResponse
+import com.wip.common.models.ChapterVisionResult
 import com.wip.common.models.OcrServiceResult
 import com.wip.ocrAI.models.AIModel
 import com.wip.ocrAI.models.OcrIASettings
@@ -239,11 +240,13 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
         outputDir: String,
         useStructuredOutput: Boolean,
         saveThinking: Boolean,
-        aiModel: AIModel
+        aiModel: AIModel,
+        chapterVisionResult: ChapterVisionResult? = null,
+        cropPadding: Int = 100
     ): OcrServiceResult {
         if (aiModel in setOf(AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M)) {
             val runner = UnlimitedOcrRunner(context, hostFs, settings)
-            val res = runner.performOcr(input, save, outputDir, useStructuredOutput, saveThinking, targetModelId = aiModel.id)
+            val res = runner.performOcr(input, save, outputDir, useStructuredOutput, saveThinking, targetModelId = aiModel.id, chapterVisionResult = chapterVisionResult, cropPadding = cropPadding)
             return OcrServiceResult(res.texts, res.bb, res.pageNumbers, res.pageNames, res.failedFiles)
         }
 
@@ -251,7 +254,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
         if (files.isEmpty()) {
             return OcrServiceResult(emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
         }
-        logger.info("Found ${files.size} image(s) to process.")
+        logger.info("Found ${files.size} image(s) to process (hasVisionResult=${chapterVisionResult != null}, cropPadding=$cropPadding).")
 
         val executor = try {
             getExecutor(aiModel)
@@ -324,52 +327,121 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
                     semaphore.withPermit {
                         if (isCancelled) return@async
                         try {
-                            val ocrPrompt = prompt(
-                                id = "ocr-task",
-                                params = LLMParams(
-                                    schema = if (useStructuredOutput) LLMParams.Schema.JSON.Basic("BalloonsResponse", balloonSchema) else null
-                                )
-                            ) {
-                                user {
-                                    text(effectivePromptInstructions)
-                                    image(Path(file.absolutePath))
-                                }
-                            }
+                            val (imgWidth, imgHeight) = getImageDimensions(file)
+                            val pageVisionResult = VisionCutoutHelper.findMatchingVisionResult(file, chapterVisionResult)
+                            val cropRegions = if (pageVisionResult != null && pageVisionResult.objects.isNotEmpty()) {
+                                VisionCutoutHelper.computeCropRegions(pageVisionResult.objects, imgWidth.toInt(), imgHeight.toInt(), paddingPx = cropPadding)
+                            } else emptyList()
 
-                            val (balloonsResponse, rawResponse) = retryWithBackoff {
-                                // Calling execute directly, relying on Koog's shared interface
-                                val responses = executor.execute(ocrPrompt, model)
-                                
-                                var originalText = ""
-                                // Handling list of responses from Koog
-                                for (res in responses) {
-                                    if (res != null) {
-                                        originalText += "${res.content}\n"
+                            if (cropRegions.isNotEmpty()) {
+                                logger.info("[KoogOcrService] Processing ${cropRegions.size} ROI crop(s) for '${file.name}' based on Vision detections...")
+                                val baseImg = withContext(Dispatchers.IO) { ImageIO.read(file) }
+                                    ?: throw IllegalArgumentException("Failed to decode image from path: ${file.absolutePath}")
+                                val pageResponses = mutableListOf<String>()
+
+                                for (crop in cropRegions) {
+                                    if (isCancelled) break
+                                    val subImg = baseImg.getSubimage(crop.xmin, crop.ymin, crop.width, crop.height)
+                                    val tempCropFile = File.createTempFile("koog_ocr_crop_${file.nameWithoutExtension}_", ".png")
+                                    try {
+                                        withContext(Dispatchers.IO) {
+                                            ImageIO.write(subImg, "png", tempCropFile)
+                                        }
+                                        val ocrPrompt = prompt(
+                                            id = "ocr-task",
+                                            params = LLMParams(
+                                                schema = if (useStructuredOutput) LLMParams.Schema.JSON.Basic("BalloonsResponse", balloonSchema) else null
+                                            )
+                                        ) {
+                                            user {
+                                                text(effectivePromptInstructions)
+                                                image(Path(tempCropFile.absolutePath))
+                                            }
+                                        }
+
+                                        val (balloonsResponse, rawResponse) = retryWithBackoff {
+                                            val responses = executor.execute(ocrPrompt, model)
+                                            var originalText = ""
+                                            for (res in responses) {
+                                                if (res != null) {
+                                                    originalText += "${res.content}\n"
+                                                }
+                                            }
+                                            originalText = originalText.trim()
+                                            val rawText = originalText.replace(Regex("<(thought|thinking)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), "").trim()
+                                            val jsonToParse = if (!useStructuredOutput) extractJsonFromText(rawText) else rawText
+                                            val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<BalloonsResponse>(jsonToParse)
+                                            val finalRawResponse = if (saveThinking) originalText else rawText
+                                            Pair(parsed, finalRawResponse)
+                                        }
+                                        pageResponses.add(rawResponse)
+
+                                        val cropW = crop.width.toDouble()
+                                        val cropH = crop.height.toDouble()
+
+                                        resultsMutex.withLock {
+                                            balloonsResponse.balloons.forEach { balloon ->
+                                                allTexts.add(balloon.text)
+                                                val originalBox = listOf(balloon.ymin, balloon.xmin, balloon.ymax, balloon.xmax)
+                                                val scaledLocalBox = scaleBoxToPixels(originalBox, cropW, cropH)
+                                                val globalBox = VisionCutoutHelper.remapBoxToGlobal(scaledLocalBox, crop, imgWidth, imgHeight)
+                                                allBoxes.add(globalBox)
+                                                allPageNumbers.add(index + 1)
+                                                allPageNames.add(file.name)
+                                            }
+                                        }
+                                    } finally {
+                                        tempCropFile.delete()
                                     }
                                 }
-                                originalText = originalText.trim()
-                                val rawText = originalText.replace(Regex("<(thought|thinking)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), "").trim()
-
-                                val jsonToParse = if (!useStructuredOutput) extractJsonFromText(rawText) else rawText
-                                val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<BalloonsResponse>(jsonToParse)
-                                val finalRawResponse = if (saveThinking) originalText else rawText
-                                Pair(parsed, finalRawResponse)
-                            }
-
-                            val (imgWidth, imgHeight) = getImageDimensions(file)
-
-                            resultsMutex.withLock {
-                                balloonsResponse.balloons.forEach { balloon ->
-                                    allTexts.add(balloon.text)
-                                    val originalBox = listOf(balloon.ymin, balloon.xmin, balloon.ymax, balloon.xmax)
-                                    allBoxes.add(scaleBoxToPixels(originalBox, imgWidth, imgHeight))
-                                    allPageNumbers.add(index + 1)
-                                    allPageNames.add(file.name)
+                                resultsMutex.withLock {
+                                    processedFilesCount++
+                                    progressReporter.report(processedFilesCount.toFloat() / total.toFloat())
                                 }
-                                processedFilesCount++
-                                progressReporter.report(processedFilesCount.toFloat() / total.toFloat())
+                                saveResult(save, outputDir, file, pageResponses.joinToString("\n---\n"))
+                            } else {
+                                val ocrPrompt = prompt(
+                                    id = "ocr-task",
+                                    params = LLMParams(
+                                        schema = if (useStructuredOutput) LLMParams.Schema.JSON.Basic("BalloonsResponse", balloonSchema) else null
+                                    )
+                                ) {
+                                    user {
+                                        text(effectivePromptInstructions)
+                                        image(Path(file.absolutePath))
+                                    }
+                                }
+
+                                val (balloonsResponse, rawResponse) = retryWithBackoff {
+                                    val responses = executor.execute(ocrPrompt, model)
+                                    var originalText = ""
+                                    for (res in responses) {
+                                        if (res != null) {
+                                            originalText += "${res.content}\n"
+                                        }
+                                    }
+                                    originalText = originalText.trim()
+                                    val rawText = originalText.replace(Regex("<(thought|thinking)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), "").trim()
+
+                                    val jsonToParse = if (!useStructuredOutput) extractJsonFromText(rawText) else rawText
+                                    val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<BalloonsResponse>(jsonToParse)
+                                    val finalRawResponse = if (saveThinking) originalText else rawText
+                                    Pair(parsed, finalRawResponse)
+                                }
+
+                                resultsMutex.withLock {
+                                    balloonsResponse.balloons.forEach { balloon ->
+                                        allTexts.add(balloon.text)
+                                        val originalBox = listOf(balloon.ymin, balloon.xmin, balloon.ymax, balloon.xmax)
+                                        allBoxes.add(scaleBoxToPixels(originalBox, imgWidth, imgHeight))
+                                        allPageNumbers.add(index + 1)
+                                        allPageNames.add(file.name)
+                                    }
+                                    processedFilesCount++
+                                    progressReporter.report(processedFilesCount.toFloat() / total.toFloat())
+                                }
+                                saveResult(save, outputDir, file, rawResponse)
                             }
-                            saveResult(save, outputDir, file, rawResponse)
                         } catch (e: Throwable) {
                             handleError(e, file, save, outputDir, resultsMutex, failedFiles, processedFilesCount, total)
                         }
@@ -386,11 +458,13 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
         outputDir: String,
         useStructuredOutput: Boolean,
         saveThinking: Boolean,
-        aiModel: AIModel
+        aiModel: AIModel,
+        chapterVisionResult: ChapterVisionResult? = null,
+        cropPadding: Int = 100
     ): AdvancedOcrServiceResult {
         if (aiModel in setOf(AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M)) {
             val runner = UnlimitedOcrRunner(context, hostFs, settings)
-            val res = runner.performAdvancedOcr(input, save, outputDir, useStructuredOutput, saveThinking, targetModelId = aiModel.id)
+            val res = runner.performAdvancedOcr(input, save, outputDir, useStructuredOutput, saveThinking, targetModelId = aiModel.id, chapterVisionResult = chapterVisionResult, cropPadding = cropPadding)
             return AdvancedOcrServiceResult(
                 texts = res.texts,
                 balloonBoxes = res.balloonBoxes,
@@ -431,7 +505,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
         
         val isGemma = aiModel == AIModel.GEMMA_26B || aiModel == AIModel.GEMMA_31B
         val modelId = if (aiModel == AIModel.LM_STUDIO) settings.lmStudioModelName!!.ifBlank { "default-model" } else aiModel.id
-        logger.info("Found ${files.size} image(s). Advanced OCR with model: $modelId (isGemma: $isGemma)")
+        logger.info("Found ${files.size} image(s). Advanced OCR with model: $modelId (isGemma: $isGemma, hasVisionResult=${chapterVisionResult != null}, cropPadding=$cropPadding)")
 
         val executor = try {
             getExecutor(aiModel)
@@ -530,57 +604,138 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
                     semaphore.withPermit {
                         if (isCancelled) return@async
                         try {
-                            val ocrPrompt = prompt(
-                                id = "advanced-ocr-task",
-                                params = LLMParams(
-                                    schema = if (useStructuredOutput) LLMParams.Schema.JSON.Basic("AdvancedBalloonsResponse", balloonSchema) else null
-                                )
-                            ) {
-                                user {
-                                    text(effectivePromptInstructions)
-                                    image(Path(file.absolutePath))
-                                }
-                            }
+                            val (imgWidth, imgHeight) = getImageDimensions(file)
+                            val pageVisionResult = VisionCutoutHelper.findMatchingVisionResult(file, chapterVisionResult)
+                            val cropRegions = if (pageVisionResult != null && pageVisionResult.objects.isNotEmpty()) {
+                                VisionCutoutHelper.computeCropRegions(pageVisionResult.objects, imgWidth.toInt(), imgHeight.toInt(), paddingPx = cropPadding)
+                            } else emptyList()
 
-                            val (balloonsResponse, rawResponse) = retryWithBackoff {
-                                val responses = executor.execute(ocrPrompt, model)
-                                var originalText = ""
-                                for (res in responses) {
-                                    if (res != null) {
-                                        originalText += "${res.content}\n"
+                            if (cropRegions.isNotEmpty()) {
+                                logger.info("[KoogOcrService] Processing ${cropRegions.size} ROI crop(s) for '${file.name}' based on Vision detections (Advanced OCR)...")
+                                val baseImg = withContext(Dispatchers.IO) { ImageIO.read(file) }
+                                    ?: throw IllegalArgumentException("Failed to decode image from path: ${file.absolutePath}")
+                                val pageResponses = mutableListOf<String>()
+
+                                for (crop in cropRegions) {
+                                    if (isCancelled) break
+                                    val subImg = baseImg.getSubimage(crop.xmin, crop.ymin, crop.width, crop.height)
+                                    val tempCropFile = File.createTempFile("koog_adv_crop_${file.nameWithoutExtension}_", ".png")
+                                    try {
+                                        withContext(Dispatchers.IO) {
+                                            ImageIO.write(subImg, "png", tempCropFile)
+                                        }
+                                        val ocrPrompt = prompt(
+                                            id = "advanced-ocr-task",
+                                            params = LLMParams(
+                                                schema = if (useStructuredOutput) LLMParams.Schema.JSON.Basic("AdvancedBalloonsResponse", balloonSchema) else null
+                                            )
+                                        ) {
+                                            user {
+                                                text(effectivePromptInstructions)
+                                                image(Path(tempCropFile.absolutePath))
+                                            }
+                                        }
+
+                                        val (balloonsResponse, rawResponse) = retryWithBackoff {
+                                            val responses = executor.execute(ocrPrompt, model)
+                                            var originalText = ""
+                                            for (res in responses) {
+                                                if (res != null) {
+                                                    originalText += "${res.content}\n"
+                                                }
+                                            }
+                                            originalText = originalText.trim()
+                                            val rawText = originalText.replace(Regex("<(thought|thinking)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), "").trim()
+
+                                            val jsonToParse = if (!useStructuredOutput) extractJsonFromText(rawText) else rawText
+                                            val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<AdvancedBalloonsResponse>(jsonToParse)
+                                            val finalRawResponse = if (saveThinking) originalText else rawText
+                                            Pair(parsed, finalRawResponse)
+                                        }
+                                        pageResponses.add(rawResponse)
+
+                                        val cropW = crop.width.toDouble()
+                                        val cropH = crop.height.toDouble()
+
+                                        resultsMutex.withLock {
+                                            balloonsResponse.balloons.forEach { balloon ->
+                                                allTexts.add(balloon.text)
+                                                val localBalloonBox = scaleBoxToPixels(balloon.balloon_box_2d, cropW, cropH)
+                                                val localTextBox = scaleBoxToPixels(balloon.text_box_2d, cropW, cropH)
+                                                allBalloonBoxes.add(VisionCutoutHelper.remapBoxToGlobal(localBalloonBox, crop, imgWidth, imgHeight))
+                                                allTextBoxes.add(VisionCutoutHelper.remapBoxToGlobal(localTextBox, crop, imgWidth, imgHeight))
+                                                allShapes.add(balloon.shape)
+                                                allFontStyles.add(balloon.fontStyle)
+                                                allFontFamilies.add(balloon.fontFamily)
+                                                allAngles.add(balloon.textAngle)
+                                                allIsSparse.add(balloon.isSparse)
+                                                allTextColors.add(balloon.textColor)
+                                                allHasBorder.add(balloon.hasBorder)
+                                                allBorderColors.add(balloon.borderColor)
+                                                allPageNumbers.add(index + 1)
+                                                allPageNames.add(file.name)
+                                            }
+                                        }
+                                    } finally {
+                                        tempCropFile.delete()
                                     }
                                 }
-                                originalText = originalText.trim()
-                                val rawText = originalText.replace(Regex("<(thought|thinking)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), "").trim()
-
-                                val jsonToParse = if (!useStructuredOutput) extractJsonFromText(rawText) else rawText
-                                val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<AdvancedBalloonsResponse>(jsonToParse)
-                                val finalRawResponse = if (saveThinking) originalText else rawText
-                                Pair(parsed, finalRawResponse)
-                            }
-
-                            val (imgWidth, imgHeight) = getImageDimensions(file)
-
-                            resultsMutex.withLock {
-                                balloonsResponse.balloons.forEach { balloon ->
-                                    allTexts.add(balloon.text)
-                                    allBalloonBoxes.add(scaleBoxToPixels(balloon.balloon_box_2d, imgWidth, imgHeight))
-                                    allTextBoxes.add(scaleBoxToPixels(balloon.text_box_2d, imgWidth, imgHeight))
-                                    allShapes.add(balloon.shape)
-                                    allFontStyles.add(balloon.fontStyle)
-                                    allFontFamilies.add(balloon.fontFamily)
-                                    allAngles.add(balloon.textAngle)
-                                    allIsSparse.add(balloon.isSparse)
-                                    allTextColors.add(balloon.textColor)
-                                    allHasBorder.add(balloon.hasBorder)
-                                    allBorderColors.add(balloon.borderColor)
-                                    allPageNumbers.add(index + 1)
-                                    allPageNames.add(file.name)
+                                resultsMutex.withLock {
+                                    processedFilesCount++
+                                    progressReporter.report(processedFilesCount.toFloat() / total.toFloat())
                                 }
-                                processedFilesCount++
-                                progressReporter.report(processedFilesCount.toFloat() / total.toFloat())
+                                saveResult(save, outputDir, file, pageResponses.joinToString("\n---\n"))
+                            } else {
+                                val ocrPrompt = prompt(
+                                    id = "advanced-ocr-task",
+                                    params = LLMParams(
+                                        schema = if (useStructuredOutput) LLMParams.Schema.JSON.Basic("AdvancedBalloonsResponse", balloonSchema) else null
+                                    )
+                                ) {
+                                    user {
+                                        text(effectivePromptInstructions)
+                                        image(Path(file.absolutePath))
+                                    }
+                                }
+
+                                val (balloonsResponse, rawResponse) = retryWithBackoff {
+                                    val responses = executor.execute(ocrPrompt, model)
+                                    var originalText = ""
+                                    for (res in responses) {
+                                        if (res != null) {
+                                            originalText += "${res.content}\n"
+                                        }
+                                    }
+                                    originalText = originalText.trim()
+                                    val rawText = originalText.replace(Regex("<(thought|thinking)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), "").trim()
+
+                                    val jsonToParse = if (!useStructuredOutput) extractJsonFromText(rawText) else rawText
+                                    val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<AdvancedBalloonsResponse>(jsonToParse)
+                                    val finalRawResponse = if (saveThinking) originalText else rawText
+                                    Pair(parsed, finalRawResponse)
+                                }
+
+                                resultsMutex.withLock {
+                                    balloonsResponse.balloons.forEach { balloon ->
+                                        allTexts.add(balloon.text)
+                                        allBalloonBoxes.add(scaleBoxToPixels(balloon.balloon_box_2d, imgWidth, imgHeight))
+                                        allTextBoxes.add(scaleBoxToPixels(balloon.text_box_2d, imgWidth, imgHeight))
+                                        allShapes.add(balloon.shape)
+                                        allFontStyles.add(balloon.fontStyle)
+                                        allFontFamilies.add(balloon.fontFamily)
+                                        allAngles.add(balloon.textAngle)
+                                        allIsSparse.add(balloon.isSparse)
+                                        allTextColors.add(balloon.textColor)
+                                        allHasBorder.add(balloon.hasBorder)
+                                        allBorderColors.add(balloon.borderColor)
+                                        allPageNumbers.add(index + 1)
+                                        allPageNames.add(file.name)
+                                    }
+                                    processedFilesCount++
+                                    progressReporter.report(processedFilesCount.toFloat() / total.toFloat())
+                                }
+                                saveResult(save, outputDir, file, rawResponse)
                             }
-                            saveResult(save, outputDir, file, rawResponse)
                         } catch (e: Throwable) {
                             handleError(e, file, save, outputDir, resultsMutex, failedFiles, processedFilesCount, total)
                         }

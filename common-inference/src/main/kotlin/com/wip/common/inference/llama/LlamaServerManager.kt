@@ -134,12 +134,17 @@ class LlamaServerManager(
             if (!file.exists() || !file.canExecute()) {
                 return false to null
             }
+            val isWindows = LlamaBinaryDownloader.isWindows()
+            val isWindowsApp = isWindows && path.contains("WindowsApps", ignoreCase = true)
             val exeName = file.nameWithoutExtension.lowercase()
-            val versionArgs = if (exeName == "llama" || exeName == "llama-cli") {
+
+            val baseArgs = if (exeName == "llama" || exeName == "llama-cli") {
                 listOf(file.absolutePath, "serve", "--version")
             } else {
                 listOf(file.absolutePath, "--version")
             }
+            val versionArgs = if (isWindowsApp) listOf("cmd.exe", "/c") + baseArgs else baseArgs
+
             return try {
                 val pb = ProcessBuilder(versionArgs)
                 pb.redirectErrorStream(true)
@@ -155,22 +160,27 @@ class LlamaServerManager(
                 }
                 proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
                 if (proc.isAlive) {
+                    proc.descendants().forEach { it.destroyForcibly() }
                     proc.destroyForcibly()
                 }
                 val info = output.toString().trim()
                 true to (if (info.isNotBlank()) info else "Executable OK")
             } catch (e: Exception) {
                 try {
-                    val helpArgs = if (exeName == "llama" || exeName == "llama-cli") {
+                    val helpBase = if (exeName == "llama" || exeName == "llama-cli") {
                         listOf(file.absolutePath, "serve", "--help")
                     } else {
                         listOf(file.absolutePath, "--help")
                     }
+                    val helpArgs = if (isWindowsApp) listOf("cmd.exe", "/c") + helpBase else helpBase
                     val pb = ProcessBuilder(helpArgs)
                     pb.redirectErrorStream(true)
                     val proc = pb.start()
                     proc.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
-                    if (proc.isAlive) proc.destroyForcibly()
+                    if (proc.isAlive) {
+                        proc.descendants().forEach { it.destroyForcibly() }
+                        proc.destroyForcibly()
+                    }
                     true to "Executable OK"
                 } catch (ex: Exception) {
                     true to "Executable present"
@@ -303,7 +313,7 @@ class LlamaServerManager(
                 return customFile.absolutePath
             }
             if (customFile.isDirectory) {
-                val inDir = File(customFile, LlamaBinaryDownloader.getExecutableName())
+                val inDir = File(customFile , LlamaBinaryDownloader.getExecutableName())
                 if (inDir.exists() && inDir.canExecute()) {
                     logger?.info("[LlamaServerManager] Found llama-server in custom directory: ${inDir.absolutePath}")
                     return inDir.absolutePath
@@ -410,20 +420,41 @@ class LlamaServerManager(
         // Wait for health check
         val deadline = System.currentTimeMillis() + (effectiveConfig.startupTimeoutSeconds * 1000L)
         var ready = false
+        var consecutiveFailures = 0
+
         while (System.currentTimeMillis() < deadline) {
-            if (!process.isRunning) {
-                throw IllegalStateException("llama-server process terminated prematurely during startup.")
-            }
             if (client.checkHealth(baseUrl, logger)) {
                 ready = true
                 break
             }
-            delay(500L)
+
+            if (!process.isRunning) {
+                val exitCode = process.exitCode
+                if (exitCode != null && exitCode != 0) {
+                    val stderrSnippet = process.lastStderr.ifBlank { "No stderr captured." }
+                    logger?.error("[LlamaServerManager] llama-server process exited with code $exitCode during startup: $stderrSnippet")
+                    throw IllegalStateException("llama-server process exited with code $exitCode during startup: $stderrSnippet")
+                } else if (exitCode == 0) {
+                    consecutiveFailures++
+                    if (consecutiveFailures == 1) {
+                        logger?.info("[LlamaServerManager] Launcher process completed with code 0 (detached/alias); waiting for server to bind $baseUrl...")
+                    }
+                }
+            }
+
+            delay(1000L)
         }
 
         if (!ready) {
-            process.stop()
-            throw IllegalStateException("llama-server failed to respond to health checks at $baseUrl within ${effectiveConfig.startupTimeoutSeconds}s.")
+            // Final health check check
+            if (client.checkHealth(baseUrl, logger)) {
+                ready = true
+            } else {
+                process.stop()
+                val stderrSnippet = process.lastStderr
+                val extraMsg = if (stderrSnippet.isNotBlank()) "\nRecent server output:\n$stderrSnippet" else ""
+                throw IllegalStateException("llama-server failed to respond to health checks at $baseUrl within ${effectiveConfig.startupTimeoutSeconds}s.$extraMsg")
+            }
         }
 
         logger?.info("[LlamaServerManager] llama-server successfully started and verified at $baseUrl")
@@ -435,8 +466,12 @@ class LlamaServerManager(
     /**
      * Stops the currently active server session if running.
      */
-    suspend fun stopActiveServer() = mutex.withLock {
-        activeSession?.close()
-        activeSession = null
+    suspend fun stopActiveServer(logger: PluginLogger? = null) = mutex.withLock {
+        val existing = activeSession
+        if (existing != null) {
+            logger?.info("[LlamaServerManager] Stopping active llama-server session at ${existing.baseUrl}...")
+            existing.close()
+            activeSession = null
+        }
     }
 }

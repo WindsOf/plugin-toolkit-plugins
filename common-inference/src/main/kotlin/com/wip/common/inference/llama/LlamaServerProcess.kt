@@ -29,40 +29,65 @@ class LlamaServerProcess(
     val isRunning: Boolean
         get() = process?.isAlive == true
 
+    val exitCode: Int?
+        get() = try { process?.exitValue() } catch (_: Exception) { null }
+
+    private val recentStderr = mutableListOf<String>()
+    val lastStderr: String
+        get() = synchronized(recentStderr) { recentStderr.joinToString("\n") }
+
     /**
      * Starts the llama-server subprocess.
      */
     fun start(): Process {
         val exeFile = File(executablePath)
-        val workingDir = exeFile.parentFile ?: File(".")
+        val isWindows = System.getProperty("os.name", "").lowercase().contains("win")
+        val isWindowsApp = isWindows && executablePath.contains("WindowsApps", ignoreCase = true)
 
-        val command = mutableListOf<String>()
-        command.add(executablePath)
+        val workingDir = if (isWindowsApp) {
+            File(System.getProperty("user.home", "."))
+        } else {
+            exeFile.parentFile ?: File(".")
+        }
+
+        val rawArgs = mutableListOf<String>()
         val exeName = exeFile.nameWithoutExtension.lowercase()
         if (exeName == "llama" || exeName == "llama-cli") {
-            command.add("serve")
+            rawArgs.add("serve")
         }
-        command.add("-m")
-        command.add(modelPath)
+        rawArgs.add("-m")
+        rawArgs.add(modelPath)
         if (!config.mmprojPath.isNullOrBlank()) {
-            command.add("--mmproj")
-            command.add(config.mmprojPath)
+            rawArgs.add("--mmproj")
+            rawArgs.add(config.mmprojPath)
         }
         if (config.contextSize > 0) {
-            command.add("-c")
-            command.add(config.contextSize.toString())
+            rawArgs.add("-c")
+            rawArgs.add(config.contextSize.toString())
         }
-        command.add("--host")
-        command.add(config.host)
-        command.add("--port")
-        command.add(config.port.toString())
-        command.add("-ngl")
-        command.add(config.gpuLayers.toString())
-        command.add("-t")
-        command.add(config.threads.toString())
+        rawArgs.add("--host")
+        rawArgs.add(config.host)
+        rawArgs.add("--port")
+        rawArgs.add(config.port.toString())
+        rawArgs.add("-ngl")
+        rawArgs.add(config.gpuLayers.toString())
+        rawArgs.add("-t")
+        rawArgs.add(config.threads.toString())
 
         if (config.extraArgs.isNotEmpty()) {
-            command.addAll(config.extraArgs)
+            rawArgs.addAll(config.extraArgs)
+        }
+
+        val command = mutableListOf<String>()
+        if (isWindowsApp) {
+            // Windows App Execution Aliases require cmd.exe /c invocation for AppExecLink package DLL resolution
+            command.add("cmd.exe")
+            command.add("/c")
+            command.add(executablePath)
+            command.addAll(rawArgs)
+        } else {
+            command.add(executablePath)
+            command.addAll(rawArgs)
         }
 
         logger?.info("[LlamaServerProcess] Spawning: ${command.joinToString(" ")}")
@@ -72,8 +97,9 @@ class LlamaServerProcess(
 
         // Propagate PATH / LD_LIBRARY_PATH so companion DLLs/.so files in the same directory are found
         val env = processBuilder.environment()
-        val existingPath = env["PATH"] ?: ""
-        env["PATH"] = "${workingDir.absolutePath}${File.pathSeparator}$existingPath"
+        val pathKey = env.keys.firstOrNull { it.equals("PATH", ignoreCase = true) } ?: "PATH"
+        val existingPath = env[pathKey] ?: ""
+        env[pathKey] = "${workingDir.absolutePath}${File.pathSeparator}$existingPath"
 
         val existingLd = env["LD_LIBRARY_PATH"] ?: ""
         env["LD_LIBRARY_PATH"] = "${workingDir.absolutePath}${File.pathSeparator}$existingLd"
@@ -101,6 +127,10 @@ class LlamaServerProcess(
                     var line = reader.readLine()
                     while (line != null) {
                         logger?.info("[llama-server:stderr] $line")
+                        synchronized(recentStderr) {
+                            if (recentStderr.size > 30) recentStderr.removeAt(0)
+                            recentStderr.add(line)
+                        }
                         line = reader.readLine()
                     }
                 }
@@ -120,14 +150,23 @@ class LlamaServerProcess(
         if (!proc.isAlive) return
 
         logger?.info("[LlamaServerProcess] Stopping llama-server process (PID=${proc.pid()})...")
-        proc.destroy()
         try {
+            proc.descendants().forEach { child ->
+                try { child.destroy() } catch (_: Exception) {}
+            }
+            proc.destroy()
             if (!proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                 logger?.warn("[LlamaServerProcess] llama-server did not terminate within ${timeoutSeconds}s. Forcing kill...")
+                proc.descendants().forEach { child ->
+                    try { child.destroyForcibly() } catch (_: Exception) {}
+                }
                 proc.destroyForcibly()
                 proc.waitFor(3, TimeUnit.SECONDS)
             }
         } catch (_: Exception) {
+            proc.descendants().forEach { child ->
+                try { child.destroyForcibly() } catch (_: Exception) {}
+            }
             proc.destroyForcibly()
         }
 

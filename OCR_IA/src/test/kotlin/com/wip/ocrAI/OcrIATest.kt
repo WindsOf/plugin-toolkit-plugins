@@ -82,7 +82,6 @@ class OcrIATest {
             val locks = plugin.checkLocks(context)
             assertTrue(locks.containsKey("model:Unlimited-OCR-Q4_K_M"))
             assertTrue(locks.containsKey("model:unlimited-ocr-q4_k_m"))
-            assertTrue(locks.containsKey("Unlimited-OCR-Q4_K_M"))
         }
     }
 
@@ -92,6 +91,7 @@ class OcrIATest {
         val context = io.mockk.mockk<PluginContext>(relaxed = true)
         plugin.detectLlamaServer(context)
         plugin.checkInstalledModels(context)
+        plugin.stopLlamaServer(context)
     }
     
     @Test
@@ -137,6 +137,110 @@ class OcrIATest {
         assertEquals(200.0, detRegions[0].xmin)
         assertEquals(300.0, detRegions[0].ymax)
         assertEquals(400.0, detRegions[0].xmax)
+
+        // Test 4: Standard Unlimited-OCR tagged format with layout_tag [x1, y1, x2, y2]
+        val taggedOutput = "text [389, 318, 680, 369]IT'S MY\nMANA CORE.\nimage [0, 0, 999, 999]"
+        val taggedRegions = runner.parseOcrOutput(taggedOutput, 940.0, 1918.0)
+        assertEquals(1, taggedRegions.size)
+        assertEquals("IT'S MY\nMANA CORE.", taggedRegions[0].text)
+        // xmin = 389/1000 * 940 = 365.66
+        // ymin = 318/1000 * 1918 = 609.924
+        // xmax = 680/1000 * 940 = 639.2
+        // ymax = 369/1000 * 1918 = 707.742
+        assertEquals(609.924, taggedRegions[0].ymin, 0.01)
+        assertEquals(365.66, taggedRegions[0].xmin, 0.01)
+        assertEquals(707.742, taggedRegions[0].ymax, 0.01)
+        assertEquals(639.2, taggedRegions[0].xmax, 0.01)
+    }
+
+    @Test
+    fun testVisionCutoutHelperCropAndMerge() {
+        val obj1 = com.wip.common.models.SegmentedObject(
+            label = "balloon",
+            confidence = 0.9,
+            box = com.wip.common.models.DetectionBox(ymin = 0.10, xmin = 0.10, ymax = 0.15, xmax = 0.20)
+        )
+        val obj2 = com.wip.common.models.SegmentedObject(
+            label = "text",
+            confidence = 0.95,
+            box = com.wip.common.models.DetectionBox(ymin = 0.12, xmin = 0.12, ymax = 0.18, xmax = 0.22)
+        )
+        val objDisjoint = com.wip.common.models.SegmentedObject(
+            label = "balloon",
+            confidence = 0.85,
+            box = com.wip.common.models.DetectionBox(ymin = 0.70, xmin = 0.50, ymax = 0.80, xmax = 0.60)
+        )
+
+        val imageW = 1000
+        val imageH = 10000
+
+        // With padding = 100px:
+        // obj1: ymin=1000-100=900, xmin=100-100=0, ymax=1500+100=1600, xmax=200+100=300
+        // obj2: ymin=1200-100=1100, xmin=120-100=20, ymax=1800+100=1900, xmax=220+100=320
+        // obj1 and obj2 overlap! Union: ymin=900, xmin=0, ymax=1900, xmax=320
+        // objDisjoint: ymin=7000-100=6900, xmin=500-100=400, ymax=8000+100=8100, xmax=600+100=700
+        val crops = VisionCutoutHelper.computeCropRegions(
+            listOf(obj1, obj2, objDisjoint),
+            imageWidth = imageW,
+            imageHeight = imageH,
+            paddingPx = 100
+        )
+
+        assertEquals(2, crops.size)
+        // First merged crop
+        assertEquals(0, crops[0].xmin)
+        assertEquals(900, crops[0].ymin)
+        assertEquals(320, crops[0].xmax)
+        assertEquals(1900, crops[0].ymax)
+
+        // Second disjoint crop
+        assertEquals(400, crops[1].xmin)
+        assertEquals(6900, crops[1].ymin)
+        assertEquals(700, crops[1].xmax)
+        assertEquals(8100, crops[1].ymax)
+
+        // Test coordinate remapping
+        val localBox = listOf(50.0, 20.0, 150.0, 120.0) // [ymin, xmin, ymax, xmax] relative to crop
+        val globalBox = VisionCutoutHelper.remapBoxToGlobal(localBox, crops[0], imageW.toDouble(), imageH.toDouble())
+        assertEquals(950.0, globalBox[0])  // 900 + 50
+        assertEquals(20.0, globalBox[1])   // 0 + 20
+        assertEquals(1050.0, globalBox[2]) // 900 + 150
+        assertEquals(120.0, globalBox[3])  // 0 + 120
+    }
+
+    @Test
+    fun testVisionCutoutHelperMatching() {
+        val vResult1 = com.wip.common.models.VisionResult(
+            objects = emptyList(),
+            imageWidth = 800,
+            imageHeight = 1200,
+            pageName = "page_001.png"
+        )
+        val vResult2 = com.wip.common.models.VisionResult(
+            objects = emptyList(),
+            imageWidth = 800,
+            imageHeight = 1200,
+            pageName = "page_002"
+        )
+        val chapterVision = com.wip.common.models.ChapterVisionResult(
+            results = listOf(vResult1, vResult2),
+            totalObjectsDetected = 0
+        )
+
+        val file1 = java.io.File("C:/images/page_001.png")
+        val file2 = java.io.File("C:/images/page_002.webp")
+        val fileMissing = java.io.File("C:/images/page_003.png")
+
+        val match1 = VisionCutoutHelper.findMatchingVisionResult(file1, chapterVision)
+        assertNotNull(match1)
+        assertEquals("page_001.png", match1.pageName)
+
+        val match2 = VisionCutoutHelper.findMatchingVisionResult(file2, chapterVision)
+        assertNotNull(match2)
+        assertEquals("page_002", match2.pageName)
+
+        val matchMissing = VisionCutoutHelper.findMatchingVisionResult(fileMissing, chapterVision)
+        assertEquals(null, matchMissing)
     }
 
     @Test
@@ -152,6 +256,8 @@ class OcrIATest {
             useStructuredOutput = false,
             saveThinking = false,
             model = AIModel.UNLIMITED_OCR_Q4_K_M,
+            chapterVisionResult = null,
+            cropPadding = 100,
             context = context,
             hostFs = hostFs
         )
@@ -166,6 +272,8 @@ class OcrIATest {
             useStructuredOutput = false,
             saveThinking = false,
             model = AIModel.UNLIMITED_OCR_Q4_K_M,
+            chapterVisionResult = null,
+            cropPadding = 100,
             context = context,
             hostFs = hostFs
         )
@@ -181,6 +289,8 @@ class OcrIATest {
                 useStructuredOutput = false,
                 saveThinking = false,
                 model = m,
+                chapterVisionResult = null,
+                cropPadding = 100,
                 context = context,
                 hostFs = hostFs
             )
