@@ -58,7 +58,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
 
     private fun getProvider(modelId: String): LLMProvider {
         return when (modelId) {
-            AIModel.GEMMA_26B.id, AIModel.GEMMA_31B.id, AIModel.GEMINI_3_5_FLASH.id, AIModel.GEMINI_3_1_FLASH_LITE.id -> LLMProvider.Google
+            AIModel.GEMMA_26B.id, AIModel.GEMMA_31B.id, AIModel.GEMINI_3_5_FLASH.id,AIModel.GEMINI_3_6_FLASH.id, AIModel.GEMINI_3_7_FLASH.id, AIModel.GEMINI_3_1_FLASH_LITE.id -> LLMProvider.Google
             AIModel.LM_STUDIO.id -> LLMProvider.OpenAI
             else -> LLMProvider.Google
         }

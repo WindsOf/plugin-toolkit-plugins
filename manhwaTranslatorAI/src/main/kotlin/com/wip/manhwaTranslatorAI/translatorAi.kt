@@ -57,6 +57,8 @@ enum class AIModel(val id: String) {
     GEMMA_26B("gemma-4-26b-a4b-it"),
     GEMMA_31B("gemma-4-31b-it"),
     GEMINI_3_5_FLASH("gemini-3.5-flash"),
+    GEMINI_3_6_FLASH("gemini-3.6-flash"),
+    GEMINI_3_7_FLASH("gemini-3.7-flash"),
     GEMINI_3_1_FLASH_LITE("gemini-3.1-flash-lite"),
     @RequiresSetting(["lmStudioModelName", "lmStudioApiKey", "lmStudioUrl"])
     LM_STUDIO("lm-studio")
