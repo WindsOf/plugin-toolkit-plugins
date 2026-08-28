@@ -118,4 +118,64 @@ class VisionPluginTest {
             assertTrue(result.maskPath != null && File(result.maskPath!!).exists())
         }
     }
+
+    @Test
+    fun testDetectAndSegmentWithMultiScaleAndDebugImage() {
+        val vision = VisionPlugin()
+        val tempDir = File("build/tmp/test_vision_debug").apply {
+            if (exists()) deleteRecursively()
+            mkdirs()
+        }
+
+        val testImage = File(tempDir, "sample_manhwa_page.png")
+        val img = BufferedImage(1000, 1500, BufferedImage.TYPE_INT_RGB)
+        val g = img.createGraphics()
+        g.color = Color.WHITE
+        g.fillRect(0, 0, 1000, 1500)
+        g.color = Color.DARK_GRAY
+        g.fillOval(150, 200, 500, 400) // Large speech bubble
+        g.color = Color.BLACK
+        g.fillRect(200, 300, 400, 150) // Speech text
+        g.dispose()
+        ImageIO.write(img, "png", testImage)
+
+        val logger = FakeLogger()
+        val progress = FakeProgress()
+        val pluginFs = mockk<PluginFileSystem>(relaxed = true) {
+            coEvery { readFile(any()) } returns null
+            coEvery { readTextFile(any()) } returns null
+        }
+        val hostFs = mockk<HostFileSystem>(relaxed = true)
+
+        val context = mockk<PluginContext>(relaxed = true) {
+            every { this@mockk.logger } returns logger
+            every { this@mockk.progress } returns progress
+            every { this@mockk.fileSystem } returns pluginFs
+        }
+
+        runBlocking {
+            val result = vision.detectAndSegment(
+                imagePath = testImage.absolutePath,
+                detectionScoreThreshold = 0.25,
+                segmentationScoreThreshold = 0.25,
+                iouThreshold = 0.45,
+                detectScale = 2.0,
+                detectOverlap = 0.35,
+                segmentScale = 2.0,
+                segmentOverlap = 0.35,
+                saveMask = true,
+                saveDebugImage = true,
+                outputDir = tempDir.absolutePath,
+                context = context,
+                hostFs = hostFs
+            )
+
+            assertEquals(1000, result.imageWidth)
+            assertEquals(1500, result.imageHeight)
+            assertEquals("sample_manhwa_page.png", result.pageName)
+            assertTrue(result.maskPath != null && File(result.maskPath!!).exists())
+            assertTrue(result.debugImagePath != null && File(result.debugImagePath!!).exists())
+            assertTrue(File(result.debugImagePath!!).length() > 0)
+        }
+    }
 }

@@ -57,7 +57,9 @@ data class VisionResult(
     @CapabilityResult(name = "pageName", description = "Name or relative path of the source image file")
     val pageName: String = "",
     @CapabilityResult(name = "maskPath", description = "Optional path to the rendered segmentation mask image", semanticTypes = ["path/file"])
-    val maskPath: String? = null
+    val maskPath: String? = null,
+    @CapabilityResult(name = "debugImagePath", description = "Optional path to the rendered visual debug image", semanticTypes = ["path/file"])
+    val debugImagePath: String? = null
 )
 
 /**

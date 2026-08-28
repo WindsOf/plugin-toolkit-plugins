@@ -18,8 +18,10 @@ object SahiInferenceRunner {
     fun generateSlices(imageWidth: Int, imageHeight: Int, config: SahiConfig): List<SliceWindow> {
         val slices = mutableListOf<SliceWindow>()
 
-        val sliceW = min(config.sliceWidth, imageWidth)
-        val sliceH = min(config.sliceHeight, imageHeight)
+        val effectiveW = (config.sliceWidth * config.tileScale).toInt().coerceAtLeast(64)
+        val effectiveH = (config.sliceHeight * config.tileScale).toInt().coerceAtLeast(64)
+        val sliceW = min(effectiveW, imageWidth)
+        val sliceH = min(effectiveH, imageHeight)
 
         val stepW = max(1, (sliceW * (1.0f - config.overlapWidthRatio)).toInt())
         val stepH = max(1, (sliceH * (1.0f - config.overlapHeightRatio)).toInt())
@@ -49,6 +51,58 @@ object SahiInferenceRunner {
         }
 
         return slices
+    }
+
+    /**
+     * Runs SAHI sliced instance segmentation on a [BufferedImage] using an ONNX [OnnxInferenceSession].
+     */
+    fun runSlicedSegmentation(
+        image: BufferedImage,
+        modelSpec: ModelSpec,
+        session: OnnxInferenceSession,
+        config: SahiConfig = SahiConfig(),
+        logger: PluginLogger? = null
+    ): List<SegmentedObject> {
+        val slices = generateSlices(image.width, image.height, config)
+        logger?.info("SAHI Segmentation: Sliced image (${image.width}x${image.height}) into ${slices.size} tiles with scale ${config.tileScale}.")
+
+        val inputName = session.session.inputNames.iterator().next()
+        val allObjects = mutableListOf<SegmentedObject>()
+
+        for ((index, slice) in slices.withIndex()) {
+            val tileImg: BufferedImage = if (slice.isFullImage) {
+                image
+            } else {
+                image.getSubimage(slice.x, slice.y, slice.width, slice.height)
+            }
+
+            var tensor: OnnxTensor? = null
+            try {
+                tensor = ImageTensorUtils.createTensor(
+                    session.environment,
+                    tileImg,
+                    modelSpec.inputWidth,
+                    modelSpec.inputHeight
+                )
+
+                val result = session.session.run(mapOf(inputName to tensor))
+                val localObjects = RfDetrPostprocessor.decodeOutputs(result, modelSpec, config.scoreThreshold)
+                result.close()
+
+                for (local in localObjects) {
+                    val globalObj = RfDetrPostprocessor.remapTileToGlobal(local, slice, image.width, image.height)
+                    allObjects.add(globalObj)
+                }
+            } catch (e: Exception) {
+                logger?.warn("Error during segmentation tile [${index + 1}/${slices.size}] inference: ${e.message}")
+            } finally {
+                tensor?.close()
+            }
+        }
+
+        val mergedObjects = NmsUtils.applySegmentationNms(allObjects, config.iouThreshold, config.scoreThreshold)
+        logger?.info("SAHI Segmentation: Merged ${allObjects.size} raw tile segmentations into ${mergedObjects.size} global segmentations.")
+        return mergedObjects
     }
 
     /**

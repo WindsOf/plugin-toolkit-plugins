@@ -77,49 +77,88 @@ class RfDetrPostprocessorTest {
     }
 
     @Test
-    fun testBoundaryTracing() {
+    fun testMarchingSquaresContourExtractionOnSquare() {
         val width = 32
         val height = 32
         val grid = Array(height) { BooleanArray(width) }
 
-        // Draw a filled square in the center
+        // Draw a filled square in the center [8..24, 8..24]
         for (y in 8..24) {
             for (x in 8..24) {
                 grid[y][x] = true
             }
         }
 
-        val contours = RfDetrPostprocessor.traceAllContours(grid, width, height)
-        assertTrue(contours.isNotEmpty())
-        val firstContour = contours.first()
-        assertTrue(firstContour.size >= 8)
+        val loops = RfDetrPostprocessor.traceMarchingSquaresContours(grid, width, height, minComponentSize = 16)
+        assertTrue(loops.isNotEmpty(), "Should extract at least one closed loop")
+        val firstLoop = loops.first()
+        assertTrue(firstLoop.size >= 4)
 
-        // Verify contour points are within grid bounds
-        for ((cx, cy) in firstContour) {
-            assertTrue(cx in 0.0..width.toDouble())
-            assertTrue(cy in 0.0..height.toDouble())
-        }
+        // Verify loop is closed (first point equals last point)
+        assertEquals(firstLoop.first().first, firstLoop.last().first, 0.001)
+        assertEquals(firstLoop.first().second, firstLoop.last().second, 0.001)
 
-        val simplified = RfDetrPostprocessor.ramerDouglasPeucker(firstContour, 0.5)
-        assertTrue(simplified.size >= 4)
+        // Simplify collinear points along straight square edges
+        val simplified = RfDetrPostprocessor.simplifyCollinearPoints(firstLoop)
+        // Square loop after collinear simplification should have 5 vertices (4 corners + closing vertex)
+        assertEquals(5, simplified.size, "Square contour simplified should have 4 corners + closing vertex")
     }
 
     @Test
-    fun testRdpOnLargeClosedContourDoesNotOverflow() {
-        // Construct a circular closed loop of 5000 points
-        val numPoints = 5000
-        val circlePoints = mutableListOf<Pair<Double, Double>>()
-        for (i in 0 until numPoints) {
-            val angle = i * 2.0 * Math.PI / numPoints
-            val x = 100.0 + 50.0 * Math.cos(angle)
-            val y = 100.0 + 50.0 * Math.sin(angle)
-            circlePoints.add(Pair(x, y))
-        }
-        // Close loop
-        circlePoints.add(circlePoints.first())
+    fun testMarchingSquaresOnCircularMask() {
+        val width = 64
+        val height = 64
+        val grid = Array(height) { BooleanArray(width) }
 
-        val simplified = RfDetrPostprocessor.ramerDouglasPeucker(circlePoints, epsilon = 0.5)
-        assertTrue(simplified.isNotEmpty())
-        assertTrue(simplified.size < numPoints)
+        val cx = 32.0
+        val cy = 32.0
+        val radius = 15.0
+
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val dx = x - cx
+                val dy = y - cy
+                if (dx * dx + dy * dy <= radius * radius) {
+                    grid[y][x] = true
+                }
+            }
+        }
+
+        val loops = RfDetrPostprocessor.traceMarchingSquaresContours(grid, width, height, minComponentSize = 16)
+        assertTrue(loops.isNotEmpty())
+        val circleLoop = loops.first()
+        assertTrue(circleLoop.size > 20, "Circular mask should have many smooth boundary points")
+
+        // Check loop is fully closed without self-intersections
+        assertEquals(circleLoop.first().first, circleLoop.last().first, 0.001)
+        assertEquals(circleLoop.first().second, circleLoop.last().second, 0.001)
+
+        // Ensure collinear simplification preserves all curved points
+        val simplified = RfDetrPostprocessor.simplifyCollinearPoints(circleLoop)
+        assertTrue(simplified.size >= 16, "Circle contour must retain curved points and not collapse into diamond")
+    }
+
+    @Test
+    fun testMarchingSquaresOnMultipleDisjointBubbles() {
+        val width = 64
+        val height = 64
+        val grid = Array(height) { BooleanArray(width) }
+
+        // Bubble 1 at top left
+        for (y in 5..15) {
+            for (x in 5..15) {
+                grid[y][x] = true
+            }
+        }
+
+        // Bubble 2 at bottom right
+        for (y in 40..55) {
+            for (x in 40..55) {
+                grid[y][x] = true
+            }
+        }
+
+        val loops = RfDetrPostprocessor.traceMarchingSquaresContours(grid, width, height, minComponentSize = 16)
+        assertEquals(2, loops.size, "Should detect 2 independent closed loops for disjoint bubbles")
     }
 }

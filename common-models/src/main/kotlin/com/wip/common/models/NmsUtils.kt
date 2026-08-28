@@ -133,4 +133,34 @@ object NmsUtils {
             xmax = weightedXmax / denom
         )
     }
+
+    /**
+     * Applies class-aware greedy Non-Maximum Suppression (NMS) on a list of SegmentedObjects.
+     */
+    fun applySegmentationNms(
+        objects: List<SegmentedObject>,
+        iouThreshold: Double = 0.45,
+        scoreThreshold: Double = 0.25
+    ): List<SegmentedObject> {
+        val filtered = objects.filter { it.confidence >= scoreThreshold }
+        if (filtered.isEmpty()) return emptyList()
+
+        val results = mutableListOf<SegmentedObject>()
+        val byClass = filtered.groupBy { it.label }
+
+        for ((_, classObjs) in byClass) {
+            val sorted = classObjs.sortedByDescending { it.confidence }.toMutableList()
+
+            while (sorted.isNotEmpty()) {
+                val current = sorted.removeAt(0)
+                results.add(current)
+
+                sorted.removeAll { candidate ->
+                    calculateIoU(current.box, candidate.box) > iouThreshold
+                }
+            }
+        }
+
+        return results.sortedByDescending { it.confidence }
+    }
 }

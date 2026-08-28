@@ -81,6 +81,91 @@ object InpaintingUtils {
     }
 
     /**
+     * Renders a comprehensive color-coded visual debug image showing all detected/segmented bounding boxes,
+     * transparent polygon overlays, class labels, and confidence percentages over the original base image.
+     */
+    fun renderDebugVisualization(
+        baseImage: BufferedImage,
+        objects: List<SegmentedObject>,
+        candidateBoxes: List<DetectionBox> = emptyList()
+    ): BufferedImage {
+        val width = baseImage.width
+        val height = baseImage.height
+        val debugImg = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
+        val g2d = debugImg.createGraphics()
+        g2d.drawImage(baseImage, 0, 0, null)
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+        g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+
+        // 1. Draw candidate boxes in thin dashed outline if supplied
+        if (candidateBoxes.isNotEmpty()) {
+            g2d.stroke = java.awt.BasicStroke(1.5f, java.awt.BasicStroke.CAP_BUTT, java.awt.BasicStroke.JOIN_BEVEL, 0f, floatArrayOf(5f, 5f), 0f)
+            for (box in candidateBoxes) {
+                val bx = (box.xmin * width).toInt().coerceIn(0, width - 1)
+                val by = (box.ymin * height).toInt().coerceIn(0, height - 1)
+                val bw = max(1, ((box.xmax - box.xmin) * width).toInt())
+                val bh = max(1, ((box.ymax - box.ymin) * height).toInt())
+                g2d.color = Color(255, 255, 0, 180)
+                g2d.drawRect(bx, by, bw, bh)
+            }
+        }
+
+        // 2. Draw segmented objects: polygon fills, polygon borders, bounding boxes, labels
+        for (obj in objects) {
+            val label = obj.label.trim().lowercase()
+            val (baseColor, fillColor) = when {
+                label.contains("balloon") || label.contains("bubble") -> Pair(Color(0, 200, 255), Color(0, 200, 255, 75))
+                label == "text" -> Pair(Color(50, 255, 50), Color(50, 255, 50, 80))
+                label.contains("watermark") -> Pair(Color(255, 0, 255), Color(255, 0, 255, 80))
+                label.contains("panel") -> Pair(Color(255, 140, 0), Color(255, 140, 0, 60))
+                else -> Pair(Color(255, 220, 0), Color(255, 220, 0, 75))
+            }
+
+            // Fill & draw polygon if available
+            if (obj.polygon.size >= 3) {
+                val poly = Polygon()
+                for (pt in obj.polygon) {
+                    val px = (pt.x * width).toInt().coerceIn(0, width - 1)
+                    val py = (pt.y * height).toInt().coerceIn(0, height - 1)
+                    poly.addPoint(px, py)
+                }
+                g2d.color = fillColor
+                g2d.fillPolygon(poly)
+                g2d.color = baseColor
+                g2d.stroke = java.awt.BasicStroke(2.5f)
+                g2d.drawPolygon(poly)
+            }
+
+            // Draw bounding box
+            val bx = (obj.box.xmin * width).toInt().coerceIn(0, width - 1)
+            val by = (obj.box.ymin * height).toInt().coerceIn(0, height - 1)
+            val bw = max(1, ((obj.box.xmax - obj.box.xmin) * width).toInt())
+            val bh = max(1, ((obj.box.ymax - obj.box.ymin) * height).toInt())
+
+            g2d.color = baseColor
+            g2d.stroke = java.awt.BasicStroke(2.0f)
+            g2d.drawRect(bx, by, bw, bh)
+
+            // Draw label badge with dark background
+            val tag = "${obj.label} ${(obj.confidence * 100).toInt()}%"
+            val fontMetrics = g2d.fontMetrics
+            val textWidth = fontMetrics.stringWidth(tag)
+            val textHeight = fontMetrics.height
+            val tagX = bx + 3
+            val tagY = max(textHeight + 2, by - 4)
+
+            g2d.color = Color(0, 0, 0, 190)
+            g2d.fillRect(tagX - 2, tagY - textHeight + 2, textWidth + 6, textHeight + 2)
+            g2d.color = baseColor
+            g2d.drawRect(tagX - 2, tagY - textHeight + 2, textWidth + 6, textHeight + 2)
+            g2d.drawString(tag, tagX + 1, tagY)
+        }
+
+        g2d.dispose()
+        return debugImg
+    }
+
+    /**
      * Applies morphological dilation with the specified pixel radius.
      */
     fun applyDilation(sourceMask: BufferedImage, radius: Int): BufferedImage {

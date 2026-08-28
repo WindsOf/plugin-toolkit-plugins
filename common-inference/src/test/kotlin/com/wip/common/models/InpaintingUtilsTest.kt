@@ -206,4 +206,42 @@ class InpaintingUtilsTest {
         val r = (inRgb shr 16) and 0xFF
         assertTrue(r > 200, "Inpainted patch should be reconstructed white color")
     }
+
+    @Test
+    fun testRenderDebugVisualization() {
+        val width = 200
+        val height = 200
+        val baseImg = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+        val g = baseImg.createGraphics()
+        g.color = Color.WHITE
+        g.fillRect(0, 0, width, height)
+        g.dispose()
+
+        val balloonObj = SegmentedObject(
+            label = "balloon",
+            confidence = 0.95,
+            box = DetectionBox("balloon", 0.95, 0.1, 0.1, 0.5, 0.5),
+            polygon = listOf(PolygonPoint(0.1, 0.1), PolygonPoint(0.5, 0.1), PolygonPoint(0.5, 0.5), PolygonPoint(0.1, 0.5))
+        )
+        val textObj = SegmentedObject(
+            label = "text",
+            confidence = 0.98,
+            box = DetectionBox("text", 0.98, 0.2, 0.2, 0.4, 0.4),
+            polygon = listOf(PolygonPoint(0.2, 0.2), PolygonPoint(0.4, 0.2), PolygonPoint(0.4, 0.4), PolygonPoint(0.2, 0.4))
+        )
+
+        val debugImg = InpaintingUtils.renderDebugVisualization(
+            baseImage = baseImg,
+            objects = listOf(balloonObj, textObj),
+            candidateBoxes = listOf(balloonObj.box)
+        )
+
+        assertNotNull(debugImg)
+        assertEquals(width, debugImg.width)
+        assertEquals(height, debugImg.height)
+
+        // Pixel in drawn area should not be pure white anymore (it has colored alpha overlay)
+        val centerRgb = debugImg.getRGB(60, 60)
+        assertTrue(centerRgb != Color.WHITE.rgb, "Overlay should have rendered colors on debug visualization")
+    }
 }

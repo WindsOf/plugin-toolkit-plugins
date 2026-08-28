@@ -101,4 +101,43 @@ class SegmentationModelsTest {
         assertEquals("/tmp/out/page_001_mask.png", decoded.maskPath)
         assertEquals(5, decoded.cleanedObjectsCount)
     }
+
+    @Test
+    fun testVisionResultWithDebugImagePath() {
+        val result = VisionResult(
+            objects = emptyList(),
+            imageWidth = 800,
+            imageHeight = 1200,
+            pageName = "test.png",
+            maskPath = "/path/test_mask.png",
+            debugImagePath = "/path/test_vision_debug.png"
+        )
+        val jsonStr = json.encodeToString(VisionResult.serializer(), result)
+        val decoded = json.decodeFromString(VisionResult.serializer(), jsonStr)
+        assertEquals("/path/test_vision_debug.png", decoded.debugImagePath)
+    }
+
+    @Test
+    fun testApplySegmentationNms() {
+        val obj1 = SegmentedObject(
+            label = "balloon",
+            confidence = 0.95,
+            box = DetectionBox("balloon", 0.95, 0.1, 0.1, 0.5, 0.5)
+        )
+        val obj2 = SegmentedObject(
+            label = "balloon",
+            confidence = 0.80,
+            box = DetectionBox("balloon", 0.80, 0.11, 0.11, 0.51, 0.51) // Heavy overlap with obj1
+        )
+        val obj3 = SegmentedObject(
+            label = "text",
+            confidence = 0.90,
+            box = DetectionBox("text", 0.90, 0.15, 0.15, 0.4, 0.4) // Different class
+        )
+
+        val filtered = NmsUtils.applySegmentationNms(listOf(obj1, obj2, obj3), iouThreshold = 0.45)
+        assertEquals(2, filtered.size, "Overlapping balloon obj2 should be suppressed by obj1")
+        assertEquals(0.95, filtered[0].confidence)
+        assertEquals("text", filtered[1].label)
+    }
 }

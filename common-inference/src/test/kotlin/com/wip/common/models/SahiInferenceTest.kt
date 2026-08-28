@@ -148,4 +148,33 @@ class SahiInferenceTest {
         assertEquals(0.0f, gVal, 0.01f)
         assertEquals(0.0f, bVal, 0.01f)
     }
+
+    @Test
+    fun testMultiScaleSliceGeneration() {
+        val config2x = SahiConfig(
+            sliceWidth = 640,
+            sliceHeight = 640,
+            overlapWidthRatio = 0.20f,
+            overlapHeightRatio = 0.20f,
+            tileScale = 2.0,
+            includeFullImage = false
+        )
+
+        // 2000 x 3000 px image
+        val slices = SahiInferenceRunner.generateSlices(2000, 3000, config2x)
+        assertTrue(slices.isNotEmpty())
+
+        // With tileScale = 2.0, effective tile size is 1280x1280
+        val firstSlice = slices[0]
+        assertEquals(1280, firstSlice.width)
+        assertEquals(1280, firstSlice.height)
+        assertEquals(0, firstSlice.x)
+        assertEquals(0, firstSlice.y)
+
+        // Verify full image coverage
+        val maxReachedY = slices.maxOf { it.ymax }
+        val maxReachedX = slices.maxOf { it.xmax }
+        assertEquals(3000, maxReachedY)
+        assertEquals(2000, maxReachedX)
+    }
 }
