@@ -51,9 +51,9 @@ data class VisionResult(
     @CapabilityResult(name = "objects", description = "List of segmented objects detected in the image")
     val objects: List<SegmentedObject>,
     @CapabilityResult(name = "imageWidth", description = "Original image width in pixels")
-    val imageWidth: Int,
+    val imageWidth: Int = 0,
     @CapabilityResult(name = "imageHeight", description = "Original image height in pixels")
-    val imageHeight: Int,
+    val imageHeight: Int = 0,
     @CapabilityResult(name = "pageName", description = "Name or relative path of the source image file")
     val pageName: String = "",
     @CapabilityResult(name = "maskPath", description = "Optional path to the rendered segmentation mask image", semanticTypes = ["path/file"])
@@ -102,7 +102,12 @@ data class CleanerResult(
         name = "cleaned objects count",
         description = "Total number of segmented text instances removed from the image"
     )
-    val cleanedObjectsCount: Int
+    val cleanedObjectsCount: Int,
+    @CapabilityResult(
+        name = "segmentation data",
+        description = "Optional vision segmentation data passed through from input"
+    )
+    val segmentationData: VisionResult? = null
 )
 
 /**
@@ -129,5 +134,10 @@ data class ChapterCleanerResult(
         name = "total cleaned pages",
         description = "Total count of pages successfully cleaned"
     )
-    val totalCleanedPages: Int
+    val totalCleanedPages: Int,
+    @CapabilityResult(
+        name = "chapter vision result",
+        description = "Optional chapter vision segmentation results passed through from input"
+    )
+    val chapterVisionResult: ChapterVisionResult? = null
 )

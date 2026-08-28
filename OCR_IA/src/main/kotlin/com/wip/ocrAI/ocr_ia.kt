@@ -8,6 +8,8 @@ import com.wip.common.models.ChapterVisionResult
 import com.wip.common.models.ModelCatalog
 import com.wip.common.models.ModelManager
 import com.wip.common.models.OCRResult
+import com.wip.common.models.OcrVisionMerger
+import com.wip.common.models.VisionResult
 import com.wip.ocrAI.models.AIModel
 import com.wip.ocrAI.models.OcrDownloadModel
 import com.wip.ocrAI.models.OcrIASettings
@@ -26,6 +28,7 @@ import org.wip.plugintoolkit.api.annotations.PluginLocks
 import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
+import java.io.File
 
 @PluginInfo(
     id = "com.wip.ocr_ia",
@@ -34,7 +37,7 @@ import org.wip.plugintoolkit.api.annotations.PluginValidate
     description = "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog",
     supportedOs = [OS.WINDOWS]
 )
-class OCR_IA(val settings: OcrIASettings) {
+class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
 
     @PluginLoad
     fun onLoad(logger: PluginLogger): Result<Unit> {
@@ -309,6 +312,82 @@ class OCR_IA(val settings: OcrIASettings) {
             }
             throw RuntimeException(msg, e)
         }
+    }
+
+    @Capability(
+        name = "merge_ocr_with_vision",
+        description = "Merges multi-line OCR text entries that fall within the same speech balloon using Vision instance segmentation"
+    )
+    suspend fun mergeOcrWithVision(
+        @CapabilityParam(description = "The OCR Result to merge")
+        ocrData: OCRResult,
+        @CapabilityParam(description = "Chapter Vision segmentation result containing balloon instances")
+        chapterVisionResult: ChapterVisionResult,
+        context: PluginContext
+    ): OCRResult {
+        context.logger.info("Merging OCR Result using ChapterVisionResult (total vision pages: ${chapterVisionResult.results.size}, total OCR items: ${ocrData.texts.size})")
+        return OcrVisionMerger.mergeChapterOcrResult(
+            ocrData = ocrData,
+            chapterVisionResult = chapterVisionResult,
+            separator = " "
+        )
+    }
+
+    @Capability(
+        name = "merge_advanced_ocr_with_vision",
+        description = "Merges multi-line Advanced OCR text entries that fall within the same speech balloon using Vision instance segmentation"
+    )
+    suspend fun mergeAdvancedOcrWithVision(
+        @CapabilityParam(description = "The Advanced OCR Result to merge")
+        ocrData: AdvancedOCRResult,
+        @CapabilityParam(description = "Chapter Vision segmentation result containing balloon instances")
+        chapterVisionResult: ChapterVisionResult,
+        context: PluginContext
+    ): AdvancedOCRResult {
+        context.logger.info("Merging Advanced OCR Result using ChapterVisionResult (total vision pages: ${chapterVisionResult.results.size}, total OCR items: ${ocrData.texts.size})")
+        return OcrVisionMerger.mergeChapterAdvancedOcrResult(
+            ocrData = ocrData,
+            chapterVisionResult = chapterVisionResult,
+            separator = " "
+        )
+    }
+
+    @Capability(
+        name = "merge_single_ocr_with_vision",
+        description = "Merges multi-line single image OCR text entries that fall within the same speech balloon using Vision instance segmentation"
+    )
+    suspend fun mergeSingleOcrWithVision(
+        @CapabilityParam(description = "The OCR Result to merge")
+        ocrData: OCRResult,
+        @CapabilityParam(description = "Single image Vision segmentation result containing balloon instances")
+        visionResult: VisionResult,
+        context: PluginContext
+    ): OCRResult {
+        context.logger.info("Merging single OCR Result using VisionResult (total vision objects: ${visionResult.objects.size}, total OCR items: ${ocrData.texts.size})")
+        return OcrVisionMerger.mergeOcrResult(
+            ocrData = ocrData,
+            visionResult = visionResult,
+            separator = " "
+        )
+    }
+
+    @Capability(
+        name = "merge_single_advanced_ocr_with_vision",
+        description = "Merges multi-line single image Advanced OCR text entries that fall within the same speech balloon using Vision instance segmentation"
+    )
+    suspend fun mergeSingleAdvancedOcrWithVision(
+        @CapabilityParam(description = "The Advanced OCR Result to merge")
+        ocrData: AdvancedOCRResult,
+        @CapabilityParam(description = "Single image Vision segmentation result containing balloon instances")
+        visionResult: VisionResult,
+        context: PluginContext
+    ): AdvancedOCRResult {
+        context.logger.info("Merging single Advanced OCR Result using VisionResult (total vision objects: ${visionResult.objects.size}, total OCR items: ${ocrData.texts.size})")
+        return OcrVisionMerger.mergeAdvancedOcrResult(
+            ocrData = ocrData,
+            visionResult = visionResult,
+            separator = " "
+        )
     }
 
     @PluginSetup

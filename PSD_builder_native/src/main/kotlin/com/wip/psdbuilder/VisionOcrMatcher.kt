@@ -213,11 +213,17 @@ object VisionOcrMatcher {
         imageHeight: Double,
         matchThreshold: Double = 0.25
     ): List<MatchedBalloonText> {
-        val results = mutableListOf<MatchedBalloonText>()
-        val balloonObjects = visionObjects?.filter { obj ->
+        val candidateObjects = visionObjects?.filter { obj ->
             val label = obj.label.trim().lowercase()
-            label == "balloon" || label == "speech_balloon" || label == "thought_balloon" || label.contains("balloon")
+            !label.contains("watermark")
         } ?: emptyList()
+
+        val balloonObjects = candidateObjects.filter { obj ->
+            val label = obj.label.trim().lowercase()
+            label != "text"
+        }.ifEmpty { candidateObjects }
+
+        val results = mutableListOf<MatchedBalloonText>()
 
         for ((index, text) in texts.withIndex()) {
             val ocrBoxRaw = ocrBoxes.getOrNull(index) ?: emptyList()
@@ -294,11 +300,15 @@ object VisionOcrMatcher {
                     bestScore = score
                     bestObject = obj
                     bestPixelPoly = pixelPoly
+                    val minPX = pixelPoly.minOf { it.x }.toFloat()
+                    val maxPX = pixelPoly.maxOf { it.x }.toFloat()
+                    val minPY = pixelPoly.minOf { it.y }.toFloat()
+                    val maxPY = pixelPoly.maxOf { it.y }.toFloat()
                     bestBounds = PsdBounds(
-                        left = segBox[1].toFloat(),
-                        top = segBox[0].toFloat(),
-                        right = segBox[3].toFloat(),
-                        bottom = segBox[2].toFloat()
+                        left = min(segBox[1].toFloat(), minPX),
+                        top = min(segBox[0].toFloat(), minPY),
+                        right = max(segBox[3].toFloat(), maxPX),
+                        bottom = max(segBox[2].toFloat(), maxPY)
                     )
                     bestVisualCenter = computeVisualCenter(pixelPoly)
                 }

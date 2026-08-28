@@ -297,5 +297,87 @@ class OcrIATest {
             assertEquals(0, res.texts.size)
         }
     }
+
+    @Test
+    fun testMergeCapabilities() = kotlinx.coroutines.runBlocking {
+        val plugin = OCR_IA(OcrIASettings())
+        val context = io.mockk.mockk<PluginContext>(relaxed = true)
+
+        val ocr = com.wip.common.models.OCRResult(
+            texts = listOf("Line 1", "Line 2"),
+            bb = listOf(
+                listOf(0.1, 0.1, 0.2, 0.3),
+                listOf(0.21, 0.1, 0.3, 0.3)
+            ),
+            pageNumbers = listOf(1, 1),
+            pageNames = listOf("p1.png", "p1.png"),
+            failedFiles = emptyList()
+        )
+
+        val singleVision = com.wip.common.models.VisionResult(
+            objects = listOf(
+                com.wip.common.models.SegmentedObject(
+                    label = "balloon",
+                    confidence = 0.9,
+                    box = com.wip.common.models.DetectionBox(
+                        label = "balloon",
+                        confidence = 0.9,
+                        ymin = 0.05,
+                        xmin = 0.05,
+                        ymax = 0.35,
+                        xmax = 0.35
+                    ),
+                    polygon = emptyList()
+                )
+            ),
+            imageWidth = 1000,
+            imageHeight = 1000,
+            pageName = "p1.png"
+        )
+
+        val chapterVision = com.wip.common.models.ChapterVisionResult(
+            results = listOf(singleVision),
+            totalObjectsDetected = 1
+        )
+
+        val mergedChapter = plugin.mergeOcrWithVision(ocr, chapterVision, context)
+        assertEquals(1, mergedChapter.texts.size)
+        assertEquals("Line 1 Line 2", mergedChapter.texts[0])
+
+        val mergedSingle = plugin.mergeSingleOcrWithVision(ocr, singleVision, context)
+        assertEquals(1, mergedSingle.texts.size)
+        assertEquals("Line 1 Line 2", mergedSingle.texts[0])
+
+        val advOcr = com.wip.common.models.AdvancedOCRResult(
+            texts = listOf("Adv Line 1", "Adv Line 2"),
+            balloonBoxes = listOf(
+                listOf(0.1, 0.1, 0.2, 0.3),
+                listOf(0.21, 0.1, 0.3, 0.3)
+            ),
+            textBoxes = listOf(
+                listOf(0.12, 0.12, 0.18, 0.28),
+                listOf(0.22, 0.12, 0.28, 0.28)
+            ),
+            shapes = listOf("oval", "oval"),
+            fontStyles = listOf("normal", "normal"),
+            fontFamilies = listOf("AnimeAce2.0BB", "AnimeAce2.0BB"),
+            textAngles = listOf(0.0, 0.0),
+            isSparse = listOf(false, false),
+            textColors = listOf("#000000", "#000000"),
+            hasBorder = listOf(false, false),
+            borderColors = listOf("#FFFFFF", "#FFFFFF"),
+            pageNumbers = listOf(1, 1),
+            pageNames = listOf("p1.png", "p1.png"),
+            failedFiles = emptyList()
+        )
+
+        val mergedAdvChapter = plugin.mergeAdvancedOcrWithVision(advOcr, chapterVision, context)
+        assertEquals(1, mergedAdvChapter.texts.size)
+        assertEquals("Adv Line 1 Adv Line 2", mergedAdvChapter.texts[0])
+
+        val mergedAdvSingle = plugin.mergeSingleAdvancedOcrWithVision(advOcr, singleVision, context)
+        assertEquals(1, mergedAdvSingle.texts.size)
+        assertEquals("Adv Line 1 Adv Line 2", mergedAdvSingle.texts[0])
+    }
 }
 

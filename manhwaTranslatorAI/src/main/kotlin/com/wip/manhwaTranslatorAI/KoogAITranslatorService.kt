@@ -1,11 +1,9 @@
 package com.wip.manhwaTranslatorAI
 
 import ai.koog.prompt.dsl.prompt
-import ai.koog.prompt.executor.llms.all.simpleGoogleAIExecutor
 import ai.koog.prompt.executor.clients.openai.OpenAILLMClient
 import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
 import ai.koog.prompt.executor.clients.google.GoogleLLMClient
-import ai.koog.prompt.executor.llms.SingleLLMPromptExecutor
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
@@ -195,7 +193,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
         useStructuredOutput: Boolean = true,
         modelId: String,
         pageNames: List<String>? = null,
-        inputFolder: String,
+        inputFolder: String?,
         outputDir: String,
         tempSummaryDir: String,
         useContextImages: Boolean = false,
