@@ -133,10 +133,12 @@ class LlamaInferenceClient(
                 add(buildJsonObject {
                     put("role", "user")
                     putJsonArray("content") {
-                        add(buildJsonObject {
-                            put("type", "text")
-                            put("text", promptInstructions)
-                        })
+                        if (promptInstructions.isNotBlank()) {
+                            add(buildJsonObject {
+                                put("type", "text")
+                                put("text", promptInstructions)
+                            })
+                        }
                         add(buildJsonObject {
                             put("type", "image_url")
                             putJsonObject("image_url") {

@@ -56,17 +56,21 @@ object VisionCutoutHelper {
 
         val fileName = pageFile.name
         val baseName = pageFile.nameWithoutExtension
+        val fileNum = baseName.filter { it.isDigit() }.toIntOrNull()
 
         return chapterVisionResult.results.firstOrNull { r ->
             var cleanRName = r.pageName
             for (ext in supportedExtensions) {
                 cleanRName = cleanRName.removeSuffix(ext)
             }
+            val rNum = cleanRName.filter { it.isDigit() }.toIntOrNull()
 
             r.pageName.equals(fileName, ignoreCase = true) ||
             cleanRName.equals(baseName, ignoreCase = true) ||
             cleanRName.equals(fileName, ignoreCase = true) ||
-            r.pageName.equals(baseName, ignoreCase = true)
+            r.pageName.equals(baseName, ignoreCase = true) ||
+            (fileNum != null && rNum != null && fileNum == rNum) ||
+            cleanRName.trimStart('0').equals(baseName.trimStart('0'), ignoreCase = true)
         }
     }
 

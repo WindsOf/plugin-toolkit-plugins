@@ -106,6 +106,38 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
         1000.0 to 1000.0 // fallback
     }
 
+    private fun isHallucinationOrEmpty(rawText: String?): Boolean {
+        if (rawText.isNullOrBlank()) return true
+        val clean = rawText.trim()
+        if (clean.isBlank()) return true
+        if (!clean.any { it.isLetterOrDigit() }) return true
+
+        val lower = clean.lowercase()
+        val directMatches = setOf(
+            "(no text)", "no text", "none", "n/a", "na", "empty", "nothing",
+            "no dialogue", "no speech", "no speech bubble", "no speech bubbles",
+            "no text detected", "no text found", "no visible text",
+            "(nessun testo)", "nessun testo", "nessun dialogo",
+            "1", "0", "null", "undefined"
+        )
+        if (lower in directMatches) return true
+
+        val hallucinationRegexes = listOf(
+            Regex("""(?i)^\s*\(?(?:no\s+text|nessun\s+testo|none|empty|nothing|no\s+dialogue|no\s+speech(?:\s+bubbles?)?)\)?\.?\s*$"""),
+            Regex("""(?i)\b(?:the\s+image\s+contains\s+no\s+text|image\s+contains\s+no\s+visible\s+text|there\s+is\s+no\s+text\s+in\s+this\s+image|no\s+text\s+(?:found|detected|visible)\s+in\s+the\s+image)\b"""),
+            Regex("""(?i)\b(?:the\s+ocr\s+result.*is\s+a\s+hallucination|does\s+not\s+correspond\s+to\s+any\s+content|absence\s+of\s+any\s+visible\s+text)\b"""),
+            Regex("""(?i)\b(?:correct\s+ocr\s+output\s+must\s+reflect\s+the\s+absence\s+of|cannot\s+find\s+any\s+text\s+to\s+transcribe|no\s+transcription\s+available)\b""")
+        )
+
+        for (regex in hallucinationRegexes) {
+            if (regex.containsMatchIn(lower)) {
+                return true
+            }
+        }
+
+        return false
+    }
+
     private fun scaleBoxToPixels(box: List<Double>, width: Double, height: Double): List<Double> {
         if (box.size < 4) return box
         // if the coordinates are larger than 2, they are likely on the 0-1000 scale
@@ -381,13 +413,15 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
 
                                         resultsMutex.withLock {
                                             balloonsResponse.balloons.forEach { balloon ->
-                                                allTexts.add(balloon.text)
-                                                val originalBox = listOf(balloon.ymin, balloon.xmin, balloon.ymax, balloon.xmax)
-                                                val scaledLocalBox = scaleBoxToPixels(originalBox, cropW, cropH)
-                                                val globalBox = VisionCutoutHelper.remapBoxToGlobal(scaledLocalBox, crop, imgWidth, imgHeight)
-                                                allBoxes.add(globalBox)
-                                                allPageNumbers.add(index + 1)
-                                                allPageNames.add(file.name)
+                                                if (!isHallucinationOrEmpty(balloon.text)) {
+                                                    allTexts.add(balloon.text)
+                                                    val originalBox = listOf(balloon.ymin, balloon.xmin, balloon.ymax, balloon.xmax)
+                                                    val scaledLocalBox = scaleBoxToPixels(originalBox, cropW, cropH)
+                                                    val globalBox = VisionCutoutHelper.remapBoxToGlobal(scaledLocalBox, crop, imgWidth, imgHeight)
+                                                    allBoxes.add(globalBox)
+                                                    allPageNumbers.add(index + 1)
+                                                    allPageNames.add(file.name)
+                                                }
                                             }
                                         }
                                     } finally {
@@ -431,11 +465,13 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
 
                                 resultsMutex.withLock {
                                     balloonsResponse.balloons.forEach { balloon ->
-                                        allTexts.add(balloon.text)
-                                        val originalBox = listOf(balloon.ymin, balloon.xmin, balloon.ymax, balloon.xmax)
-                                        allBoxes.add(scaleBoxToPixels(originalBox, imgWidth, imgHeight))
-                                        allPageNumbers.add(index + 1)
-                                        allPageNames.add(file.name)
+                                        if (!isHallucinationOrEmpty(balloon.text)) {
+                                            allTexts.add(balloon.text)
+                                            val originalBox = listOf(balloon.ymin, balloon.xmin, balloon.ymax, balloon.xmax)
+                                            allBoxes.add(scaleBoxToPixels(originalBox, imgWidth, imgHeight))
+                                            allPageNumbers.add(index + 1)
+                                            allPageNames.add(file.name)
+                                        }
                                     }
                                     processedFilesCount++
                                     progressReporter.report(processedFilesCount.toFloat() / total.toFloat())
@@ -659,21 +695,23 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
 
                                         resultsMutex.withLock {
                                             balloonsResponse.balloons.forEach { balloon ->
-                                                allTexts.add(balloon.text)
-                                                val localBalloonBox = scaleBoxToPixels(balloon.balloon_box_2d, cropW, cropH)
-                                                val localTextBox = scaleBoxToPixels(balloon.text_box_2d, cropW, cropH)
-                                                allBalloonBoxes.add(VisionCutoutHelper.remapBoxToGlobal(localBalloonBox, crop, imgWidth, imgHeight))
-                                                allTextBoxes.add(VisionCutoutHelper.remapBoxToGlobal(localTextBox, crop, imgWidth, imgHeight))
-                                                allShapes.add(balloon.shape)
-                                                allFontStyles.add(balloon.fontStyle)
-                                                allFontFamilies.add(balloon.fontFamily)
-                                                allAngles.add(balloon.textAngle)
-                                                allIsSparse.add(balloon.isSparse)
-                                                allTextColors.add(balloon.textColor)
-                                                allHasBorder.add(balloon.hasBorder)
-                                                allBorderColors.add(balloon.borderColor)
-                                                allPageNumbers.add(index + 1)
-                                                allPageNames.add(file.name)
+                                                if (!isHallucinationOrEmpty(balloon.text)) {
+                                                    allTexts.add(balloon.text)
+                                                    val localBalloonBox = scaleBoxToPixels(balloon.balloon_box_2d, cropW, cropH)
+                                                    val localTextBox = scaleBoxToPixels(balloon.text_box_2d, cropW, cropH)
+                                                    allBalloonBoxes.add(VisionCutoutHelper.remapBoxToGlobal(localBalloonBox, crop, imgWidth, imgHeight))
+                                                    allTextBoxes.add(VisionCutoutHelper.remapBoxToGlobal(localTextBox, crop, imgWidth, imgHeight))
+                                                    allShapes.add(balloon.shape)
+                                                    allFontStyles.add(balloon.fontStyle)
+                                                    allFontFamilies.add(balloon.fontFamily)
+                                                    allAngles.add(balloon.textAngle)
+                                                    allIsSparse.add(balloon.isSparse)
+                                                    allTextColors.add(balloon.textColor)
+                                                    allHasBorder.add(balloon.hasBorder)
+                                                    allBorderColors.add(balloon.borderColor)
+                                                    allPageNumbers.add(index + 1)
+                                                    allPageNames.add(file.name)
+                                                }
                                             }
                                         }
                                     } finally {
@@ -717,19 +755,21 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
 
                                 resultsMutex.withLock {
                                     balloonsResponse.balloons.forEach { balloon ->
-                                        allTexts.add(balloon.text)
-                                        allBalloonBoxes.add(scaleBoxToPixels(balloon.balloon_box_2d, imgWidth, imgHeight))
-                                        allTextBoxes.add(scaleBoxToPixels(balloon.text_box_2d, imgWidth, imgHeight))
-                                        allShapes.add(balloon.shape)
-                                        allFontStyles.add(balloon.fontStyle)
-                                        allFontFamilies.add(balloon.fontFamily)
-                                        allAngles.add(balloon.textAngle)
-                                        allIsSparse.add(balloon.isSparse)
-                                        allTextColors.add(balloon.textColor)
-                                        allHasBorder.add(balloon.hasBorder)
-                                        allBorderColors.add(balloon.borderColor)
-                                        allPageNumbers.add(index + 1)
-                                        allPageNames.add(file.name)
+                                        if (!isHallucinationOrEmpty(balloon.text)) {
+                                            allTexts.add(balloon.text)
+                                            allBalloonBoxes.add(scaleBoxToPixels(balloon.balloon_box_2d, imgWidth, imgHeight))
+                                            allTextBoxes.add(scaleBoxToPixels(balloon.text_box_2d, imgWidth, imgHeight))
+                                            allShapes.add(balloon.shape)
+                                            allFontStyles.add(balloon.fontStyle)
+                                            allFontFamilies.add(balloon.fontFamily)
+                                            allAngles.add(balloon.textAngle)
+                                            allIsSparse.add(balloon.isSparse)
+                                            allTextColors.add(balloon.textColor)
+                                            allHasBorder.add(balloon.hasBorder)
+                                            allBorderColors.add(balloon.borderColor)
+                                            allPageNumbers.add(index + 1)
+                                            allPageNames.add(file.name)
+                                        }
                                     }
                                     processedFilesCount++
                                     progressReporter.report(processedFilesCount.toFloat() / total.toFloat())

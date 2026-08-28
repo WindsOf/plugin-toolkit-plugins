@@ -643,7 +643,10 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                             }
 
                             indices.forEach { idx ->
-                                pageTexts.add(safeTexts[idx])
+                                val txt = safeTexts[idx]
+                                if (isHallucinationOrEmpty(txt)) return@forEach
+
+                                pageTexts.add(txt)
                                 val bBox = safeBalloonBoxes[idx]
                                 if (bBox.size >= 4) {
                                     val absYMin = (if (bBox[0] <= 1.0 && bBox[2] <= 1.0) bBox[0] * imgH else bBox[0]) + currentYOffset
@@ -857,6 +860,42 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         )
     }
 
+    fun isHallucinationOrEmpty(rawText: String?): Boolean {
+        if (rawText.isNullOrBlank()) return true
+        val clean = rawText.trim()
+            .replace(Regex("(?i)<\\|/?(?:ref|box|det|quad|grounding|image|text)[^>]*\\|>"), "")
+            .replace(Regex("(?i)\\b(?:image|figure|table|header|footer|background|watermark)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]"), "")
+            .replace(Regex("(?i)^\\s*(?:text|balloon|speech|dialogue|caption|title|paragraph|line)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]\\s*"), "")
+            .trim()
+        if (clean.isBlank()) return true
+        if (!clean.any { it.isLetterOrDigit() }) return true
+
+        val lower = clean.lowercase()
+        val directMatches = setOf(
+            "(no text)", "no text", "none", "n/a", "na", "empty", "nothing",
+            "no dialogue", "no speech", "no speech bubble", "no speech bubbles",
+            "no text detected", "no text found", "no visible text",
+            "(nessun testo)", "nessun testo", "nessun dialogo",
+            "1", "0", "null", "undefined"
+        )
+        if (lower in directMatches) return true
+
+        val hallucinationRegexes = listOf(
+            Regex("""(?i)^\s*\(?(?:no\s+text|nessun\s+testo|none|empty|nothing|no\s+dialogue|no\s+speech(?:\s+bubbles?)?)\)?\.?\s*$"""),
+            Regex("""(?i)\b(?:the\s+image\s+contains\s+no\s+text|image\s+contains\s+no\s+visible\s+text|there\s+is\s+no\s+text\s+in\s+this\s+image|no\s+text\s+(?:found|detected|visible)\s+in\s+the\s+image)\b"""),
+            Regex("""(?i)\b(?:the\s+ocr\s+result.*is\s+a\s+hallucination|does\s+not\s+correspond\s+to\s+any\s+content|absence\s+of\s+any\s+visible\s+text)\b"""),
+            Regex("""(?i)\b(?:correct\s+ocr\s+output\s+must\s+reflect\s+the\s+absence\s+of|cannot\s+find\s+any\s+text\s+to\s+transcribe|no\s+transcription\s+available)\b""")
+        )
+
+        for (regex in hallucinationRegexes) {
+            if (regex.containsMatchIn(lower)) {
+                return true
+            }
+        }
+
+        return false
+    }
+
     val json = Json { ignoreUnknownKeys = true }
 
     @Capability(
@@ -905,7 +944,8 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         val width = baseImage.width.toDouble()
         val height = baseImage.height.toDouble()
 
-        val activeTexts = payload.balloons.ifEmpty { payload.texts }
+        val rawActiveTexts = payload.balloons.ifEmpty { payload.texts }
+        val activeTexts = rawActiveTexts.filter { !isHallucinationOrEmpty(it.text) }
         val texts = activeTexts.map { it.text }
 
         val balloonBoxes = activeTexts.map {
@@ -1346,26 +1386,40 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             val borderColors: List<String?>
         )
 
-        val processedData: ProcessedTextData = if (effectiveVisionResult != null && effectiveVisionResult.objects.isNotEmpty() && texts.size > 1) {
+        val validIndices = texts.indices.filter { !isHallucinationOrEmpty(texts[it]) }
+        val safeInputTexts = validIndices.map { texts[it] }
+        val safeInputBalloonBoxes = validIndices.map { balloonBoxes.getOrElse(it) { emptyList() } }
+        val safeInputTextBoxes = textBoxes?.let { tBoxes -> validIndices.map { tBoxes.getOrElse(it) { emptyList() } } }
+        val safeInputFontSizes = fontSizes?.let { fs -> validIndices.map { fs.getOrNull(it) } }
+        val safeInputFontNames = fontNames?.let { fn -> validIndices.map { fn.getOrNull(it) } }
+        val safeInputBorderSizes = borderSizes?.let { bs -> validIndices.map { bs.getOrNull(it) } }
+        val safeInputTextAngles = textAngles?.let { ta -> validIndices.map { ta.getOrNull(it) } }
+        val safeInputShapes = shapes?.let { sh -> validIndices.map { sh.getOrNull(it) } }
+        val safeInputTextColors = textColors?.let { tc -> validIndices.map { tc.getOrNull(it) } }
+        val safeInputHasBorder = hasBorder?.let { hb -> validIndices.map { hb.getOrNull(it) } }
+        val safeInputBorderColors = borderColors?.let { bc -> validIndices.map { bc.getOrNull(it) } }
+        val safeInputBoundaries = customBoundaries?.let { cb -> validIndices.map { cb.getOrNull(it) } }
+
+        val processedData: ProcessedTextData = if (effectiveVisionResult != null && effectiveVisionResult.objects.isNotEmpty() && safeInputTexts.size > 1) {
             val tempAdv = AdvancedOCRResult(
-                texts = texts,
-                balloonBoxes = balloonBoxes,
-                textBoxes = textBoxes ?: balloonBoxes,
-                shapes = shapes?.map { it ?: "oval" } ?: List(texts.size) { "oval" },
-                fontStyles = List(texts.size) { "normal" },
-                fontFamilies = fontNames?.map { it ?: "AnimeAce2.0BB" } ?: List(texts.size) { "AnimeAce2.0BB" },
-                textAngles = textAngles?.map { it ?: 0.0 } ?: List(texts.size) { 0.0 },
-                isSparse = List(texts.size) { false },
-                textColors = textColors?.map { it ?: "#000000" } ?: List(texts.size) { "#000000" },
-                hasBorder = hasBorder?.map { it ?: false } ?: List(texts.size) { false },
-                borderColors = borderColors?.map { it ?: "#FFFFFF" } ?: List(texts.size) { "#FFFFFF" },
-                pageNumbers = List(texts.size) { 1 },
-                pageNames = List(texts.size) { "" },
+                texts = safeInputTexts,
+                balloonBoxes = safeInputBalloonBoxes,
+                textBoxes = safeInputTextBoxes ?: safeInputBalloonBoxes,
+                shapes = safeInputShapes?.map { it ?: "oval" } ?: List(safeInputTexts.size) { "oval" },
+                fontStyles = List(safeInputTexts.size) { "normal" },
+                fontFamilies = safeInputFontNames?.map { it ?: "AnimeAce2.0BB" } ?: List(safeInputTexts.size) { "AnimeAce2.0BB" },
+                textAngles = safeInputTextAngles?.map { it ?: 0.0 } ?: List(safeInputTexts.size) { 0.0 },
+                isSparse = List(safeInputTexts.size) { false },
+                textColors = safeInputTextColors?.map { it ?: "#000000" } ?: List(safeInputTexts.size) { "#000000" },
+                hasBorder = safeInputHasBorder?.map { it ?: false } ?: List(safeInputTexts.size) { false },
+                borderColors = safeInputBorderColors?.map { it ?: "#FFFFFF" } ?: List(safeInputTexts.size) { "#FFFFFF" },
+                pageNumbers = List(safeInputTexts.size) { 1 },
+                pageNames = List(safeInputTexts.size) { "" },
                 failedFiles = emptyList()
             )
             val mergedAdv = com.wip.common.models.OcrVisionMerger.mergeAdvancedOcrResult(tempAdv, effectiveVisionResult, separator = " ")
-            val fSizes = List(mergedAdv.texts.size) { fontSizes?.firstOrNull() ?: 60 }
-            val bSizes = List(mergedAdv.texts.size) { borderSizes?.firstOrNull() ?: 0 }
+            val fSizes = List(mergedAdv.texts.size) { safeInputFontSizes?.firstOrNull() ?: 60 }
+            val bSizes = List(mergedAdv.texts.size) { safeInputBorderSizes?.firstOrNull() ?: 0 }
             ProcessedTextData(
                 texts = mergedAdv.texts,
                 balloonBoxes = mergedAdv.balloonBoxes,
@@ -1381,17 +1435,17 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             )
         } else {
             ProcessedTextData(
-                texts = texts,
-                balloonBoxes = balloonBoxes,
-                textBoxes = textBoxes,
-                fontSizes = fontSizes ?: List(texts.size) { 60 },
-                fontNames = fontNames ?: List(texts.size) { "AnimeAce2.0BB" },
-                borderSizes = borderSizes ?: List(texts.size) { 0 },
-                textAngles = textAngles ?: List(texts.size) { 0.0 },
-                shapes = shapes ?: List(texts.size) { "oval" },
-                textColors = textColors ?: List(texts.size) { "#000000" },
-                hasBorder = hasBorder ?: List(texts.size) { false },
-                borderColors = borderColors ?: List(texts.size) { "#FFFFFF" }
+                texts = safeInputTexts,
+                balloonBoxes = safeInputBalloonBoxes,
+                textBoxes = safeInputTextBoxes,
+                fontSizes = safeInputFontSizes ?: List(safeInputTexts.size) { 60 },
+                fontNames = safeInputFontNames ?: List(safeInputTexts.size) { "AnimeAce2.0BB" },
+                borderSizes = safeInputBorderSizes ?: List(safeInputTexts.size) { 0 },
+                textAngles = safeInputTextAngles ?: List(safeInputTexts.size) { 0.0 },
+                shapes = safeInputShapes ?: List(safeInputTexts.size) { "oval" },
+                textColors = safeInputTextColors ?: List(safeInputTexts.size) { "#000000" },
+                hasBorder = safeInputHasBorder ?: List(safeInputTexts.size) { false },
+                borderColors = safeInputBorderColors ?: List(safeInputTexts.size) { "#FFFFFF" }
             )
         }
 
@@ -1606,6 +1660,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             if (effTexts.isNotEmpty()) {
                 group(name = "translation") {
                     for ((index, text) in effTexts.withIndex()) {
+                        if (isHallucinationOrEmpty(text)) continue
                         val box = boxDataList[index]
                         val matched = matchedResults?.getOrNull(index)
 

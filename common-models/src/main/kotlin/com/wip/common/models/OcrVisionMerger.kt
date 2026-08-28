@@ -9,6 +9,42 @@ import kotlin.math.min
  */
 object OcrVisionMerger {
 
+    fun isHallucinationOrEmpty(rawText: String?): Boolean {
+        if (rawText.isNullOrBlank()) return true
+        val clean = rawText.trim()
+            .replace(Regex("(?i)<\\|/?(?:ref|box|det|quad|grounding|image|text)[^>]*\\|>"), "")
+            .replace(Regex("(?i)\\b(?:image|figure|table|header|footer|background|watermark)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]"), "")
+            .replace(Regex("(?i)^\\s*(?:text|balloon|speech|dialogue|caption|title|paragraph|line)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]\\s*"), "")
+            .trim()
+        if (clean.isBlank()) return true
+        if (!clean.any { it.isLetterOrDigit() }) return true
+
+        val lower = clean.lowercase()
+        val directMatches = setOf(
+            "(no text)", "no text", "none", "n/a", "na", "empty", "nothing",
+            "no dialogue", "no speech", "no speech bubble", "no speech bubbles",
+            "no text detected", "no text found", "no visible text",
+            "(nessun testo)", "nessun testo", "nessun dialogo",
+            "1", "0", "null", "undefined"
+        )
+        if (lower in directMatches) return true
+
+        val hallucinationRegexes = listOf(
+            Regex("""(?i)^\s*\(?(?:no\s+text|nessun\s+testo|none|empty|nothing|no\s+dialogue|no\s+speech(?:\s+bubbles?)?)\)?\.?\s*$"""),
+            Regex("""(?i)\b(?:the\s+image\s+contains\s+no\s+text|image\s+contains\s+no\s+visible\s+text|there\s+is\s+no\s+text\s+in\s+this\s+image|no\s+text\s+(?:found|detected|visible)\s+in\s+the\s+image)\b"""),
+            Regex("""(?i)\b(?:the\s+ocr\s+result.*is\s+a\s+hallucination|does\s+not\s+correspond\s+to\s+any\s+content|absence\s+of\s+any\s+visible\s+text)\b"""),
+            Regex("""(?i)\b(?:correct\s+ocr\s+output\s+must\s+reflect\s+the\s+absence\s+of|cannot\s+find\s+any\s+text\s+to\s+transcribe|no\s+transcription\s+available)\b""")
+        )
+
+        for (regex in hallucinationRegexes) {
+            if (regex.containsMatchIn(lower)) {
+                return true
+            }
+        }
+
+        return false
+    }
+
     private class DisjointSet(size: Int) {
         private val parent = IntArray(size) { it }
 
@@ -118,6 +154,11 @@ object OcrVisionMerger {
         val ocrY1 = normOcr[2]
         val ocrX1 = normOcr[3]
         val ocrArea = (ocrX1 - ocrX0) * (ocrY1 - ocrY0)
+        if (ocrArea <= 1e-6) return false
+
+        // Do not match full-screen fallback boxes to small vision objects
+        if (ocrArea > 0.85) return false
+
         val cx = (ocrX0 + ocrX1) / 2.0
         val cy = (ocrY0 + ocrY1) / 2.0
 
@@ -146,7 +187,7 @@ object OcrVisionMerger {
         val interH = max(0.0, interYmax - interYmin)
         val interArea = interW * interH
 
-        return if (ocrArea > 1e-6) (interArea / ocrArea) >= minCoverage else false
+        return (interArea / ocrArea) >= minCoverage
     }
 
     private fun inferImageDimensions(ocrBoxes: List<List<Double>>, visionResult: VisionResult): Pair<Double, Double> {
@@ -176,27 +217,56 @@ object OcrVisionMerger {
         return Pair(imgW, imgH)
     }
 
+    private fun filterValidVisionObjects(objects: List<SegmentedObject>): List<SegmentedObject> {
+        val ignoredLabels = setOf("watermark", "panel", "character", "face", "panel_border")
+        return objects.filter { obj ->
+            val lbl = obj.label.lowercase().trim()
+            val isIgnored = ignoredLabels.any { lbl.contains(it) }
+            val isRelevant = lbl.contains("balloon") || lbl.contains("bubble") || lbl.contains("text") ||
+                    lbl.contains("dialogue") || lbl.contains("sfx") || lbl.isEmpty()
+            !isIgnored && isRelevant
+        }
+    }
+
     fun mergeOcrResult(
         ocrData: OCRResult,
         visionResult: VisionResult,
         matchThreshold: Double = 0.20,
         separator: String = " "
     ): OCRResult {
-        val n = ocrData.texts.size
-        if (n <= 1 || visionResult.objects.isEmpty()) {
-            return ocrData
+        // Pre-filter invalid / hallucinated / empty OCR entries
+        val validIndices = ocrData.texts.indices.filter { !isHallucinationOrEmpty(ocrData.texts[it]) }
+        if (validIndices.isEmpty()) {
+            return ocrData.copy(
+                texts = emptyList(),
+                bb = emptyList(),
+                pageNumbers = emptyList(),
+                pageNames = emptyList()
+            )
         }
 
-        val (imgW, imgH) = inferImageDimensions(ocrData.bb, visionResult)
+        val cleanOcr = OCRResult(
+            texts = validIndices.map { ocrData.texts[it] },
+            bb = validIndices.map { ocrData.bb.getOrElse(it) { listOf(0.0, 0.0, 0.0, 0.0) } },
+            pageNumbers = validIndices.map { ocrData.pageNumbers.getOrElse(it) { 1 } },
+            pageNames = validIndices.map { ocrData.pageNames.getOrElse(it) { "" } },
+            failedFiles = ocrData.failedFiles
+        )
+
+        val n = cleanOcr.texts.size
+        val validObjects = filterValidVisionObjects(visionResult.objects)
+
+        if (n <= 1 || validObjects.isEmpty()) {
+            return cleanOcr
+        }
+
+        val (imgW, imgH) = inferImageDimensions(cleanOcr.bb, visionResult)
         val normOcrBoxes = Array(n) { i ->
-            val b = ocrData.bb.getOrNull(i) ?: listOf(0.0, 0.0, 0.0, 0.0)
+            val b = cleanOcr.bb.getOrNull(i) ?: listOf(0.0, 0.0, 0.0, 0.0)
             normalizeBox(b, imgW, imgH)
         }
 
         val dsu = DisjointSet(n)
-        val validObjects = visionResult.objects.filter {
-            !it.label.contains("watermark", ignoreCase = true)
-        }
 
         for (vObj in validObjects) {
             val matchingIndices = mutableListOf<Int>()
@@ -219,26 +289,24 @@ object OcrVisionMerger {
             groupMap.getOrPut(root) { mutableListOf() }.add(i)
         }
 
-        val orderedRoots = mutableListOf<Int>()
-        for (i in 0 until n) {
-            val root = dsu.find(i)
-            if (!orderedRoots.contains(root)) {
-                orderedRoots.add(root)
-            }
-        }
+        val uniqueRoots = groupMap.keys.toList()
 
-        val newTexts = mutableListOf<String>()
-        val newBoxes = mutableListOf<List<Double>>()
-        val newPageNumbers = mutableListOf<Int>()
-        val newPageNames = mutableListOf<String>()
+        data class MergedItem(
+            val text: String,
+            val box: List<Double>,
+            val pageNumber: Int,
+            val pageName: String
+        )
 
-        for (root in orderedRoots) {
+        val mergedItems = mutableListOf<MergedItem>()
+
+        for (root in uniqueRoots) {
             val groupIndices = groupMap[root] ?: continue
 
-            // Sort top-to-bottom strictly by ymin, then by xmin
+            // Sort lines top-to-bottom strictly within the balloon
             groupIndices.sortWith(Comparator { a, b ->
-                val bA = ocrData.bb.getOrNull(a) ?: listOf(0.0, 0.0, 0.0, 0.0)
-                val bB = ocrData.bb.getOrNull(b) ?: listOf(0.0, 0.0, 0.0, 0.0)
+                val bA = cleanOcr.bb.getOrNull(a) ?: listOf(0.0, 0.0, 0.0, 0.0)
+                val bB = cleanOcr.bb.getOrNull(b) ?: listOf(0.0, 0.0, 0.0, 0.0)
                 val yA = min(bA[0], bA[2])
                 val yB = min(bB[0], bB[2])
                 val cmpY = yA.compareTo(yB)
@@ -249,7 +317,8 @@ object OcrVisionMerger {
                 }
             })
 
-            val mergedText = groupIndices.joinToString(separator) { ocrData.texts[it] }
+            val mergedText = groupIndices.joinToString(separator) { cleanOcr.texts[it] }.trim()
+            if (isHallucinationOrEmpty(mergedText)) continue
 
             var minY = Double.MAX_VALUE
             var minX = Double.MAX_VALUE
@@ -257,7 +326,7 @@ object OcrVisionMerger {
             var maxX = Double.MIN_VALUE
 
             for (idx in groupIndices) {
-                val b = ocrData.bb[idx]
+                val b = cleanOcr.bb[idx]
                 if (b.size >= 4) {
                     minY = min(minY, min(b[0], b[2]))
                     minX = min(minX, min(b[1], b[3]))
@@ -269,21 +338,24 @@ object OcrVisionMerger {
             val mergedBox = if (minY != Double.MAX_VALUE) {
                 listOf(minY, minX, maxY, maxX)
             } else {
-                ocrData.bb[groupIndices[0]]
+                cleanOcr.bb[groupIndices[0]]
             }
 
             val firstIdx = groupIndices[0]
-            newTexts.add(mergedText)
-            newBoxes.add(mergedBox)
-            if (firstIdx < ocrData.pageNumbers.size) newPageNumbers.add(ocrData.pageNumbers[firstIdx])
-            if (firstIdx < ocrData.pageNames.size) newPageNames.add(ocrData.pageNames[firstIdx])
+            val pageNum = if (firstIdx < cleanOcr.pageNumbers.size) cleanOcr.pageNumbers[firstIdx] else 1
+            val pageName = if (firstIdx < cleanOcr.pageNames.size) cleanOcr.pageNames[firstIdx] else ""
+
+            mergedItems.add(MergedItem(mergedText, mergedBox, pageNum, pageName))
         }
 
+        // Sort all merged balloons top-to-bottom for reading order
+        mergedItems.sortWith(compareBy({ it.box.getOrElse(0) { 0.0 } }, { it.box.getOrElse(1) { 0.0 } }))
+
         return ocrData.copy(
-            texts = newTexts,
-            bb = newBoxes,
-            pageNumbers = newPageNumbers,
-            pageNames = newPageNames
+            texts = mergedItems.map { it.text },
+            bb = mergedItems.map { it.box },
+            pageNumbers = mergedItems.map { it.pageNumber },
+            pageNames = mergedItems.map { it.pageName }
         )
     }
 
@@ -293,24 +365,60 @@ object OcrVisionMerger {
         matchThreshold: Double = 0.20,
         separator: String = " "
     ): AdvancedOCRResult {
-        val n = ocrData.texts.size
-        if (n <= 1 || visionResult.objects.isEmpty()) {
-            return ocrData
+        // Pre-filter invalid / hallucinated / empty OCR entries
+        val validIndices = ocrData.texts.indices.filter { !isHallucinationOrEmpty(ocrData.texts[it]) }
+        if (validIndices.isEmpty()) {
+            return ocrData.copy(
+                texts = emptyList(),
+                balloonBoxes = emptyList(),
+                textBoxes = emptyList(),
+                shapes = emptyList(),
+                fontStyles = emptyList(),
+                fontFamilies = emptyList(),
+                textAngles = emptyList(),
+                isSparse = emptyList(),
+                textColors = emptyList(),
+                hasBorder = emptyList(),
+                borderColors = emptyList(),
+                pageNumbers = emptyList(),
+                pageNames = emptyList()
+            )
         }
 
-        val allBoxes = ocrData.balloonBoxes.ifEmpty { ocrData.textBoxes }
+        val cleanOcr = AdvancedOCRResult(
+            texts = validIndices.map { ocrData.texts[it] },
+            balloonBoxes = validIndices.map { ocrData.balloonBoxes.getOrElse(it) { listOf(0.0, 0.0, 0.0, 0.0) } },
+            textBoxes = validIndices.map { ocrData.textBoxes.getOrElse(it) { listOf(0.0, 0.0, 0.0, 0.0) } },
+            shapes = validIndices.map { ocrData.shapes.getOrElse(it) { "oval" } },
+            fontStyles = validIndices.map { ocrData.fontStyles.getOrElse(it) { "normal" } },
+            fontFamilies = validIndices.map { ocrData.fontFamilies.getOrElse(it) { "AnimeAce2.0BB" } },
+            textAngles = validIndices.map { ocrData.textAngles.getOrElse(it) { 0.0 } },
+            isSparse = validIndices.map { ocrData.isSparse.getOrElse(it) { false } },
+            textColors = validIndices.map { ocrData.textColors.getOrElse(it) { "#000000" } },
+            hasBorder = validIndices.map { ocrData.hasBorder.getOrElse(it) { false } },
+            borderColors = validIndices.map { ocrData.borderColors.getOrElse(it) { "#FFFFFF" } },
+            pageNumbers = validIndices.map { ocrData.pageNumbers.getOrElse(it) { 1 } },
+            pageNames = validIndices.map { ocrData.pageNames.getOrElse(it) { "" } },
+            failedFiles = ocrData.failedFiles
+        )
+
+        val n = cleanOcr.texts.size
+        val validObjects = filterValidVisionObjects(visionResult.objects)
+
+        if (n <= 1 || validObjects.isEmpty()) {
+            return cleanOcr
+        }
+
+        val allBoxes = cleanOcr.balloonBoxes.ifEmpty { cleanOcr.textBoxes }
         val (imgW, imgH) = inferImageDimensions(allBoxes, visionResult)
         val normBoxes = Array(n) { i ->
-            val b = ocrData.balloonBoxes.getOrNull(i)?.takeIf { it.size >= 4 }
-                ?: ocrData.textBoxes.getOrNull(i)
+            val b = cleanOcr.balloonBoxes.getOrNull(i)?.takeIf { it.size >= 4 }
+                ?: cleanOcr.textBoxes.getOrNull(i)
                 ?: listOf(0.0, 0.0, 0.0, 0.0)
             normalizeBox(b, imgW, imgH)
         }
 
         val dsu = DisjointSet(n)
-        val validObjects = visionResult.objects.filter {
-            !it.label.contains("watermark", ignoreCase = true)
-        }
 
         for (vObj in validObjects) {
             val matchingIndices = mutableListOf<Int>()
@@ -333,35 +441,33 @@ object OcrVisionMerger {
             groupMap.getOrPut(root) { mutableListOf() }.add(i)
         }
 
-        val orderedRoots = mutableListOf<Int>()
-        for (i in 0 until n) {
-            val root = dsu.find(i)
-            if (!orderedRoots.contains(root)) {
-                orderedRoots.add(root)
-            }
-        }
+        val uniqueRoots = groupMap.keys.toList()
 
-        val newTexts = mutableListOf<String>()
-        val newBalloonBoxes = mutableListOf<List<Double>>()
-        val newTextBoxes = mutableListOf<List<Double>>()
-        val newShapes = mutableListOf<String>()
-        val newFontStyles = mutableListOf<String>()
-        val newFontFamilies = mutableListOf<String>()
-        val newTextAngles = mutableListOf<Double>()
-        val newIsSparse = mutableListOf<Boolean>()
-        val newTextColors = mutableListOf<String>()
-        val newHasBorder = mutableListOf<Boolean>()
-        val newBorderColors = mutableListOf<String>()
-        val newPageNumbers = mutableListOf<Int>()
-        val newPageNames = mutableListOf<String>()
+        data class MergedAdvItem(
+            val text: String,
+            val balloonBox: List<Double>,
+            val textBox: List<Double>,
+            val shape: String,
+            val fontStyle: String,
+            val fontFamily: String,
+            val textAngle: Double,
+            val isSparse: Boolean,
+            val textColor: String,
+            val hasBorder: Boolean,
+            val borderColor: String,
+            val pageNumber: Int,
+            val pageName: String
+        )
 
-        for (root in orderedRoots) {
+        val mergedItems = mutableListOf<MergedAdvItem>()
+
+        for (root in uniqueRoots) {
             val groupIndices = groupMap[root] ?: continue
 
             // Sort top-to-bottom strictly by ymin, then by xmin
             groupIndices.sortWith(Comparator { a, b ->
-                val bA = ocrData.textBoxes.getOrNull(a)?.takeIf { it.size >= 4 } ?: ocrData.balloonBoxes.getOrNull(a) ?: listOf(0.0, 0.0, 0.0, 0.0)
-                val bB = ocrData.textBoxes.getOrNull(b)?.takeIf { it.size >= 4 } ?: ocrData.balloonBoxes.getOrNull(b) ?: listOf(0.0, 0.0, 0.0, 0.0)
+                val bA = cleanOcr.textBoxes.getOrNull(a)?.takeIf { it.size >= 4 } ?: cleanOcr.balloonBoxes.getOrNull(a) ?: listOf(0.0, 0.0, 0.0, 0.0)
+                val bB = cleanOcr.textBoxes.getOrNull(b)?.takeIf { it.size >= 4 } ?: cleanOcr.balloonBoxes.getOrNull(b) ?: listOf(0.0, 0.0, 0.0, 0.0)
                 val yA = min(bA[0], bA[2])
                 val yB = min(bB[0], bB[2])
                 val cmpY = yA.compareTo(yB)
@@ -372,20 +478,21 @@ object OcrVisionMerger {
                 }
             })
 
-            val mergedText = groupIndices.joinToString(separator) { ocrData.texts[it] }
+            val mergedText = groupIndices.joinToString(separator) { cleanOcr.texts[it] }.trim()
+            if (isHallucinationOrEmpty(mergedText)) continue
 
             var minBY = Double.MAX_VALUE; var minBX = Double.MAX_VALUE; var maxBY = Double.MIN_VALUE; var maxBX = Double.MIN_VALUE
             var minTY = Double.MAX_VALUE; var minTX = Double.MAX_VALUE; var maxTY = Double.MIN_VALUE; var maxTX = Double.MIN_VALUE
 
             for (idx in groupIndices) {
-                val bBox = ocrData.balloonBoxes.getOrNull(idx)
+                val bBox = cleanOcr.balloonBoxes.getOrNull(idx)
                 if (bBox != null && bBox.size >= 4) {
                     minBY = min(minBY, min(bBox[0], bBox[2]))
                     minBX = min(minBX, min(bBox[1], bBox[3]))
                     maxBY = max(maxBY, max(bBox[0], bBox[2]))
                     maxBX = max(maxBX, max(bBox[1], bBox[3]))
                 }
-                val tBox = ocrData.textBoxes.getOrNull(idx)
+                val tBox = cleanOcr.textBoxes.getOrNull(idx)
                 if (tBox != null && tBox.size >= 4) {
                     minTY = min(minTY, min(tBox[0], tBox[2]))
                     minTX = min(minTX, min(tBox[1], tBox[3]))
@@ -394,40 +501,77 @@ object OcrVisionMerger {
                 }
             }
 
-            val mergedBalloonBox = if (minBY != Double.MAX_VALUE) listOf(minBY, minBX, maxBY, maxBX) else ocrData.balloonBoxes[groupIndices[0]]
-            val mergedTextBox = if (minTY != Double.MAX_VALUE) listOf(minTY, minTX, maxTY, maxTX) else (ocrData.textBoxes.getOrNull(groupIndices[0]) ?: mergedBalloonBox)
+            val mergedBalloonBox = if (minBY != Double.MAX_VALUE) listOf(minBY, minBX, maxBY, maxBX) else cleanOcr.balloonBoxes[groupIndices[0]]
+            val mergedTextBox = if (minTY != Double.MAX_VALUE) listOf(minTY, minTX, maxTY, maxTX) else (cleanOcr.textBoxes.getOrNull(groupIndices[0]) ?: mergedBalloonBox)
 
             val firstIdx = groupIndices[0]
-            newTexts.add(mergedText)
-            newBalloonBoxes.add(mergedBalloonBox)
-            newTextBoxes.add(mergedTextBox)
-            if (firstIdx < ocrData.shapes.size) newShapes.add(ocrData.shapes[firstIdx])
-            if (firstIdx < ocrData.fontStyles.size) newFontStyles.add(ocrData.fontStyles[firstIdx])
-            if (firstIdx < ocrData.fontFamilies.size) newFontFamilies.add(ocrData.fontFamilies[firstIdx])
-            if (firstIdx < ocrData.textAngles.size) newTextAngles.add(ocrData.textAngles[firstIdx])
-            if (firstIdx < ocrData.isSparse.size) newIsSparse.add(ocrData.isSparse[firstIdx])
-            if (firstIdx < ocrData.textColors.size) newTextColors.add(ocrData.textColors[firstIdx])
-            if (firstIdx < ocrData.hasBorder.size) newHasBorder.add(ocrData.hasBorder[firstIdx])
-            if (firstIdx < ocrData.borderColors.size) newBorderColors.add(ocrData.borderColors[firstIdx])
-            if (firstIdx < ocrData.pageNumbers.size) newPageNumbers.add(ocrData.pageNumbers[firstIdx])
-            if (firstIdx < ocrData.pageNames.size) newPageNames.add(ocrData.pageNames[firstIdx])
+            mergedItems.add(
+                MergedAdvItem(
+                    text = mergedText,
+                    balloonBox = mergedBalloonBox,
+                    textBox = mergedTextBox,
+                    shape = if (firstIdx < cleanOcr.shapes.size) cleanOcr.shapes[firstIdx] else "oval",
+                    fontStyle = if (firstIdx < cleanOcr.fontStyles.size) cleanOcr.fontStyles[firstIdx] else "normal",
+                    fontFamily = if (firstIdx < cleanOcr.fontFamilies.size) cleanOcr.fontFamilies[firstIdx] else "AnimeAce2.0BB",
+                    textAngle = if (firstIdx < cleanOcr.textAngles.size) cleanOcr.textAngles[firstIdx] else 0.0,
+                    isSparse = if (firstIdx < cleanOcr.isSparse.size) cleanOcr.isSparse[firstIdx] else false,
+                    textColor = if (firstIdx < cleanOcr.textColors.size) cleanOcr.textColors[firstIdx] else "#000000",
+                    hasBorder = if (firstIdx < cleanOcr.hasBorder.size) cleanOcr.hasBorder[firstIdx] else false,
+                    borderColor = if (firstIdx < cleanOcr.borderColors.size) cleanOcr.borderColors[firstIdx] else "#FFFFFF",
+                    pageNumber = if (firstIdx < cleanOcr.pageNumbers.size) cleanOcr.pageNumbers[firstIdx] else 1,
+                    pageName = if (firstIdx < cleanOcr.pageNames.size) cleanOcr.pageNames[firstIdx] else ""
+                )
+            )
         }
 
+        // Sort all merged balloons top-to-bottom for reading order
+        mergedItems.sortWith(compareBy({ it.balloonBox.getOrElse(0) { 0.0 } }, { it.balloonBox.getOrElse(1) { 0.0 } }))
+
         return ocrData.copy(
-            texts = newTexts,
-            balloonBoxes = newBalloonBoxes,
-            textBoxes = newTextBoxes,
-            shapes = newShapes,
-            fontStyles = newFontStyles,
-            fontFamilies = newFontFamilies,
-            textAngles = newTextAngles,
-            isSparse = newIsSparse,
-            textColors = newTextColors,
-            hasBorder = newHasBorder,
-            borderColors = newBorderColors,
-            pageNumbers = newPageNumbers,
-            pageNames = newPageNames
+            texts = mergedItems.map { it.text },
+            balloonBoxes = mergedItems.map { it.balloonBox },
+            textBoxes = mergedItems.map { it.textBox },
+            shapes = mergedItems.map { it.shape },
+            fontStyles = mergedItems.map { it.fontStyle },
+            fontFamilies = mergedItems.map { it.fontFamily },
+            textAngles = mergedItems.map { it.textAngle },
+            isSparse = mergedItems.map { it.isSparse },
+            textColors = mergedItems.map { it.textColor },
+            hasBorder = mergedItems.map { it.hasBorder },
+            borderColors = mergedItems.map { it.borderColor },
+            pageNumbers = mergedItems.map { it.pageNumber },
+            pageNames = mergedItems.map { it.pageName }
         )
+    }
+
+    private fun findMatchingVision(
+        pageName: String,
+        pageNum: Int,
+        chapterVisionResult: ChapterVisionResult,
+        visionMap: Map<String, VisionResult>
+    ): VisionResult? {
+        val rawName = pageName.lowercase()
+        val baseName = File(pageName).nameWithoutExtension.lowercase()
+        val numFromPageName = baseName.filter { it.isDigit() }.toIntOrNull()
+        val trimmedZeros = baseName.trimStart('0')
+
+        return visionMap[rawName]
+            ?: visionMap[baseName]
+            ?: (if (trimmedZeros.isNotEmpty()) visionMap[trimmedZeros] else null)
+            ?: (if (numFromPageName != null) visionMap["num_$numFromPageName"] else null)
+            ?: chapterVisionResult.results.firstOrNull { r ->
+                val rClean = File(r.pageName).nameWithoutExtension.lowercase()
+                val rNum = rClean.filter { it.isDigit() }.toIntOrNull()
+                r.pageName.equals(pageName, ignoreCase = true) ||
+                rClean.equals(baseName, ignoreCase = true) ||
+                rClean.trimStart('0').equals(trimmedZeros, ignoreCase = true) ||
+                (numFromPageName != null && rNum != null && numFromPageName == rNum)
+            }
+            ?: if (chapterVisionResult.results.size == 1) {
+                chapterVisionResult.results[0]
+            } else {
+                chapterVisionResult.results.getOrNull(pageNum - 1)
+            }
     }
 
     fun mergeChapterOcrResult(
@@ -446,11 +590,21 @@ object OcrVisionMerger {
             visionMap[rawName] = r
             val baseName = File(r.pageName).nameWithoutExtension.lowercase()
             visionMap[baseName] = r
+            val trimmedZeros = baseName.trimStart('0')
+            if (trimmedZeros.isNotEmpty()) {
+                visionMap[trimmedZeros] = r
+            }
+            val num = baseName.filter { it.isDigit() }.toIntOrNull()
+            if (num != null) {
+                visionMap["num_$num"] = r
+            }
         }
 
         val pageGroups = mutableMapOf<String, MutableList<Int>>()
         for (i in ocrData.texts.indices) {
-            val pageName = ocrData.pageNames.getOrNull(i) ?: ""
+            val pageName = ocrData.pageNames.getOrNull(i)?.takeIf { it.isNotBlank() }
+                ?: ocrData.pageNumbers.getOrNull(i)?.toString()
+                ?: "page_1"
             pageGroups.getOrPut(pageName) { mutableListOf() }.add(i)
         }
 
@@ -460,22 +614,12 @@ object OcrVisionMerger {
         val allMergedPageNames = mutableListOf<String>()
 
         for ((pageName, indices) in pageGroups) {
-            val rawName = pageName.lowercase()
-            val baseName = File(pageName).nameWithoutExtension.lowercase()
             val pageNum = indices.firstOrNull()?.let { ocrData.pageNumbers.getOrNull(it) } ?: 1
-
-            val visionResult = visionMap[rawName]
-                ?: visionMap[baseName]
-                ?: chapterVisionResult.results.firstOrNull { it.pageName.equals(pageName, ignoreCase = true) }
-                ?: if (chapterVisionResult.results.size == 1) {
-                    chapterVisionResult.results[0]
-                } else {
-                    chapterVisionResult.results.getOrNull(pageNum - 1)
-                }
+            val visionResult = findMatchingVision(pageName, pageNum, chapterVisionResult, visionMap)
 
             val pageOcr = OCRResult(
                 texts = indices.map { ocrData.texts[it] },
-                bb = indices.map { ocrData.bb[it] },
+                bb = indices.map { ocrData.bb.getOrElse(it) { listOf(0.0, 0.0, 0.0, 0.0) } },
                 pageNumbers = indices.map { ocrData.pageNumbers.getOrElse(it) { pageNum } },
                 pageNames = indices.map { ocrData.pageNames.getOrElse(it) { pageName } },
                 failedFiles = emptyList()
@@ -517,11 +661,21 @@ object OcrVisionMerger {
             visionMap[rawName] = r
             val baseName = File(r.pageName).nameWithoutExtension.lowercase()
             visionMap[baseName] = r
+            val trimmedZeros = baseName.trimStart('0')
+            if (trimmedZeros.isNotEmpty()) {
+                visionMap[trimmedZeros] = r
+            }
+            val num = baseName.filter { it.isDigit() }.toIntOrNull()
+            if (num != null) {
+                visionMap["num_$num"] = r
+            }
         }
 
         val pageGroups = mutableMapOf<String, MutableList<Int>>()
         for (i in ocrData.texts.indices) {
-            val pageName = ocrData.pageNames.getOrNull(i) ?: ""
+            val pageName = ocrData.pageNames.getOrNull(i)?.takeIf { it.isNotBlank() }
+                ?: ocrData.pageNumbers.getOrNull(i)?.toString()
+                ?: "page_1"
             pageGroups.getOrPut(pageName) { mutableListOf() }.add(i)
         }
 
@@ -540,18 +694,8 @@ object OcrVisionMerger {
         val allPageNames = mutableListOf<String>()
 
         for ((pageName, indices) in pageGroups) {
-            val rawName = pageName.lowercase()
-            val baseName = File(pageName).nameWithoutExtension.lowercase()
             val pageNum = indices.firstOrNull()?.let { ocrData.pageNumbers.getOrNull(it) } ?: 1
-
-            val visionResult = visionMap[rawName]
-                ?: visionMap[baseName]
-                ?: chapterVisionResult.results.firstOrNull { it.pageName.equals(pageName, ignoreCase = true) }
-                ?: if (chapterVisionResult.results.size == 1) {
-                    chapterVisionResult.results[0]
-                } else {
-                    chapterVisionResult.results.getOrNull(pageNum - 1)
-                }
+            val visionResult = findMatchingVision(pageName, pageNum, chapterVisionResult, visionMap)
 
             val pageAdvOcr = AdvancedOCRResult(
                 texts = indices.map { ocrData.texts[it] },

@@ -156,6 +156,38 @@ class UnlimitedOcrRunner(
         val borderColor: String = ""
     )
 
+    fun isHallucinationOrEmpty(rawText: String?): Boolean {
+        if (rawText.isNullOrBlank()) return true
+        val clean = cleanExtractedText(rawText.trim())
+        if (clean.isBlank()) return true
+        if (!clean.any { it.isLetterOrDigit() }) return true
+
+        val lower = clean.lowercase().trim()
+        val directMatches = setOf(
+            "(no text)", "no text", "none", "n/a", "na", "empty", "nothing",
+            "no dialogue", "no speech", "no speech bubble", "no speech bubbles",
+            "no text detected", "no text found", "no visible text",
+            "(nessun testo)", "nessun testo", "nessun dialogo",
+            "1", "0", "null", "undefined"
+        )
+        if (lower in directMatches) return true
+
+        val hallucinationRegexes = listOf(
+            Regex("""(?i)^\s*\(?(?:no\s+text|nessun\s+testo|none|empty|nothing|no\s+dialogue|no\s+speech(?:\s+bubbles?)?)\)?\.?\s*$"""),
+            Regex("""(?i)\b(?:the\s+image\s+contains\s+no\s+text|image\s+contains\s+no\s+visible\s+text|there\s+is\s+no\s+text\s+in\s+this\s+image|no\s+text\s+(?:found|detected|visible)\s+in\s+the\s+image)\b"""),
+            Regex("""(?i)\b(?:the\s+ocr\s+result.*is\s+a\s+hallucination|does\s+not\s+correspond\s+to\s+any\s+content|absence\s+of\s+any\s+visible\s+text)\b"""),
+            Regex("""(?i)\b(?:correct\s+ocr\s+output\s+must\s+reflect\s+the\s+absence\s+of|cannot\s+find\s+any\s+text\s+to\s+transcribe|no\s+transcription\s+available)\b""")
+        )
+
+        for (regex in hallucinationRegexes) {
+            if (regex.containsMatchIn(lower)) {
+                return true
+            }
+        }
+
+        return false
+    }
+
     fun cleanExtractedText(raw: String): String {
         return raw
             .replace(Regex("(?i)<\\|/?(?:ref|box|det|quad|grounding|image|text)[^>]*\\|>"), "")
@@ -176,7 +208,7 @@ class UnlimitedOcrRunner(
                 val parsed = jsonIgnoreUnknown.decodeFromString<BalloonsResponse>(jsonText)
                 for (b in parsed.balloons) {
                     val cleanText = cleanExtractedText(b.text)
-                    if (cleanText.isNotBlank()) {
+                    if (!isHallucinationOrEmpty(cleanText)) {
                         val box = scaleBox(listOf(b.ymin, b.xmin, b.ymax, b.xmax), imgWidth, imgHeight)
                         regions.add(
                             ExtractedTextRegion(
@@ -208,7 +240,7 @@ class UnlimitedOcrRunner(
             val ymax = refBoxMatcher.group(4).toDoubleOrNull() ?: 0.0
             val xmax = refBoxMatcher.group(5).toDoubleOrNull() ?: 0.0
             val box = scaleBox(listOf(ymin, xmin, ymax, xmax), imgWidth, imgHeight)
-            if (text.isNotBlank()) {
+            if (!isHallucinationOrEmpty(text)) {
                 regions.add(
                     ExtractedTextRegion(
                         text = text,
@@ -235,7 +267,7 @@ class UnlimitedOcrRunner(
             val xmax = detMatcher.group(4).toDoubleOrNull() ?: 0.0
             val text = cleanExtractedText(detMatcher.group(5))
             val box = scaleBox(listOf(ymin, xmin, ymax, xmax), imgWidth, imgHeight)
-            if (text.isNotBlank()) {
+            if (!isHallucinationOrEmpty(text)) {
                 regions.add(
                     ExtractedTextRegion(
                         text = text,
@@ -262,7 +294,7 @@ class UnlimitedOcrRunner(
             val ymax = taggedMatcher.group(4).toDoubleOrNull() ?: 0.0
             val text = cleanExtractedText(taggedMatcher.group(5))
             val box = scaleBox(listOf(ymin, xmin, ymax, xmax), imgWidth, imgHeight)
-            if (text.isNotBlank()) {
+            if (!isHallucinationOrEmpty(text)) {
                 regions.add(
                     ExtractedTextRegion(
                         text = text,
@@ -289,7 +321,7 @@ class UnlimitedOcrRunner(
             val xmax = coordMatcher.group(4).toDoubleOrNull() ?: 0.0
             val text = cleanExtractedText(coordMatcher.group(5))
             val box = scaleBox(listOf(ymin, xmin, ymax, xmax), imgWidth, imgHeight)
-            if (text.isNotBlank()) {
+            if (!isHallucinationOrEmpty(text)) {
                 regions.add(
                     ExtractedTextRegion(
                         text = text,
@@ -305,7 +337,7 @@ class UnlimitedOcrRunner(
 
         // 6. Fallback if plain text output without explicit boxes: wrap whole image
         val cleanFallback = cleanExtractedText(rawOutput)
-        if (cleanFallback.isNotBlank()) {
+        if (!isHallucinationOrEmpty(cleanFallback)) {
             regions.add(
                 ExtractedTextRegion(
                     text = cleanFallback,
@@ -428,7 +460,7 @@ class UnlimitedOcrRunner(
                                 withContext(Dispatchers.IO) {
                                     ImageIO.write(subImage, "png", tempCropFile)
                                 }
-                                val prompt = "Locate all speech bubbles and text in this image. Provide text transcriptions and bounding boxes."
+                                val prompt = ""
                                 val rawOutput = if (llamaSession != null) {
                                     LlamaInferenceClient.Default.executeVisionChat(
                                         baseUrl = llamaSession.baseUrl,
@@ -473,7 +505,7 @@ class UnlimitedOcrRunner(
 
                         saveJsonResult(save, outputDir, file, pageRegions, rawOutputs.joinToString("\n---\n"))
                     } else {
-                        val prompt = "Locate all speech bubbles and text in this image. Provide text transcriptions and bounding boxes."
+                        val prompt = ""
                         val rawOutput = if (llamaSession != null) {
                             LlamaInferenceClient.Default.executeVisionChat(
                                 baseUrl = llamaSession.baseUrl,
@@ -589,7 +621,7 @@ class UnlimitedOcrRunner(
                                 withContext(Dispatchers.IO) {
                                     ImageIO.write(subImage, "png", tempCropFile)
                                 }
-                                val prompt = "Locate all speech bubbles and text in this image. For each text area provide balloon_box_2d [ymin, xmin, ymax, xmax], text_box_2d [ymin, xmin, ymax, xmax], shape, and transcribed text."
+                                val prompt = ""
                                 val rawOutput = if (llamaSession != null) {
                                     LlamaInferenceClient.Default.executeVisionChat(
                                         baseUrl = llamaSession.baseUrl,
@@ -644,7 +676,7 @@ class UnlimitedOcrRunner(
 
                         saveJsonResult(save, outputDir, file, pageRegions, rawOutputs.joinToString("\n---\n"))
                     } else {
-                        val prompt = "Locate all speech bubbles and text in this image. For each text area provide balloon_box_2d [ymin, xmin, ymax, xmax], text_box_2d [ymin, xmin, ymax, xmax], shape, and transcribed text."
+                        val prompt = ""
                         val rawOutput = if (llamaSession != null) {
                             LlamaInferenceClient.Default.executeVisionChat(
                                 baseUrl = llamaSession.baseUrl,

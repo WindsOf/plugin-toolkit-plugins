@@ -143,14 +143,24 @@ class OcrIATest {
         val taggedRegions = runner.parseOcrOutput(taggedOutput, 940.0, 1918.0)
         assertEquals(1, taggedRegions.size)
         assertEquals("IT'S MY\nMANA CORE.", taggedRegions[0].text)
-        // xmin = 389/1000 * 940 = 365.66
-        // ymin = 318/1000 * 1918 = 609.924
-        // xmax = 680/1000 * 940 = 639.2
-        // ymax = 369/1000 * 1918 = 707.742
         assertEquals(609.924, taggedRegions[0].ymin, 0.01)
         assertEquals(365.66, taggedRegions[0].xmin, 0.01)
         assertEquals(707.742, taggedRegions[0].ymax, 0.01)
         assertEquals(639.2, taggedRegions[0].xmax, 0.01)
+
+        // Test 5: Hallucination explanation wall of text (from todebug/1.json)
+        val hallucinationOutput = "text [0, 0, 999, 999]The image contains no text. The OCR result \"1\" is a hallucination and does not correspond to any content in the source image. Therefore, the correct OCR output must reflect the absence of any visible text.\n\n(no text)"
+        val hallucinationRegions = runner.parseOcrOutput(hallucinationOutput, 940.0, 1918.0)
+        assertEquals(0, hallucinationRegions.size, "Explanation hallucination must produce 0 regions")
+
+        // Test 6: Direct (no text) and (nessun testo)
+        val noTextOutput = "(no text)"
+        val noTextRegions = runner.parseOcrOutput(noTextOutput, 1000.0, 1000.0)
+        assertEquals(0, noTextRegions.size)
+
+        val nessunTestoOutput = "(nessun testo)"
+        val nessunTestoRegions = runner.parseOcrOutput(nessunTestoOutput, 1000.0, 1000.0)
+        assertEquals(0, nessunTestoRegions.size)
     }
 
     @Test

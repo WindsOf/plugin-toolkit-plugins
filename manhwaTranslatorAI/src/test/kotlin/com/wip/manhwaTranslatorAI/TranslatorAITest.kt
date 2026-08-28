@@ -103,4 +103,21 @@ class TranslatorAITest {
         assertEquals(initialOcr.shapes, translatedOcr.shapes)
         assertEquals(initialOcr.borderColors, translatedOcr.borderColors)
     }
+
+    @Test
+    fun testIsHallucinationFiltering() {
+        val plugin = TranslatorAI(TranslatorAISettings(googleApiKey = "key123"))
+
+        assertTrue(plugin.isHallucination("(no text)"))
+        assertTrue(plugin.isHallucination("no text"))
+        assertTrue(plugin.isHallucination("(nessun testo)"))
+        assertTrue(plugin.isHallucination("nessun testo"))
+        assertTrue(plugin.isHallucination(""))
+        assertTrue(plugin.isHallucination("   "))
+        assertTrue(plugin.isHallucination("The image contains no text. The OCR result \"1\" is a hallucination"))
+        assertTrue(plugin.isHallucination("text [0, 0, 999, 999](no text)"))
+
+        kotlin.test.assertFalse(plugin.isHallucination("Hello, how are you?"))
+        kotlin.test.assertFalse(plugin.isHallucination("Questo è un testo valido."))
+    }
 }

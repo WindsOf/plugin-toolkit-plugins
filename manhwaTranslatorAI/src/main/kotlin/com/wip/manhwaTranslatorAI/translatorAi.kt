@@ -79,6 +79,42 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         return Result.success(Unit)
     }
 
+    fun isHallucination(rawText: String?): Boolean {
+        if (rawText.isNullOrBlank()) return true
+        val clean = rawText.trim()
+            .replace(Regex("(?i)<\\|/?(?:ref|box|det|quad|grounding|image|text)[^>]*\\|>"), "")
+            .replace(Regex("(?i)\\b(?:image|figure|table|header|footer|background|watermark)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]"), "")
+            .replace(Regex("(?i)^\\s*(?:text|balloon|speech|dialogue|caption|title|paragraph|line)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]\\s*"), "")
+            .trim()
+        if (clean.isBlank()) return true
+        if (!clean.any { it.isLetterOrDigit() }) return true
+
+        val lower = clean.lowercase()
+        val directMatches = setOf(
+            "(no text)", "no text", "none", "n/a", "na", "empty", "nothing",
+            "no dialogue", "no speech", "no speech bubble", "no speech bubbles",
+            "no text detected", "no text found", "no visible text",
+            "(nessun testo)", "nessun testo", "nessun dialogo",
+            "1", "0", "null", "undefined"
+        )
+        if (lower in directMatches) return true
+
+        val hallucinationRegexes = listOf(
+            Regex("""(?i)^\s*\(?(?:no\s+text|nessun\s+testo|none|empty|nothing|no\s+dialogue|no\s+speech(?:\s+bubbles?)?)\)?\.?\s*$"""),
+            Regex("""(?i)\b(?:the\s+image\s+contains\s+no\s+text|image\s+contains\s+no\s+visible\s+text|there\s+is\s+no\s+text\s+in\s+this\s+image|no\s+text\s+(?:found|detected|visible)\s+in\s+the\s+image)\b"""),
+            Regex("""(?i)\b(?:the\s+ocr\s+result.*is\s+a\s+hallucination|does\s+not\s+correspond\s+to\s+any\s+content|absence\s+of\s+any\s+visible\s+text)\b"""),
+            Regex("""(?i)\b(?:correct\s+ocr\s+output\s+must\s+reflect\s+the\s+absence\s+of|cannot\s+find\s+any\s+text\s+to\s+transcribe|no\s+transcription\s+available)\b""")
+        )
+
+        for (regex in hallucinationRegexes) {
+            if (regex.containsMatchIn(lower)) {
+                return true
+            }
+        }
+
+        return false
+    }
+
     @Capability(
         name = "translate_ocr",
         description = "Translates an OCRResult into Italian using Google AI"
@@ -137,18 +173,33 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         val effectiveDict = dictionary ?: ""
         val effectiveContextImages = useContextImages ?: false
         val effectiveSummary = generateChapterSummary ?: true
+
+        val validIndices = inputOcr.texts.indices.filter { !isHallucination(inputOcr.texts[it]) }
+        if (validIndices.isEmpty()) {
+            logger.info("Basic OCR Translation: No valid texts to translate after filtering empty/hallucinations.")
+            return inputOcr.copy(texts = emptyList(), bb = emptyList(), pageNumbers = emptyList(), pageNames = emptyList())
+        }
+
+        val cleanOcr = OCRResult(
+            texts = validIndices.map { inputOcr.texts[it] },
+            bb = validIndices.map { inputOcr.bb.getOrElse(it) { emptyList() } },
+            pageNumbers = validIndices.map { inputOcr.pageNumbers.getOrElse(it) { 1 } },
+            pageNames = validIndices.map { inputOcr.pageNames.getOrElse(it) { "" } },
+            failedFiles = inputOcr.failedFiles
+        )
+
         logger.info("Manhwa Translator AI (Basic OCRResult) started. Model: ${model.id}")
-        logger.info("Input size: ${inputOcr.texts.size} | Dictionary size: ${effectiveDict.length} | Context Images: $effectiveContextImages | Global Summary: $effectiveSummary")
+        logger.info("Input size: ${cleanOcr.texts.size} (filtered from ${inputOcr.texts.size}) | Dictionary size: ${effectiveDict.length} | Context Images: $effectiveContextImages | Global Summary: $effectiveSummary")
 
         return try {
             val service = KoogAITranslatorService(context, settings, hostFs)
             val translatedTexts = service.performTranslation(
-                input = inputOcr.texts,
+                input = cleanOcr.texts,
                 dictionary = effectiveDict,
                 apiKey = settings.googleApiKey,
                 useStructuredOutput = settings.useStructuredOutput,
                 modelId = model.id,
-                pageNames = inputOcr.pageNames,
+                pageNames = cleanOcr.pageNames,
                 inputFolder = inputFolder,
                 outputDir = outputDir,
                 tempSummaryDir = tempSummaryDir,
@@ -157,7 +208,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
                 save = save ?: true
             )
             logger.info("Basic OCR Translation completed.")
-            inputOcr.copy(texts = translatedTexts)
+            cleanOcr.copy(texts = translatedTexts)
         } catch (e: Throwable) {
             val msg = "Basic OCR Translation failed: ${e::class.simpleName}: ${e.message}"
             logger.error(msg)
@@ -306,18 +357,56 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         val effectiveDict = dictionary ?: ""
         val effectiveContextImages = useContextImages ?: false
         val effectiveSummary = generateChapterSummary ?: true
+
+        val validIndices = inputOcr.texts.indices.filter { !isHallucination(inputOcr.texts[it]) }
+        if (validIndices.isEmpty()) {
+            logger.info("Advanced OCR Translation: No valid texts to translate after filtering empty/hallucinations.")
+            return inputOcr.copy(
+                texts = emptyList(),
+                balloonBoxes = emptyList(),
+                textBoxes = emptyList(),
+                shapes = emptyList(),
+                fontStyles = emptyList(),
+                fontFamilies = emptyList(),
+                textAngles = emptyList(),
+                isSparse = emptyList(),
+                textColors = emptyList(),
+                hasBorder = emptyList(),
+                borderColors = emptyList(),
+                pageNumbers = emptyList(),
+                pageNames = emptyList()
+            )
+        }
+
+        val cleanOcr = AdvancedOCRResult(
+            texts = validIndices.map { inputOcr.texts[it] },
+            balloonBoxes = validIndices.map { inputOcr.balloonBoxes.getOrElse(it) { emptyList() } },
+            textBoxes = validIndices.map { inputOcr.textBoxes.getOrElse(it) { emptyList() } },
+            shapes = validIndices.map { inputOcr.shapes.getOrElse(it) { "oval" } },
+            fontStyles = validIndices.map { inputOcr.fontStyles.getOrElse(it) { "normal" } },
+            fontFamilies = validIndices.map { inputOcr.fontFamilies.getOrElse(it) { "AnimeAce2.0BB" } },
+            textAngles = validIndices.map { inputOcr.textAngles.getOrElse(it) { 0.0 } },
+            isSparse = validIndices.map { inputOcr.isSparse.getOrElse(it) { false } },
+            textColors = validIndices.map { inputOcr.textColors.getOrElse(it) { "#000000" } },
+            hasBorder = validIndices.map { inputOcr.hasBorder.getOrElse(it) { false } },
+            borderColors = validIndices.map { inputOcr.borderColors.getOrElse(it) { "#FFFFFF" } },
+            pageNumbers = validIndices.map { inputOcr.pageNumbers.getOrElse(it) { 1 } },
+            pageNames = validIndices.map { inputOcr.pageNames.getOrElse(it) { "" } },
+            failedFiles = inputOcr.failedFiles
+        )
+
         logger.info("Manhwa Translator AI (Advanced OCR) started. Model: ${model.id}")
-        logger.info("Input size: ${inputOcr.texts.size} | Dictionary size: ${effectiveDict.length} | Context Images: $effectiveContextImages | Global Summary: $effectiveSummary")
+        logger.info("Input size: ${cleanOcr.texts.size} (filtered from ${inputOcr.texts.size}) | Dictionary size: ${effectiveDict.length} | Context Images: $effectiveContextImages | Global Summary: $effectiveSummary")
 
         return try {
             val service = KoogAITranslatorService(context, settings, hostFs)
             val translatedTexts = service.performTranslation(
-                input = inputOcr.texts,
+                input = cleanOcr.texts,
                 dictionary = effectiveDict,
                 apiKey = settings.googleApiKey,
                 useStructuredOutput = settings.useStructuredOutput,
                 modelId = model.id,
-                pageNames = inputOcr.pageNames,
+                pageNames = cleanOcr.pageNames,
                 inputFolder = inputFolder,
                 outputDir = outputDir,
                 tempSummaryDir = tempSummaryDir,
@@ -326,7 +415,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
                 save = save ?: true
             )
             logger.info("Advanced OCR Translation completed.")
-            inputOcr.copy(texts = translatedTexts)
+            cleanOcr.copy(texts = translatedTexts)
         } catch (e: Throwable) {
             val msg = "Advanced OCR Translation failed: ${e::class.simpleName}: ${e.message}"
             logger.error(msg)

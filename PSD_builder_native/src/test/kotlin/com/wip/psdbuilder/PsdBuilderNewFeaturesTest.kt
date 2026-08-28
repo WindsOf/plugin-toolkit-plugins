@@ -217,4 +217,41 @@ class PsdBuilderNewFeaturesTest {
             tempOutputDir.deleteRecursively()
         }
     }
+
+    @Test
+    fun testGhostLayerAndHallucinationFilteringInPsdBuilder() {
+        runBlocking {
+            val plugin = PSDBuilderPlugin(PSDBuilderSettings(debugMode = false))
+            val ctx = mockk<PluginContext>(relaxed = true)
+
+            val w = 500
+            val h = 800
+            val baseImg = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+
+            val psd = plugin.buildPsdObject(
+                baseImageBmp = baseImg,
+                texts = listOf(
+                    "(no text)",
+                    "Valid Text Layer",
+                    "(nessun testo)",
+                    "The image contains no text. The OCR result \"1\" is a hallucination"
+                ),
+                balloonBoxes = listOf(
+                    listOf(0.0, 0.0, 1.0, 1.0),
+                    listOf(0.1, 0.1, 0.3, 0.5),
+                    listOf(0.0, 0.0, 1.0, 1.0),
+                    listOf(0.0, 0.0, 1.0, 1.0)
+                ),
+                context = ctx
+            )
+
+            assertNotNull(psd)
+            val translationGroup = psd.children.firstOrNull { it.name == "translation" }
+            assertNotNull(translationGroup)
+            val layers = translationGroup.children
+            assertNotNull(layers)
+            assertEquals(1, layers.size, "Only 1 valid text layer must exist, ghost/hallucination layers skipped")
+            assertEquals("Valid Text Layer", layers[0].name)
+        }
+    }
 }
