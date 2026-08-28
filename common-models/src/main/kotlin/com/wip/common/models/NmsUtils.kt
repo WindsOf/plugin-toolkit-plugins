@@ -31,12 +31,37 @@ object NmsUtils {
     }
 
     /**
-     * Applies class-aware greedy Non-Maximum Suppression (NMS) on a list of detection boxes.
+     * Calculates the Intersection over Smaller area (IOS) between two bounding boxes.
+     * Value ranges from 0.0 to 1.0. If one box is fully contained inside another, IOS = 1.0.
+     */
+    fun calculateIOS(a: DetectionBox, b: DetectionBox): Double {
+        val ymin = max(a.ymin, b.ymin)
+        val xmin = max(a.xmin, b.xmin)
+        val ymax = min(a.ymax, b.ymax)
+        val xmax = min(a.xmax, b.xmax)
+
+        val intersectWidth = max(0.0, xmax - xmin)
+        val intersectHeight = max(0.0, ymax - ymin)
+        val intersectArea = intersectWidth * intersectHeight
+
+        if (intersectArea <= 0.0) return 0.0
+
+        val areaA = max(0.0, a.xmax - a.xmin) * max(0.0, a.ymax - a.ymin)
+        val areaB = max(0.0, b.xmax - b.xmin) * max(0.0, b.ymax - b.ymin)
+        val minArea = min(areaA, areaB)
+
+        return if (minArea <= 0.0) 0.0 else intersectArea / minArea
+    }
+
+    /**
+     * Applies class-aware greedy Non-Maximum Suppression (NMS) on a list of detection boxes,
+     * suppressing both high-IoU overlapping boxes and smaller boxes contained inside larger boxes (IOS).
      */
     fun applyNms(
         boxes: List<DetectionBox>,
         iouThreshold: Double = 0.45,
-        scoreThreshold: Double = 0.25
+        scoreThreshold: Double = 0.25,
+        iosThreshold: Double = 0.65
     ): List<DetectionBox> {
         val filtered = boxes.filter { it.confidence >= scoreThreshold }
         if (filtered.isEmpty()) return emptyList()
@@ -52,7 +77,7 @@ object NmsUtils {
                 results.add(current)
 
                 sorted.removeAll { candidate ->
-                    calculateIoU(current, candidate) > iouThreshold
+                    calculateIoU(current, candidate) > iouThreshold || calculateIOS(current, candidate) > iosThreshold
                 }
             }
         }
@@ -135,12 +160,14 @@ object NmsUtils {
     }
 
     /**
-     * Applies class-aware greedy Non-Maximum Suppression (NMS) on a list of SegmentedObjects.
+     * Applies class-aware greedy Non-Maximum Suppression (NMS) on a list of SegmentedObjects,
+     * suppressing both high-IoU overlapping objects and smaller sub-objects contained inside larger objects (IOS).
      */
     fun applySegmentationNms(
         objects: List<SegmentedObject>,
         iouThreshold: Double = 0.45,
-        scoreThreshold: Double = 0.25
+        scoreThreshold: Double = 0.25,
+        iosThreshold: Double = 0.65
     ): List<SegmentedObject> {
         val filtered = objects.filter { it.confidence >= scoreThreshold }
         if (filtered.isEmpty()) return emptyList()
@@ -156,7 +183,7 @@ object NmsUtils {
                 results.add(current)
 
                 sorted.removeAll { candidate ->
-                    calculateIoU(current.box, candidate.box) > iouThreshold
+                    calculateIoU(current.box, candidate.box) > iouThreshold || calculateIOS(current.box, candidate.box) > iosThreshold
                 }
             }
         }

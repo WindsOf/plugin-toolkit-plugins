@@ -140,4 +140,40 @@ class SegmentationModelsTest {
         assertEquals(0.95, filtered[0].confidence)
         assertEquals("text", filtered[1].label)
     }
+
+    @Test
+    fun testCalculateIOSAndNestedBalloonSuppression() {
+        val largeBalloon = DetectionBox(
+            label = "balloon",
+            confidence = 0.95,
+            ymin = 0.10,
+            xmin = 0.10,
+            ymax = 0.80,
+            xmax = 0.80
+        )
+        // Small duplicate balloon nested inside the bottom of the large balloon
+        val nestedSmallBalloon = DetectionBox(
+            label = "balloon",
+            confidence = 0.55,
+            ymin = 0.60,
+            xmin = 0.20,
+            ymax = 0.78,
+            xmax = 0.70
+        )
+
+        val iou = NmsUtils.calculateIoU(largeBalloon, nestedSmallBalloon)
+        val ios = NmsUtils.calculateIOS(largeBalloon, nestedSmallBalloon)
+
+        // IoU is low (< 0.25) because largeBalloon is huge compared to nestedSmallBalloon
+        assertTrue(iou < 0.25, "Standard IoU should be low for nested small box")
+        // IOS is 1.0 because nestedSmallBalloon is 100% inside largeBalloon
+        assertEquals(1.0, ios, 0.001, "IOS should be 1.0 for fully nested small box")
+
+        val objLarge = SegmentedObject(label = "balloon", confidence = 0.95, box = largeBalloon)
+        val objSmall = SegmentedObject(label = "balloon", confidence = 0.55, box = nestedSmallBalloon)
+
+        val nmsResult = NmsUtils.applySegmentationNms(listOf(objLarge, objSmall), iouThreshold = 0.45, iosThreshold = 0.65)
+        assertEquals(1, nmsResult.size, "Nested small balloon must be suppressed by IOS NMS")
+        assertEquals(0.95, nmsResult[0].confidence)
+    }
 }

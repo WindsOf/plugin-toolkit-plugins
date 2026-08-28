@@ -178,4 +178,59 @@ class VisionPluginTest {
             assertTrue(File(result.debugImagePath!!).length() > 0)
         }
     }
+
+    @Test
+    fun testDetectAndSegmentWithTileGridAndSegmentationRois() {
+        val vision = VisionPlugin()
+        val tempDir = File("build/tmp/test_vision_rois").apply {
+            if (exists()) deleteRecursively()
+            mkdirs()
+        }
+
+        val testImage = File(tempDir, "manhwa_rois_page.png")
+        val img = BufferedImage(800, 1200, BufferedImage.TYPE_INT_RGB)
+        val g = img.createGraphics()
+        g.color = Color.WHITE
+        g.fillRect(0, 0, 800, 1200)
+        g.dispose()
+        ImageIO.write(img, "png", testImage)
+
+        val logger = FakeLogger()
+        val progress = FakeProgress()
+        val pluginFs = mockk<PluginFileSystem>(relaxed = true) {
+            coEvery { readFile(any()) } returns null
+            coEvery { readTextFile(any()) } returns null
+        }
+        val hostFs = mockk<HostFileSystem>(relaxed = true)
+
+        val context = mockk<PluginContext>(relaxed = true) {
+            every { this@mockk.logger } returns logger
+            every { this@mockk.progress } returns progress
+            every { this@mockk.fileSystem } returns pluginFs
+        }
+
+        runBlocking {
+            val result = vision.detectAndSegment(
+                imagePath = testImage.absolutePath,
+                detectionScoreThreshold = 0.25,
+                segmentationScoreThreshold = 0.25,
+                iouThreshold = 0.45,
+                iosThreshold = 0.65,
+                detectScale = 1.0,
+                detectOverlap = 0.25,
+                segmentScale = 1.0,
+                segmentOverlap = 0.25,
+                saveMask = false,
+                saveDebugImage = true,
+                drawTileGrid = true,
+                drawSegmentationRois = true,
+                outputDir = tempDir.absolutePath,
+                context = context,
+                hostFs = hostFs
+            )
+
+            assertTrue(result.debugImagePath != null && File(result.debugImagePath!!).exists())
+            assertTrue(File(result.debugImagePath!!).length() > 0)
+        }
+    }
 }

@@ -106,7 +106,12 @@ object RfDetrPostprocessor {
                     }
                 }
             }
-            return objects
+            return NmsUtils.applySegmentationNms(
+                objects = objects,
+                iouThreshold = modelSpec.iouThreshold,
+                scoreThreshold = scoreThreshold,
+                iosThreshold = 0.65
+            )
         }
 
         // 2. Multi-output tensor handling (e.g. boxes, scores, masks)
@@ -140,14 +145,16 @@ object RfDetrPostprocessor {
                 if (sShape.size == 3) {
                     val sDim2 = sShape[2].toInt()
                     for (c in 0 until min(numClasses, sDim2)) {
-                        val score = sBuffer.get(i * sDim2 + c)
+                        val rawLogit = sBuffer.get(i * sDim2 + c)
+                        val score = sigmoid(rawLogit)
                         if (score > maxScore) {
                             maxScore = score
                             bestClass = c
                         }
                     }
                 } else if (sShape.size == 2) {
-                    maxScore = sBuffer.get(i)
+                    val rawLogit = sBuffer.get(i)
+                    maxScore = sigmoid(rawLogit)
                     bestClass = 0
                 }
 
@@ -219,8 +226,15 @@ object RfDetrPostprocessor {
             }
         }
 
-        return objects
+        return NmsUtils.applySegmentationNms(
+            objects = objects,
+            iouThreshold = modelSpec.iouThreshold,
+            scoreThreshold = scoreThreshold,
+            iosThreshold = 0.65
+        )
     }
+
+    private fun sigmoid(x: Float): Float = (1.0f / (1.0f + kotlin.math.exp(-x))).coerceIn(0.0f, 1.0f)
 
     /**
      * Extracts exact polygon contour points from a 2D/3D mask slice using Marching Squares Isocontour tracing.

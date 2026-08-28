@@ -244,4 +244,36 @@ class InpaintingUtilsTest {
         val centerRgb = debugImg.getRGB(60, 60)
         assertTrue(centerRgb != Color.WHITE.rgb, "Overlay should have rendered colors on debug visualization")
     }
+
+    @Test
+    fun testRenderDebugVisualizationWithSlicesAndSegmentationRois() {
+        val width = 300
+        val height = 300
+        val baseImg = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+        val g = baseImg.createGraphics()
+        g.color = Color.WHITE
+        g.fillRect(0, 0, width, height)
+        g.dispose()
+
+        val slices = listOf(
+            SliceWindow(0, 0, 150, 150),
+            SliceWindow(100, 100, 150, 150)
+        )
+
+        val segRois = listOf(
+            DetectionBox("balloon", 0.95, 0.1, 0.1, 0.5, 0.5)
+        )
+
+        val debugImg = InpaintingUtils.renderDebugVisualization(
+            baseImage = baseImg,
+            objects = emptyList(),
+            candidateBoxes = emptyList(),
+            slices = slices,
+            segmentationRois = segRois
+        )
+
+        assertNotNull(debugImg)
+        assertEquals(width, debugImg.width)
+        assertEquals(height, debugImg.height)
+    }
 }

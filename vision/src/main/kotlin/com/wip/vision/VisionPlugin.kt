@@ -10,6 +10,7 @@ import com.wip.common.models.InpaintingUtils
 import com.wip.common.models.ModelCatalog
 import com.wip.common.models.ModelManager
 import com.wip.common.models.ModelSpec
+import com.wip.common.models.NmsUtils
 import com.wip.common.models.OnnxInferenceEngine
 import com.wip.common.models.OnnxInferenceSession
 import com.wip.common.models.RfDetrPostprocessor
@@ -202,6 +203,8 @@ class VisionPlugin {
         segmentationScoreThreshold: Double = 0.25,
         @CapabilityParam(description = "IoU NMS threshold", defaultValue = "0.45")
         iouThreshold: Double = 0.45,
+        @CapabilityParam(description = "Intersection over Smaller area (IOS) threshold for containment NMS suppression (0.0 to 1.0)", defaultValue = "0.65")
+        iosThreshold: Double = 0.65,
         @CapabilityParam(description = "Detection tile resolution scale factor (e.g. 1.0 = 640px, 2.0 = 1280px downscaled)", defaultValue = "1.0")
         detectScale: Double = 1.0,
         @CapabilityParam(description = "Detection sliding window overlap ratio (0.0 to 0.8)", defaultValue = "0.25")
@@ -214,13 +217,17 @@ class VisionPlugin {
         saveMask: Boolean = false,
         @CapabilityParam(description = "Save visual debug image showing all detected/segmented bounding boxes and contours", defaultValue = "false")
         saveDebugImage: Boolean = false,
+        @CapabilityParam(description = "Draw sliding window tile slice grids with alternating colors on the debug image", defaultValue = "false")
+        drawTileGrid: Boolean = false,
+        @CapabilityParam(description = "Draw Stage 2 Segmentation ROI crop boxes on the debug image", defaultValue = "false")
+        drawSegmentationRois: Boolean = false,
         @CapabilityOutput(description = "Optional output directory to save mask/debug image", defaultValue = "", semanticTypes = ["path/folder"])
         outputDir: String = "",
         context: PluginContext,
         hostFs: HostFileSystem
     ): VisionResult {
         val logger = context.logger
-        logger.info("Starting Detect and Segment for $imagePath (detectScale=$detectScale, segmentScale=$segmentScale, detectOverlap=$detectOverlap, segmentOverlap=$segmentOverlap)")
+        logger.info("Starting Detect and Segment for $imagePath (detectScale=$detectScale, segmentScale=$segmentScale, detectOverlap=$detectOverlap, segmentOverlap=$segmentOverlap, iosThreshold=$iosThreshold, drawTileGrid=$drawTileGrid, drawSegmentationRois=$drawSegmentationRois)")
 
         val inputFile = File(imagePath)
         if (!inputFile.exists()) {
@@ -248,23 +255,25 @@ class VisionPlugin {
                 classes = listOf("balloon", "text", "watermark")
             )
 
+        val yoloSahiConfig = SahiConfig(
+            sliceWidth = yoloSpec.inputWidth,
+            sliceHeight = yoloSpec.inputHeight,
+            overlapWidthRatio = detectOverlap.toFloat().coerceIn(0.0f, 0.8f),
+            overlapHeightRatio = detectOverlap.toFloat().coerceIn(0.0f, 0.8f),
+            scoreThreshold = detectionScoreThreshold,
+            iouThreshold = iouThreshold,
+            tileScale = detectScale.coerceAtLeast(0.5)
+        )
+        val detectSlices = SahiInferenceRunner.generateSlices(imgW, imgH, yoloSahiConfig)
+
         val yoloSession = ModelManager.Default.createInferenceSession(yoloModelId, context.fileSystem, ExecutionDevice.AUTO, logger)
         val candidateBoxes = if (yoloSession != null) {
             try {
-                val sahiConfig = SahiConfig(
-                    sliceWidth = yoloSpec.inputWidth,
-                    sliceHeight = yoloSpec.inputHeight,
-                    overlapWidthRatio = detectOverlap.toFloat().coerceIn(0.0f, 0.8f),
-                    overlapHeightRatio = detectOverlap.toFloat().coerceIn(0.0f, 0.8f),
-                    scoreThreshold = detectionScoreThreshold,
-                    iouThreshold = iouThreshold,
-                    tileScale = detectScale.coerceAtLeast(0.5)
-                )
                 val detResult = SahiInferenceRunner.runSlicedInference(
                     image = baseImage,
                     modelSpec = yoloSpec,
                     session = yoloSession,
-                    config = sahiConfig,
+                    config = yoloSahiConfig,
                     logger = logger
                 )
                 detResult.boxes
@@ -291,6 +300,7 @@ class VisionPlugin {
             )
 
         val finalObjects = mutableListOf<SegmentedObject>()
+        val segmentationRois = mutableListOf<DetectionBox>()
 
         val rfdetrSession = ModelManager.Default.createInferenceSession(rfdetrModelId, context.fileSystem, ExecutionDevice.AUTO, logger)
         if (rfdetrSession != null) {
@@ -355,6 +365,8 @@ class VisionPlugin {
                         } while (mergedAny)
                         mergedRois.add(curr)
                     }
+
+                    segmentationRois.addAll(mergedRois)
 
                     for (box in mergedRois) {
                         val pxX = (box.xmin * imgW).toInt().coerceIn(0, imgW - 1)
@@ -459,6 +471,14 @@ class VisionPlugin {
             }
         }
 
+        // Global Stage 2 NMS Deduplication (IoU + IOS containment suppression across all ROIs)
+        val deduplicatedObjects = NmsUtils.applySegmentationNms(
+            objects = finalObjects,
+            iouThreshold = iouThreshold,
+            scoreThreshold = segmentationScoreThreshold,
+            iosThreshold = iosThreshold
+        )
+
         var savedMaskPath: String? = null
         if (saveMask && outputDir.isNotBlank()) {
             val outFolder = File(outputDir)
@@ -467,7 +487,7 @@ class VisionPlugin {
             val maskName = "${inputFile.nameWithoutExtension}_mask.png"
             val maskFile = File(outFolder, maskName)
             val maskImg = InpaintingUtils.renderMaskFromObjects(
-                objects = finalObjects,
+                objects = deduplicatedObjects,
                 imageWidth = imgW,
                 imageHeight = imgH,
                 targetClasses = setOf("text"),
@@ -489,8 +509,10 @@ class VisionPlugin {
             val debugFile = File(outFolder, debugName)
             val debugImg = InpaintingUtils.renderDebugVisualization(
                 baseImage = baseImage,
-                objects = finalObjects,
-                candidateBoxes = candidateBoxes
+                objects = deduplicatedObjects,
+                candidateBoxes = candidateBoxes,
+                slices = if (drawTileGrid) detectSlices else emptyList(),
+                segmentationRois = if (drawSegmentationRois) segmentationRois else emptyList()
             )
             withContext(Dispatchers.IO) {
                 ImageIO.write(debugImg, "png", debugFile)
@@ -499,10 +521,10 @@ class VisionPlugin {
             logger.info("Saved visual debug image to: $savedDebugPath")
         }
 
-        logger.info("Vision complete for $imagePath. Detected ${finalObjects.size} segmented objects.")
+        logger.info("Vision complete for $imagePath. Detected ${deduplicatedObjects.size} segmented objects (suppressed ${finalObjects.size - deduplicatedObjects.size} duplicates).")
 
         return VisionResult(
-            objects = finalObjects,
+            objects = deduplicatedObjects,
             imageWidth = imgW,
             imageHeight = imgH,
             pageName = inputFile.name,
@@ -525,6 +547,8 @@ class VisionPlugin {
         segmentationScoreThreshold: Double = 0.25,
         @CapabilityParam(description = "IoU threshold", defaultValue = "0.45")
         iouThreshold: Double = 0.45,
+        @CapabilityParam(description = "Intersection over Smaller area (IOS) threshold for containment NMS suppression (0.0 to 1.0)", defaultValue = "0.65")
+        iosThreshold: Double = 0.65,
         @CapabilityParam(description = "Detection tile resolution scale factor (e.g. 1.0 = 640px, 2.0 = 1280px downscaled)", defaultValue = "1.0")
         detectScale: Double = 1.0,
         @CapabilityParam(description = "Detection sliding window overlap ratio (0.0 to 0.8)", defaultValue = "0.25")
@@ -537,6 +561,10 @@ class VisionPlugin {
         saveMasks: Boolean = false,
         @CapabilityParam(description = "Save visual debug images for each page", defaultValue = "false")
         saveDebugImages: Boolean = false,
+        @CapabilityParam(description = "Draw sliding window tile slice grids with alternating colors on the debug images", defaultValue = "false")
+        drawTileGrid: Boolean = false,
+        @CapabilityParam(description = "Draw Stage 2 Segmentation ROI crop boxes on the debug images", defaultValue = "false")
+        drawSegmentationRois: Boolean = false,
         @CapabilityOutput(description = "Output directory for masks/debug images", defaultValue = "", semanticTypes = ["path/folder"])
         outputDir: String = "",
         context: PluginContext,
@@ -570,12 +598,15 @@ class VisionPlugin {
                 detectionScoreThreshold = detectionScoreThreshold,
                 segmentationScoreThreshold = segmentationScoreThreshold,
                 iouThreshold = iouThreshold,
+                iosThreshold = iosThreshold,
                 detectScale = detectScale,
                 detectOverlap = detectOverlap,
                 segmentScale = segmentScale,
                 segmentOverlap = segmentOverlap,
                 saveMask = saveMasks,
                 saveDebugImage = saveDebugImages,
+                drawTileGrid = drawTileGrid,
+                drawSegmentationRois = drawSegmentationRois,
                 outputDir = outputDir,
                 context = context,
                 hostFs = hostFs
@@ -605,12 +636,16 @@ class VisionPlugin {
         scoreThreshold: Double = 0.25,
         @CapabilityParam(description = "IoU threshold", defaultValue = "0.45")
         iouThreshold: Double = 0.45,
+        @CapabilityParam(description = "Intersection over Smaller area (IOS) threshold for containment NMS suppression (0.0 to 1.0)", defaultValue = "0.65")
+        iosThreshold: Double = 0.65,
         @CapabilityParam(description = "Detection tile resolution scale factor (e.g. 1.0 = 640px, 2.0 = 1280px downscaled)", defaultValue = "1.0")
         detectScale: Double = 1.0,
         @CapabilityParam(description = "Detection sliding window overlap ratio (0.0 to 0.8)", defaultValue = "0.25")
         detectOverlap: Double = 0.25,
         @CapabilityParam(description = "Save visual debug image showing all detected bounding boxes", defaultValue = "false")
         saveDebugImage: Boolean = false,
+        @CapabilityParam(description = "Draw sliding window tile slice grids with alternating colors on the debug image", defaultValue = "false")
+        drawTileGrid: Boolean = false,
         @CapabilityOutput(description = "Optional output directory to save debug image", defaultValue = "", semanticTypes = ["path/folder"])
         outputDir: String = "",
         context: PluginContext,
@@ -621,6 +656,9 @@ class VisionPlugin {
 
         val img = withContext(Dispatchers.IO) { ImageIO.read(inputFile) }
             ?: throw IllegalArgumentException("Could not decode image: $imagePath")
+
+        val imgW = img.width
+        val imgH = img.height
 
         val yoloModelId = ModelCatalog.YOLO_DET_X_ID
         val yoloSpec = ModelManager.Default.getModelSpec(yoloModelId, context.fileSystem)
@@ -647,12 +685,26 @@ class VisionPlugin {
                 iouThreshold = iouThreshold,
                 tileScale = detectScale.coerceAtLeast(0.5)
             )
-            val detResult = SahiInferenceRunner.runSlicedInference(
+            val slices = SahiInferenceRunner.generateSlices(imgW, imgH, sahiConfig)
+
+            val rawDetResult = SahiInferenceRunner.runSlicedInference(
                 image = img,
                 modelSpec = yoloSpec,
                 session = session,
                 config = sahiConfig,
                 logger = context.logger
+            )
+
+            val nmsBoxes = NmsUtils.applyNms(
+                boxes = rawDetResult.boxes,
+                iouThreshold = iouThreshold,
+                scoreThreshold = scoreThreshold,
+                iosThreshold = iosThreshold
+            )
+            val detResult = DetectionResult(
+                boxes = nmsBoxes,
+                imageWidth = imgW,
+                imageHeight = imgH
             )
 
             if (saveDebugImage && outputDir.isNotBlank()) {
@@ -670,7 +722,8 @@ class VisionPlugin {
                 }
                 val debugImg = InpaintingUtils.renderDebugVisualization(
                     baseImage = img,
-                    objects = objects
+                    objects = objects,
+                    slices = if (drawTileGrid) slices else emptyList()
                 )
                 withContext(Dispatchers.IO) {
                     ImageIO.write(debugImg, "png", debugFile)

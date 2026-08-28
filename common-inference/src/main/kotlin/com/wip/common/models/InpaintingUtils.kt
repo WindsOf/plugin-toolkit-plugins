@@ -82,12 +82,15 @@ object InpaintingUtils {
 
     /**
      * Renders a comprehensive color-coded visual debug image showing all detected/segmented bounding boxes,
-     * transparent polygon overlays, class labels, and confidence percentages over the original base image.
+     * transparent polygon overlays, class labels, confidence percentages, optional dual-color sliding window tile grids,
+     * and optional Stage 2 Segmentation ROI crops.
      */
     fun renderDebugVisualization(
         baseImage: BufferedImage,
         objects: List<SegmentedObject>,
-        candidateBoxes: List<DetectionBox> = emptyList()
+        candidateBoxes: List<DetectionBox> = emptyList(),
+        slices: List<SliceWindow> = emptyList(),
+        segmentationRois: List<DetectionBox> = emptyList()
     ): BufferedImage {
         val width = baseImage.width
         val height = baseImage.height
@@ -97,7 +100,70 @@ object InpaintingUtils {
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
         g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
 
-        // 1. Draw candidate boxes in thin dashed outline if supplied
+        // 1. Draw SAHI sliding window tile slice grids with alternating dual colors if supplied
+        if (slices.isNotEmpty()) {
+            val tileColors = listOf(
+                Color(0, 220, 255, 230),  // Electric Cyan
+                Color(255, 50, 180, 230)  // Hot Magenta
+            )
+            val tileStroke = java.awt.BasicStroke(2.0f, java.awt.BasicStroke.CAP_BUTT, java.awt.BasicStroke.JOIN_MITER, 10.0f, floatArrayOf(8.0f, 6.0f), 0.0f)
+            val font = java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.BOLD, 12)
+            g2d.font = font
+
+            for ((index, slice) in slices.withIndex()) {
+                val color = tileColors[index % tileColors.size]
+                g2d.color = color
+                g2d.stroke = tileStroke
+                g2d.drawRect(slice.x, slice.y, slice.width, slice.height)
+
+                val badgeText = "Tile #${index + 1} (${slice.width}x${slice.height})"
+                val fontMetrics = g2d.fontMetrics
+                val textW = fontMetrics.stringWidth(badgeText)
+                val textH = fontMetrics.height
+                val badgeX = (slice.x + 8).coerceIn(4, max(4, width - textW - 12))
+                val badgeY = (slice.y + textH + 4).coerceIn(textH + 4, height - 4)
+
+                g2d.color = Color(0, 0, 0, 210)
+                g2d.fillRect(badgeX - 4, badgeY - textH + 2, textW + 8, textH + 2)
+                g2d.color = color
+                g2d.drawRect(badgeX - 4, badgeY - textH + 2, textW + 8, textH + 2)
+                g2d.drawString(badgeText, badgeX, badgeY)
+            }
+        }
+
+        // 2. Draw Stage 2 Segmentation ROI crop boxes in amber/orange with dashed borders if supplied
+        if (segmentationRois.isNotEmpty()) {
+            val roiStroke = java.awt.BasicStroke(2.0f, java.awt.BasicStroke.CAP_BUTT, java.awt.BasicStroke.JOIN_MITER, 10.0f, floatArrayOf(6.0f, 4.0f), 0.0f)
+            val font = java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.BOLD, 11)
+            g2d.font = font
+            val roiColor = Color(255, 160, 0, 220) // Amber / Orange
+
+            for ((index, roi) in segmentationRois.withIndex()) {
+                val rx = (roi.xmin * width).toInt().coerceIn(0, width - 1)
+                val ry = (roi.ymin * height).toInt().coerceIn(0, height - 1)
+                val rw = max(1, ((roi.xmax - roi.xmin) * width).toInt())
+                val rh = max(1, ((roi.ymax - roi.ymin) * height).toInt())
+
+                g2d.color = roiColor
+                g2d.stroke = roiStroke
+                g2d.drawRect(rx, ry, rw, rh)
+
+                val badgeText = "Seg ROI #${index + 1} (${rw}x${rh})"
+                val fontMetrics = g2d.fontMetrics
+                val textW = fontMetrics.stringWidth(badgeText)
+                val textH = fontMetrics.height
+                val badgeX = (rx + 4).coerceIn(4, max(4, width - textW - 10))
+                val badgeY = (ry + rh - 6).coerceIn(textH + 4, height - 4)
+
+                g2d.color = Color(0, 0, 0, 210)
+                g2d.fillRect(badgeX - 3, badgeY - textH + 2, textW + 6, textH + 2)
+                g2d.color = roiColor
+                g2d.drawRect(badgeX - 3, badgeY - textH + 2, textW + 6, textH + 2)
+                g2d.drawString(badgeText, badgeX, badgeY)
+            }
+        }
+
+        // 3. Draw candidate boxes in thin dashed outline if supplied
         if (candidateBoxes.isNotEmpty()) {
             g2d.stroke = java.awt.BasicStroke(1.5f, java.awt.BasicStroke.CAP_BUTT, java.awt.BasicStroke.JOIN_BEVEL, 0f, floatArrayOf(5f, 5f), 0f)
             for (box in candidateBoxes) {
@@ -110,11 +176,11 @@ object InpaintingUtils {
             }
         }
 
-        // 2. Draw segmented objects: polygon fills, polygon borders, bounding boxes, labels
+        // 4. Draw segmented objects: polygon fills, polygon borders, bounding boxes, labels
         for (obj in objects) {
             val label = obj.label.trim().lowercase()
             val (baseColor, fillColor) = when {
-                label.contains("balloon") || label.contains("bubble") -> Pair(Color(0, 200, 255), Color(0, 200, 255, 75))
+                label.contains("balloon") || label.contains("bubble") || label.contains("circular") -> Pair(Color(0, 200, 255), Color(0, 200, 255, 75))
                 label == "text" -> Pair(Color(50, 255, 50), Color(50, 255, 50, 80))
                 label.contains("watermark") -> Pair(Color(255, 0, 255), Color(255, 0, 255, 80))
                 label.contains("panel") -> Pair(Color(255, 140, 0), Color(255, 140, 0, 60))
