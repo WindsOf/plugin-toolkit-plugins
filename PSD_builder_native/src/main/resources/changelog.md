@@ -1,3 +1,13 @@
+Version: 5.3.1
+Date: 2026-08-28
+Fixed:
+  - Eliminated bounding box mix-and-matching / artificial margin hallucination interpolation in PSDBuilderPlugin: boundary shapes and text layers now rely strictly on cleaner / vision segmentation boxes when available, falling back directly to OCR balloon boxes (or OCR text boxes) without clamping.
+  - Enhanced VisionOcrMatcher scoring to robustly match texts based on cleaner polygon containment and visual center without being penalized by inaccurate OCR balloon boxes.
+  - Drastically optimized JVM heap memory consumption in PSDBuilderPlugin to eliminate OutOfMemoryError during chapter builds and debug mode rendering.
+  - Eliminated redundant full-image allocations and intermediate IntArrays by extracting RGBA pixel data directly via DataBufferInt.
+  - Extracted debug overlay drawing and immediately flushed intermediate BufferedImages.
+  - Capped chapter parallel PSD build concurrency to prevent simultaneous large canvas allocations.
+-------------------------------------------------------------------------------------------------
 Version: 5.3.0
 Date: 2026-08-22
 Added:

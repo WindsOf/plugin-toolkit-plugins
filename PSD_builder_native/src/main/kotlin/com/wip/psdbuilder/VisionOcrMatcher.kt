@@ -283,18 +283,18 @@ object VisionOcrMatcher {
                 val dist = sqrt((textCenterX - segCenterX) * (textCenterX - segCenterX) + (textCenterY - segCenterY) * (textCenterY - segCenterY)) / diag
                 val distScore = (1.0 - dist).coerceIn(0.0, 1.0)
 
-                val score: Double
-                if (ocrBalloonBox != null && ocrBalloonBox.size >= 4) {
-                    val boxIou = boxIoU(ocrBalloonBox, segBox)
-                    val containment = boxPolygonContainment(ocrBox, pixelPoly)
-                    score = 0.6 * boxIou + 0.4 * containment
-                } else {
-                    val boxIou = boxIoU(ocrBox, segBox)
-                    val containment = boxPolygonContainment(ocrBox, pixelPoly)
-                    val isCenterInside = isPointInPolygon(textCenterX, textCenterY, pixelPoly)
-                    val centerBonus = if (isCenterInside) 0.2 else 0.0
-                    score = 0.5 * containment + 0.3 * boxIou + 0.2 * distScore + centerBonus
-                }
+                val isCenterInside = isPointInPolygon(textCenterX, textCenterY, pixelPoly) || (
+                    textCenterX >= segBox[1] && textCenterX <= segBox[3] &&
+                    textCenterY >= segBox[0] && textCenterY <= segBox[2]
+                )
+                val containment = boxPolygonContainment(ocrBox, pixelPoly)
+                val textIou = boxIoU(ocrBox, segBox)
+                val balloonIou = if (ocrBalloonBox != null && ocrBalloonBox.size >= 4) boxIoU(ocrBalloonBox, segBox) else 0.0
+
+                val centerScore = if (isCenterInside) 0.5 else 0.0
+                val containmentScore = 0.3 * containment
+                val iouScore = 0.15 * maxOf(textIou, balloonIou)
+                val score = centerScore + containmentScore + iouScore + (0.05 * distScore)
 
                 if (score > bestScore) {
                     bestScore = score

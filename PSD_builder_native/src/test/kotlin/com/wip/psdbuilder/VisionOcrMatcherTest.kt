@@ -92,15 +92,59 @@ class VisionOcrMatcherTest {
 
         // First item should match the balloon
         val match1 = matches[0]
-        assertNotNull(match1.matchedBalloon)
-        assertEquals("speech_balloon", match1.matchedBalloon?.label)
-        assertNotNull(match1.visualCenter)
-        assertEquals(400.0, match1.visualCenter?.x ?: 0.0, 1.0)
-        assertEquals(400.0, match1.visualCenter?.y ?: 0.0, 1.0)
+        val balloon = match1.matchedBalloon
+        assertNotNull(balloon)
+        assertEquals("speech_balloon", balloon.label)
+        val vCenter = match1.visualCenter
+        assertNotNull(vCenter)
+        assertEquals(400.0, vCenter.x, 1.0)
+        assertEquals(400.0, vCenter.y, 1.0)
         assertTrue(match1.matchScore > 0.4)
 
         // Second item outside should not match
         val match2 = matches[1]
         assertNull(match2.matchedBalloon)
+    }
+
+    @Test
+    fun testMatchOcrWithInaccurateOcrBalloonBox() {
+        val width = 1000.0
+        val height = 1000.0
+
+        val segmentedBalloon = SegmentedObject(
+            label = "speech_balloon",
+            confidence = 0.98,
+            box = DetectionBox(ymin = 0.1, xmin = 0.1, ymax = 0.7, xmax = 0.7),
+            polygon = listOf(
+                PolygonPoint(0.1, 0.1),
+                PolygonPoint(0.7, 0.1),
+                PolygonPoint(0.7, 0.7),
+                PolygonPoint(0.1, 0.7)
+            ),
+            shape = "oval",
+            area = 360000.0
+        )
+
+        val texts = listOf("Dialogue inside large bubble")
+        val ocrBoxes = listOf(listOf(0.3, 0.3, 0.45, 0.55)) // Text inside (300, 300) to (450, 550)
+        val ocrBalloonBoxes = listOf(listOf(0.28, 0.28, 0.47, 0.57)) // Inaccurate tight OCR balloon box
+
+        val matches = VisionOcrMatcher.match(
+            texts = texts,
+            ocrBoxes = ocrBoxes,
+            ocrBalloonBoxes = ocrBalloonBoxes,
+            visionObjects = listOf(segmentedBalloon),
+            imageWidth = width,
+            imageHeight = height
+        )
+
+        assertEquals(1, matches.size)
+        assertNotNull(matches[0].matchedBalloon, "Should match cleaner balloon directly based on containment and center")
+        val bounds = matches[0].polygonBounds
+        assertNotNull(bounds)
+        assertEquals(100f, bounds.left, 1f)
+        assertEquals(100f, bounds.top, 1f)
+        assertEquals(700f, bounds.right, 1f)
+        assertEquals(700f, bounds.bottom, 1f)
     }
 }

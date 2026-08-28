@@ -285,17 +285,54 @@ class VisionPlugin {
                 try {
                     val inputName = rfdetrSession.session.inputNames.iterator().next()
 
-                    for (box in candidateBoxes) {
-                        val margin = 0.05 // 5% context expansion
-                        val expXmin = (box.xmin - margin).coerceIn(0.0, 1.0)
-                        val expYmin = (box.ymin - margin).coerceIn(0.0, 1.0)
-                        val expXmax = (box.xmax + margin).coerceIn(0.0, 1.0)
-                        val expYmax = (box.ymax + margin).coerceIn(0.0, 1.0)
+                    // Expand candidate boxes by 15% context margin to capture full balloon contours
+                    val expandedBoxes = candidateBoxes.map { box ->
+                        val margin = 0.15
+                        DetectionBox(
+                            label = box.label,
+                            confidence = box.confidence,
+                            ymin = (box.ymin - margin).coerceIn(0.0, 1.0),
+                            xmin = (box.xmin - margin).coerceIn(0.0, 1.0),
+                            ymax = (box.ymax + margin).coerceIn(0.0, 1.0),
+                            xmax = (box.xmax + margin).coerceIn(0.0, 1.0)
+                        )
+                    }
 
-                        val pxX = (expXmin * imgW).toInt().coerceIn(0, imgW - 1)
-                        val pxY = (expYmin * imgH).toInt().coerceIn(0, imgH - 1)
-                        val rawW = ((expXmax - expXmin) * imgW).toInt()
-                        val rawH = ((expYmax - expYmin) * imgH).toInt()
+                    // Merge overlapping ROI regions so nearby text/sub-balloons within the same bubble are not sliced
+                    val mergedRois = mutableListOf<DetectionBox>()
+                    var remaining = expandedBoxes.toMutableList()
+                    while (remaining.isNotEmpty()) {
+                        var curr = remaining.removeAt(0)
+                        var mergedAny: Boolean
+                        do {
+                            mergedAny = false
+                            val nextRemaining = mutableListOf<DetectionBox>()
+                            for (other in remaining) {
+                                val overlaps = !(curr.xmax < other.xmin || curr.xmin > other.xmax || curr.ymax < other.ymin || curr.ymin > other.ymax)
+                                if (overlaps) {
+                                    curr = DetectionBox(
+                                        label = curr.label,
+                                        confidence = maxOf(curr.confidence, other.confidence),
+                                        ymin = minOf(curr.ymin, other.ymin),
+                                        xmin = minOf(curr.xmin, other.xmin),
+                                        ymax = maxOf(curr.ymax, other.ymax),
+                                        xmax = maxOf(curr.xmax, other.xmax)
+                                    )
+                                    mergedAny = true
+                                } else {
+                                    nextRemaining.add(other)
+                                }
+                            }
+                            remaining = nextRemaining
+                        } while (mergedAny)
+                        mergedRois.add(curr)
+                    }
+
+                    for (box in mergedRois) {
+                        val pxX = (box.xmin * imgW).toInt().coerceIn(0, imgW - 1)
+                        val pxY = (box.ymin * imgH).toInt().coerceIn(0, imgH - 1)
+                        val rawW = ((box.xmax - box.xmin) * imgW).toInt()
+                        val rawH = ((box.ymax - box.ymin) * imgH).toInt()
                         val pxW = max(1, rawW).coerceIn(1, imgW - pxX)
                         val pxH = max(1, rawH).coerceIn(1, imgH - pxY)
 

@@ -152,7 +152,7 @@ data class PSDBuilderSettings(
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "PSD Builder Native",
-    version = "5.3.0",
+    version = "5.3.1",
     description = "A plugin that builds layered PSD files natively in Kotlin.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
@@ -498,7 +498,8 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         }?.sortedBy { it.name } ?: emptyList()
 
         val processedPages = java.util.concurrent.atomic.AtomicInteger(0)
-        val semaphore = Semaphore(4)
+        val maxConcurrent = maxOf(1, minOf(2, Runtime.getRuntime().availableProcessors()))
+        val semaphore = Semaphore(maxConcurrent)
         val psdPaths = mutableListOf<String>()
 
         data class ImageGroup(val files: List<File>, val mergedHeight: Int, val maxWidth: Int)
@@ -520,6 +521,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                             val imgBmp = ImageIO.read(img)
                             w = imgBmp?.width ?: 0
                             h = imgBmp?.height ?: 0
+                            imgBmp?.flush()
                         } finally {
                             reader.dispose()
                         }
@@ -527,6 +529,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                         val imgBmp = ImageIO.read(img)
                         w = imgBmp?.width ?: 0
                         h = imgBmp?.height ?: 0
+                        imgBmp?.flush()
                     }
                     img to Pair(w, h)
                 }
@@ -610,7 +613,10 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
                             if (mergedBmp != null && g2d != null) {
                                 val bmp = withContext(Dispatchers.IO) { ImageIO.read(imageFile) }
-                                g2d.drawImage(bmp, 0, currentYOffset, null)
+                                if (bmp != null) {
+                                    g2d.drawImage(bmp, 0, currentYOffset, null)
+                                    bmp.flush()
+                                }
                             }
 
                             val cleanMatch = cleanFilesFromChapterResult.firstOrNull { f ->
@@ -629,6 +635,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                                     val cBmp = withContext(Dispatchers.IO) { ImageIO.read(cleanMatch) }
                                     if (cBmp != null) {
                                         g2dClean.drawImage(cBmp, 0, currentYOffset, null)
+                                        cBmp.flush()
                                     }
                                 } else {
                                     singleCleanFilePath = cleanMatch.absolutePath
@@ -716,6 +723,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                             borderColors = if (safeBorderColors != null) pageBorderColors else null,
                             visionResult = pageVisionResult
                         )
+                        mergedBmp?.flush()
+                        mergedCleanBmp?.flush()
+
                         val psdBytes = withContext(Dispatchers.Default) {
                             KPsd.write(psd, compress = false)
                         }
@@ -887,7 +897,11 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         }
 
         val originalBaseImage = withContext(Dispatchers.IO) { ImageIO.read(File(imagePathToUse)) }
+            ?: throw IllegalArgumentException("Failed to read image: $imagePathToUse")
         val baseImage = ensureFastImage(originalBaseImage)
+        if (baseImage !== originalBaseImage) {
+            originalBaseImage.flush()
+        }
         val width = baseImage.width.toDouble()
         val height = baseImage.height.toDouble()
 
@@ -933,6 +947,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
         val psd = buildPsdObject(
             imagePath = imagePathToUse,
+            baseImageBmp = baseImage,
             cleanImagePath = resolvedCleanPath,
             texts = texts,
             balloonBoxes = balloonBoxes,
@@ -947,6 +962,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             hasBorder = hasBorderList,
             borderColors = borderColors
         )
+        baseImage.flush()
         val psdBytes = withContext(Dispatchers.Default) {
             KPsd.write(psd, compress = false)
         }
@@ -965,6 +981,232 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         g.drawImage(image, 0, 0, null)
         g.dispose()
         return newImage
+    }
+
+    private fun bufferedImageToPixelData(image: java.awt.image.BufferedImage): PixelData {
+        val width = image.width
+        val height = image.height
+        val totalPixels = width * height
+        val bytes = ByteArray(totalPixels * 4 + 64) // Pad with 64 extra bytes to prevent RLE lookahead crashes in KPsd
+
+        val raster = image.raster
+        val dataBuffer = raster.dataBuffer
+        if (dataBuffer is java.awt.image.DataBufferInt && (image.type == java.awt.image.BufferedImage.TYPE_INT_ARGB || image.type == java.awt.image.BufferedImage.TYPE_INT_RGB)) {
+            val intData = dataBuffer.data
+            val isRgb = image.type == java.awt.image.BufferedImage.TYPE_INT_RGB
+            for (i in 0 until totalPixels) {
+                val argb = intData[i]
+                val a = if (isRgb) 255 else ((argb shr 24) and 0xff)
+                val r = (argb shr 16) and 0xff
+                val g = (argb shr 8) and 0xff
+                val b = argb and 0xff
+                val base = i * 4
+                bytes[base] = r.toByte()
+                bytes[base + 1] = g.toByte()
+                bytes[base + 2] = b.toByte()
+                bytes[base + 3] = a.toByte()
+            }
+        } else {
+            val rowBuffer = IntArray(width)
+            var base = 0
+            for (y in 0 until height) {
+                image.getRGB(0, y, width, 1, rowBuffer, 0, width)
+                for (x in 0 until width) {
+                    val argb = rowBuffer[x]
+                    bytes[base] = ((argb shr 16) and 0xff).toByte()
+                    bytes[base + 1] = ((argb shr 8) and 0xff).toByte()
+                    bytes[base + 2] = (argb and 0xff).toByte()
+                    bytes[base + 3] = ((argb shr 24) and 0xff).toByte()
+                    base += 4
+                }
+            }
+        }
+        return PixelData(width, height, bytes)
+    }
+
+    private fun drawCleanerDebug(
+        g2dCleaner: java.awt.Graphics2D,
+        visionResult: VisionResult,
+        width: Int,
+        height: Int
+    ) {
+        for (obj in visionResult.objects) {
+            val label = obj.label.trim().lowercase()
+            val sYmin = (obj.box.ymin * height).toInt()
+            val sXmin = (obj.box.xmin * width).toInt()
+            val sYmax = (obj.box.ymax * height).toInt()
+            val sXmax = (obj.box.xmax * width).toInt()
+            val sW = maxOf(1, sXmax - sXmin)
+            val sH = maxOf(1, sYmax - sYmin)
+
+            val color = when {
+                label.contains("balloon") -> java.awt.Color(0, 200, 255)
+                label == "text" -> java.awt.Color(50, 255, 50)
+                label == "watermark" -> java.awt.Color(255, 0, 255)
+                else -> java.awt.Color.YELLOW
+            }
+
+            g2dCleaner.color = color
+            g2dCleaner.stroke = java.awt.BasicStroke(2f)
+            g2dCleaner.drawRect(sXmin, sYmin, sW, sH)
+
+            if (obj.polygon.size >= 3) {
+                val xPoints = obj.polygon.map { (it.x * width).toInt() }.toIntArray()
+                val yPoints = obj.polygon.map { (it.y * height).toInt() }.toIntArray()
+                g2dCleaner.stroke = java.awt.BasicStroke(1.5f)
+                g2dCleaner.drawPolygon(xPoints, yPoints, obj.polygon.size)
+            }
+
+            val tag = "${obj.label} (${(obj.confidence * 100).toInt()}%)"
+            g2dCleaner.color = color
+            g2dCleaner.drawString(tag, sXmin + 4, maxOf(12, sYmin - 4))
+        }
+    }
+
+    private fun drawOcrDebug(
+        g2dOcr: java.awt.Graphics2D,
+        boxDataList: List<BoxData>,
+        effShapes: List<String?>
+    ) {
+        for ((index, box) in boxDataList.withIndex()) {
+            if (box.bBox.size >= 4) {
+                g2dOcr.color = java.awt.Color.MAGENTA
+                g2dOcr.stroke = java.awt.BasicStroke(2f)
+                g2dOcr.drawRect(
+                    box.bBox[1].toInt(),
+                    box.bBox[0].toInt(),
+                    (box.bBox[3] - box.bBox[1]).toInt(),
+                    (box.bBox[2] - box.bBox[0]).toInt()
+                )
+            }
+            if (box.tBox.size >= 4) {
+                g2dOcr.color = java.awt.Color.GREEN
+                g2dOcr.stroke = java.awt.BasicStroke(3f)
+                g2dOcr.drawRect(
+                    box.tBox[1].toInt(),
+                    box.tBox[0].toInt(),
+                    (box.tBox[3] - box.tBox[1]).toInt(),
+                    (box.tBox[2] - box.tBox[0]).toInt()
+                )
+                g2dOcr.color = java.awt.Color.RED
+                g2dOcr.drawLine((box.cx - 10).toInt(), box.cy.toInt(), (box.cx + 10).toInt(), box.cy.toInt())
+                g2dOcr.drawLine(box.cx.toInt(), (box.cy - 10).toInt(), box.cx.toInt(), (box.cy + 10).toInt())
+            }
+            g2dOcr.color = java.awt.Color.ORANGE
+            g2dOcr.stroke = java.awt.BasicStroke(4f)
+            g2dOcr.drawRect(box.ibx0.toInt(), box.iby0.toInt(), (box.ibx1 - box.ibx0).toInt(), (box.iby1 - box.iby0).toInt())
+
+            g2dOcr.color = java.awt.Color.BLUE
+            val shape = effShapes.getOrNull(index) ?: "oval"
+            if (shape.equals("rectangular", ignoreCase = true)) {
+                g2dOcr.drawRect(box.ibx0.toInt(), box.iby0.toInt(), (box.ibx1 - box.ibx0).toInt(), (box.iby1 - box.iby0).toInt())
+            } else {
+                g2dOcr.drawOval(box.ibx0.toInt(), box.iby0.toInt(), (box.ibx1 - box.ibx0).toInt(), (box.iby1 - box.iby0).toInt())
+            }
+        }
+    }
+
+    private fun drawBoundaryDebug(
+        g2dBoundary: java.awt.Graphics2D,
+        effTexts: List<String>,
+        boxDataList: List<BoxData>,
+        matchedResults: List<MatchedBalloonText>?,
+        customBoundaries: List<com.wip.kpsd.TextBoundary>?,
+        effShapes: List<String?>,
+        paddingPercentage: Float
+    ) {
+        for ((index, _) in effTexts.withIndex()) {
+            val box = boxDataList[index]
+            val matched = matchedResults?.getOrNull(index)
+
+            val ibTop = box.iby0.toInt()
+            val ibLeft = box.ibx0.toInt()
+            val ibBottom = box.iby1.toInt()
+            val ibRight = box.ibx1.toInt()
+            val boxWidth = maxOf(1, ibRight - ibLeft)
+            val boxHeight = maxOf(1, ibBottom - ibTop)
+
+            val bPadding = minOf(boxWidth, boxHeight) * paddingPercentage
+            var boundaryShape = customBoundaries?.getOrNull(index)
+            if (boundaryShape == null && matched?.polygonPixels != null) {
+                boundaryShape = PolygonTextBoundary(
+                    polygon = matched.polygonPixels,
+                    padding = bPadding,
+                    visualCenter = matched.visualCenter
+                )
+            }
+            if (boundaryShape == null) {
+                val shape = effShapes.getOrNull(index) ?: "oval"
+                boundaryShape = if (shape.equals("rectangular", ignoreCase = true)) {
+                    com.wip.kpsd.RectangleBoundary(padding = bPadding)
+                } else {
+                    com.wip.kpsd.EllipseBoundary(padding = bPadding)
+                }
+            }
+
+            when (boundaryShape) {
+                is PolygonTextBoundary -> {
+                    val poly = boundaryShape.polygon
+                    if (poly.size >= 3) {
+                        val xPts = poly.map { it.x.toInt() }.toIntArray()
+                        val yPts = poly.map { it.y.toInt() }.toIntArray()
+                        g2dBoundary.color = java.awt.Color(255, 0, 255)
+                        g2dBoundary.stroke = java.awt.BasicStroke(2.5f)
+                        g2dBoundary.drawPolygon(xPts, yPts, poly.size)
+
+                        val vcx = (boundaryShape.visualCenter?.x ?: box.cx).toInt()
+                        val vcy = (boundaryShape.visualCenter?.y ?: box.cy).toInt()
+                        g2dBoundary.color = java.awt.Color.RED
+                        g2dBoundary.stroke = java.awt.BasicStroke(2f)
+                        g2dBoundary.drawLine(vcx - 12, vcy, vcx + 12, vcy)
+                        g2dBoundary.drawLine(vcx, vcy - 12, vcx, vcy + 12)
+
+                        g2dBoundary.color = java.awt.Color(255, 100, 255, 180)
+                        g2dBoundary.stroke = java.awt.BasicStroke(1f, java.awt.BasicStroke.CAP_BUTT, java.awt.BasicStroke.JOIN_BEVEL, 0f, floatArrayOf(4f, 4f), 0f)
+                        g2dBoundary.drawRect(ibLeft, ibTop, boxWidth, boxHeight)
+
+                        g2dBoundary.color = java.awt.Color(255, 0, 255)
+                        g2dBoundary.drawString("Boundary #${index + 1}: Polygon (${poly.size} pts, pad=${bPadding.toInt()}px)", ibLeft + 4, maxOf(12, ibTop - 4))
+                    }
+                }
+                is com.wip.kpsd.EllipseBoundary -> {
+                    val pad = bPadding.toInt()
+                    g2dBoundary.color = java.awt.Color(0, 229, 255)
+                    g2dBoundary.stroke = java.awt.BasicStroke(2.5f)
+                    g2dBoundary.drawOval(ibLeft + pad, ibTop + pad, maxOf(1, boxWidth - 2 * pad), maxOf(1, boxHeight - 2 * pad))
+
+                    g2dBoundary.color = java.awt.Color(0, 229, 255, 150)
+                    g2dBoundary.stroke = java.awt.BasicStroke(1f, java.awt.BasicStroke.CAP_BUTT, java.awt.BasicStroke.JOIN_BEVEL, 0f, floatArrayOf(4f, 4f), 0f)
+                    g2dBoundary.drawRect(ibLeft, ibTop, boxWidth, boxHeight)
+
+                    val cx = box.cx.toInt()
+                    val cy = box.cy.toInt()
+                    g2dBoundary.color = java.awt.Color.RED
+                    g2dBoundary.stroke = java.awt.BasicStroke(2f)
+                    g2dBoundary.drawLine(cx - 10, cy, cx + 10, cy)
+                    g2dBoundary.drawLine(cx, cy - 10, cx, cy + 10)
+
+                    g2dBoundary.color = java.awt.Color(0, 229, 255)
+                    g2dBoundary.drawString("Boundary #${index + 1}: Ellipse (pad=${bPadding.toInt()}px)", ibLeft + 4, maxOf(12, ibTop - 4))
+                }
+                is com.wip.kpsd.RectangleBoundary -> {
+                    val pad = bPadding.toInt()
+                    g2dBoundary.color = java.awt.Color(0, 255, 102)
+                    g2dBoundary.stroke = java.awt.BasicStroke(2.5f)
+                    g2dBoundary.drawRect(ibLeft + pad, ibTop + pad, maxOf(1, boxWidth - 2 * pad), maxOf(1, boxHeight - 2 * pad))
+
+                    val cx = box.cx.toInt()
+                    val cy = box.cy.toInt()
+                    g2dBoundary.color = java.awt.Color.RED
+                    g2dBoundary.stroke = java.awt.BasicStroke(2f)
+                    g2dBoundary.drawLine(cx - 10, cy, cx + 10, cy)
+                    g2dBoundary.drawLine(cx, cy - 10, cx, cy + 10)
+
+                    g2dBoundary.color = java.awt.Color(0, 255, 102)
+                    g2dBoundary.drawString("Boundary #${index + 1}: Rectangle (pad=${bPadding.toInt()}px)", ibLeft + 4, maxOf(12, ibTop - 4))
+                }
+            }
+        }
     }
 
     private fun normalizeBoundingBox(box: List<Double>): List<Double> {
@@ -1042,9 +1284,14 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                 ?: throw IllegalArgumentException("Failed to read image: $imagePath")
         }
         val baseImage = ensureFastImage(originalBaseImage)
+        if (baseImage !== originalBaseImage && baseImageBmp == null) {
+            originalBaseImage.flush()
+        }
 
         val width = baseImage.width
         val height = baseImage.height
+
+        val bgPixelData = bufferedImageToPixelData(baseImage)
 
         val cleanBmp = if (cleanImageBmp != null) {
             cleanImageBmp
@@ -1066,43 +1313,21 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                 val gClean = resized.createGraphics()
                 gClean.drawImage(cleanFast, 0, 0, width, height, null)
                 gClean.dispose()
+                if (cleanFast !== cleanBmp && cleanImageBmp == null) cleanFast.flush()
                 resized
             } else {
                 cleanFast
             }
-            val cleanRgbData = IntArray(width * height)
-            cleanFastResized.getRGB(0, 0, width, height, cleanRgbData, 0, width)
-            val cBytes = ByteArray(width * height * 4 + 64)
-            for (i in 0 until width * height) {
-                val argb = cleanRgbData[i]
-                val a = (argb shr 24) and 0xff
-                val r = (argb shr 16) and 0xff
-                val g = (argb shr 8) and 0xff
-                val b = argb and 0xff
-                val base = i * 4
-                cBytes[base] = r.toByte()
-                cBytes[base + 1] = g.toByte()
-                cBytes[base + 2] = b.toByte()
-                cBytes[base + 3] = a.toByte()
+            val pData = bufferedImageToPixelData(cleanFastResized)
+            if (cleanFastResized !== cleanBmp && cleanImageBmp == null) {
+                cleanFastResized.flush()
             }
-            PixelData(width, height, cBytes)
+            if (cleanImageBmp == null) {
+                cleanBmp.flush()
+            }
+            pData
         } else {
-            val rgbData = IntArray(width * height)
-            baseImage.getRGB(0, 0, width, height, rgbData, 0, width)
-            val bgCopy = ByteArray(width * height * 4 + 64)
-            for (i in 0 until width * height) {
-                val argb = rgbData[i]
-                val a = (argb shr 24) and 0xff
-                val r = (argb shr 16) and 0xff
-                val g = (argb shr 8) and 0xff
-                val b = argb and 0xff
-                val base = i * 4
-                bgCopy[base] = r.toByte()
-                bgCopy[base + 1] = g.toByte()
-                bgCopy[base + 2] = b.toByte()
-                bgCopy[base + 3] = a.toByte()
-            }
-            PixelData(width, height, bgCopy)
+            PixelData(width, height, bgPixelData.data.copyOf())
         }
 
         val effectiveVisionResult = visionResult
@@ -1216,11 +1441,12 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             val iby0: Double
             val ibx1: Double
             val iby1: Double
-            var cx: Double
-            var cy: Double
+            val cx: Double
+            val cy: Double
 
             val matched = matchedResults?.getOrNull(index)
             if (matched?.matchedBalloon != null && matched.polygonBounds != null && matched.visualCenter != null) {
+                // 1. Rely strictly on cleaner / vision segmentation boxes when available
                 val segBounds = matched.polygonBounds
                 ibx0 = segBounds.left.toDouble()
                 iby0 = segBounds.top.toDouble()
@@ -1228,71 +1454,30 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                 iby1 = segBounds.bottom.toDouble()
                 cx = matched.visualCenter.x
                 cy = matched.visualCenter.y
-            } else if (tBox.size >= 4 && bBox.size >= 4) {
-                val t_ymin = tBox[0]
-                val t_xmin = tBox[1]
-                val t_ymax = tBox[2]
-                val t_xmax = tBox[3]
-
-                val b_ymin = bBox[0]
-                val b_xmin = bBox[1]
-                val b_ymax = bBox[2]
-                val b_xmax = bBox[3]
-
-                cx = (t_xmin + t_xmax) / 2.0
-                cy = (t_ymin + t_ymax) / 2.0
-
-                val tw = t_xmax - t_xmin
-                val th = t_ymax - t_ymin
-
-                var marginLeft = maxOf(0.0, t_xmin - b_xmin)
-                var marginRight = maxOf(0.0, b_xmax - t_xmax)
-                var marginTop = maxOf(0.0, t_ymin - b_ymin)
-                var marginBottom = maxOf(0.0, b_ymax - t_ymax)
-
-                val thresholdX = tw * 0.5
-                val thresholdY = th * 0.5
-                val fallbackX = tw * 0.4
-                val fallbackY = th * 0.4
-
-                val isHallucinating = (
-                    marginLeft > thresholdX ||
-                    marginRight > thresholdX ||
-                    marginTop > thresholdY ||
-                    marginBottom > thresholdY
-                )
-
-                if (isHallucinating) {
-                    if (marginLeft > thresholdX) marginLeft = fallbackX
-                    if (marginRight > thresholdX) marginRight = fallbackX
-                    if (marginTop > thresholdY) marginTop = fallbackY
-                    if (marginBottom > thresholdY) marginBottom = fallbackY
-
-                    ibx0 = t_xmin - marginLeft
-                    ibx1 = t_xmax + marginRight
-                    iby0 = t_ymin - marginTop
-                    iby1 = t_ymax + marginBottom
-
-                    cx = (ibx0 + ibx1) / 2.0
-                    cy = (iby0 + iby1) / 2.0
-                } else {
-                    val bw = b_xmax - b_xmin
-                    val bh = b_ymax - b_ymin
-
-                    ibx0 = cx - bw / 2.0
-                    ibx1 = cx + bw / 2.0
-                    iby0 = cy - bh / 2.0
-                    iby1 = cy + bh / 2.0
-                }
             } else if (bBox.size >= 4) {
-                ibx0 = bBox[1]; iby0 = bBox[0]; ibx1 = bBox[3]; iby1 = bBox[2]
-                cx = (ibx0 + ibx1) / 2.0; cy = (iby0 + iby1) / 2.0
+                // 2. Drop to OCR balloon boxes when cleaner boxes are not available
+                ibx0 = bBox[1]
+                iby0 = bBox[0]
+                ibx1 = bBox[3]
+                iby1 = bBox[2]
+                cx = (ibx0 + ibx1) / 2.0
+                cy = (iby0 + iby1) / 2.0
             } else if (tBox.size >= 4) {
-                ibx0 = tBox[1]; iby0 = tBox[0]; ibx1 = tBox[3]; iby1 = tBox[2]
-                cx = (ibx0 + ibx1) / 2.0; cy = (iby0 + iby1) / 2.0
+                // 3. Drop to OCR text boxes when neither cleaner nor OCR balloon box is available
+                ibx0 = tBox[1]
+                iby0 = tBox[0]
+                ibx1 = tBox[3]
+                iby1 = tBox[2]
+                cx = (ibx0 + ibx1) / 2.0
+                cy = (iby0 + iby1) / 2.0
             } else {
-                ibx0 = 0.4 * width; iby0 = 0.4 * height; ibx1 = 0.6 * width; iby1 = 0.6 * height
-                cx = (ibx0 + ibx1) / 2.0; cy = (iby0 + iby1) / 2.0
+                // 4. Default fallback
+                ibx0 = 0.4 * width
+                iby0 = 0.4 * height
+                ibx1 = 0.6 * width
+                iby1 = 0.6 * height
+                cx = (ibx0 + ibx1) / 2.0
+                cy = (iby0 + iby1) / 2.0
             }
 
             boxDataList.add(BoxData(ibx0, iby0, ibx1, iby1, cx, cy, bBox, tBox))
@@ -1306,238 +1491,42 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             // 1. OCR Debug layer
             val ocrDebugImg = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
             val g2dOcr = ocrDebugImg.createGraphics()
-            for ((index, box) in boxDataList.withIndex()) {
-                if (box.bBox.size >= 4) {
-                    g2dOcr.color = java.awt.Color.MAGENTA
-                    g2dOcr.stroke = java.awt.BasicStroke(2f)
-                    g2dOcr.drawRect(
-                        box.bBox[1].toInt(),
-                        box.bBox[0].toInt(),
-                        (box.bBox[3]-box.bBox[1]).toInt(),
-                        (box.bBox[2]-box.bBox[0]).toInt()
-                    )
-                }
-                if (box.tBox.size >= 4) {
-                    g2dOcr.color = java.awt.Color.GREEN
-                    g2dOcr.stroke = java.awt.BasicStroke(3f)
-                    g2dOcr.drawRect(box.tBox[1].toInt(), box.tBox[0].toInt(), (box.tBox[3]-box.tBox[1]).toInt(), (box.tBox[2]-box.tBox[0]).toInt())
-                    g2dOcr.color = java.awt.Color.RED
-                    g2dOcr.drawLine((box.cx - 10).toInt(), box.cy.toInt(), (box.cx + 10).toInt(), box.cy.toInt())
-                    g2dOcr.drawLine(box.cx.toInt(), (box.cy - 10).toInt(), box.cx.toInt(), (box.cy + 10).toInt())
-                }
-                g2dOcr.color = java.awt.Color.ORANGE
-                g2dOcr.stroke = java.awt.BasicStroke(4f)
-                g2dOcr.drawRect(box.ibx0.toInt(), box.iby0.toInt(), (box.ibx1-box.ibx0).toInt(), (box.iby1-box.iby0).toInt())
-
-                g2dOcr.color = java.awt.Color.BLUE
-                val shape = effShapes.getOrNull(index) ?: "oval"
-                if (shape.equals("rectangular", ignoreCase = true)) {
-                    g2dOcr.drawRect(box.ibx0.toInt(), box.iby0.toInt(), (box.ibx1 - box.ibx0).toInt(), (box.iby1 - box.iby0).toInt())
-                } else {
-                    g2dOcr.drawOval(box.ibx0.toInt(), box.iby0.toInt(), (box.ibx1 - box.ibx0).toInt(), (box.iby1 - box.iby0).toInt())
-                }
-            }
+            g2dOcr.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+            drawOcrDebug(g2dOcr, boxDataList, effShapes)
             g2dOcr.dispose()
-
-            val ocrDebugRgb = IntArray(width * height)
-            ocrDebugImg.getRGB(0, 0, width, height, ocrDebugRgb, 0, width)
-            val ocrBytes = ByteArray(width * height * 4 + 64)
-            for (i in 0 until width * height) {
-                val argb = ocrDebugRgb[i]
-                val a = (argb shr 24) and 0xff
-                val r = (argb shr 16) and 0xff
-                val g = (argb shr 8) and 0xff
-                val b = argb and 0xff
-                val base = i * 4
-                ocrBytes[base] = r.toByte()
-                ocrBytes[base + 1] = g.toByte()
-                ocrBytes[base + 2] = b.toByte()
-                ocrBytes[base + 3] = a.toByte()
-            }
-            ocrDebugPixelData = PixelData(width, height, ocrBytes)
+            ocrDebugPixelData = bufferedImageToPixelData(ocrDebugImg)
+            ocrDebugImg.flush()
 
             // 2. Cleaner / Segmentation Debug layer
-            var cleanerDebugImg: java.awt.image.BufferedImage? = null
             if (effectiveVisionResult != null && effectiveVisionResult.objects.isNotEmpty()) {
-                val img = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
-                cleanerDebugImg = img
-                val g2dCleaner = img.createGraphics()
-                for (obj in effectiveVisionResult.objects) {
-                    val label = obj.label.trim().lowercase()
-                    val sYmin = (obj.box.ymin * height).toInt()
-                    val sXmin = (obj.box.xmin * width).toInt()
-                    val sYmax = (obj.box.ymax * height).toInt()
-                    val sXmax = (obj.box.xmax * width).toInt()
-                    val sW = maxOf(1, sXmax - sXmin)
-                    val sH = maxOf(1, sYmax - sYmin)
-
-                    val color = when {
-                        label.contains("balloon") -> java.awt.Color(0, 200, 255)
-                        label == "text" -> java.awt.Color(50, 255, 50)
-                        label == "watermark" -> java.awt.Color(255, 0, 255)
-                        else -> java.awt.Color.YELLOW
-                    }
-
-                    g2dCleaner.color = color
-                    g2dCleaner.stroke = java.awt.BasicStroke(2f)
-                    g2dCleaner.drawRect(sXmin, sYmin, sW, sH)
-
-                    if (obj.polygon.size >= 3) {
-                        val xPoints = obj.polygon.map { (it.x * width).toInt() }.toIntArray()
-                        val yPoints = obj.polygon.map { (it.y * height).toInt() }.toIntArray()
-                        g2dCleaner.stroke = java.awt.BasicStroke(1.5f)
-                        g2dCleaner.drawPolygon(xPoints, yPoints, obj.polygon.size)
-                    }
-
-                    val tag = "${obj.label} (${(obj.confidence * 100).toInt()}%)"
-                    g2dCleaner.color = color
-                    g2dCleaner.drawString(tag, sXmin + 4, maxOf(12, sYmin - 4))
-                }
+                val cleanerDebugImg = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+                val g2dCleaner = cleanerDebugImg.createGraphics()
+                g2dCleaner.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+                drawCleanerDebug(g2dCleaner, effectiveVisionResult, width, height)
                 g2dCleaner.dispose()
-
-                val cleanerDebugRgb = IntArray(width * height)
-                cleanerDebugImg.getRGB(0, 0, width, height, cleanerDebugRgb, 0, width)
-                val cleanerBytes = ByteArray(width * height * 4 + 64)
-                for (i in 0 until width * height) {
-                    val argb = cleanerDebugRgb[i]
-                    val a = (argb shr 24) and 0xff
-                    val r = (argb shr 16) and 0xff
-                    val g = (argb shr 8) and 0xff
-                    val b = argb and 0xff
-                    val base = i * 4
-                    cleanerBytes[base] = r.toByte()
-                    cleanerBytes[base + 1] = g.toByte()
-                    cleanerBytes[base + 2] = b.toByte()
-                    cleanerBytes[base + 3] = a.toByte()
-                }
-                cleanerDebugPixelData = PixelData(width, height, cleanerBytes)
+                cleanerDebugPixelData = bufferedImageToPixelData(cleanerDebugImg)
+                cleanerDebugImg.flush()
             }
 
-            // 3. Boundary Shapes Debug Layer (boundaryShape used for autoFit and autoSize)
+            // 3. Boundary Shapes Debug layer
             val boundaryDebugImg = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
             val g2dBoundary = boundaryDebugImg.createGraphics()
             g2dBoundary.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
-
-            for ((index, text) in effTexts.withIndex()) {
-                val box = boxDataList[index]
-                val matched = matchedResults?.getOrNull(index)
-
-                val ibTop = box.iby0.toInt()
-                val ibLeft = box.ibx0.toInt()
-                val ibBottom = box.iby1.toInt()
-                val ibRight = box.ibx1.toInt()
-                val boxWidth = maxOf(1, ibRight - ibLeft)
-                val boxHeight = maxOf(1, ibBottom - ibTop)
-
-                val bPadding = minOf(boxWidth, boxHeight) * settings.paddingPercentage
-                var boundaryShape = customBoundaries?.getOrNull(index)
-                if (boundaryShape == null && matched?.polygonPixels != null) {
-                    boundaryShape = PolygonTextBoundary(
-                        polygon = matched.polygonPixels,
-                        padding = bPadding,
-                        visualCenter = matched.visualCenter
-                    )
-                }
-                if (boundaryShape == null) {
-                    val shape = effShapes.getOrNull(index) ?: "oval"
-                    boundaryShape = if (shape.equals("rectangular", ignoreCase = true)) {
-                        com.wip.kpsd.RectangleBoundary(padding = bPadding)
-                    } else {
-                        com.wip.kpsd.EllipseBoundary(padding = bPadding)
-                    }
-                }
-
-                when (boundaryShape) {
-                    is PolygonTextBoundary -> {
-                        val poly = boundaryShape.polygon
-                        if (poly.size >= 3) {
-                            val xPts = poly.map { it.x.toInt() }.toIntArray()
-                            val yPts = poly.map { it.y.toInt() }.toIntArray()
-                            g2dBoundary.color = java.awt.Color(255, 0, 255)
-                            g2dBoundary.stroke = java.awt.BasicStroke(2.5f)
-                            g2dBoundary.drawPolygon(xPts, yPts, poly.size)
-
-                            val vcx = (boundaryShape.visualCenter?.x ?: box.cx).toInt()
-                            val vcy = (boundaryShape.visualCenter?.y ?: box.cy).toInt()
-                            g2dBoundary.color = java.awt.Color.RED
-                            g2dBoundary.stroke = java.awt.BasicStroke(2f)
-                            g2dBoundary.drawLine(vcx - 12, vcy, vcx + 12, vcy)
-                            g2dBoundary.drawLine(vcx, vcy - 12, vcx, vcy + 12)
-
-                            g2dBoundary.color = java.awt.Color(255, 100, 255, 180)
-                            g2dBoundary.stroke = java.awt.BasicStroke(1f, java.awt.BasicStroke.CAP_BUTT, java.awt.BasicStroke.JOIN_BEVEL, 0f, floatArrayOf(4f, 4f), 0f)
-                            g2dBoundary.drawRect(ibLeft, ibTop, boxWidth, boxHeight)
-
-                            g2dBoundary.color = java.awt.Color(255, 0, 255)
-                            g2dBoundary.drawString("Boundary #${index + 1}: Polygon (${poly.size} pts, pad=${bPadding.toInt()}px)", ibLeft + 4, maxOf(12, ibTop - 4))
-                        }
-                    }
-                    is com.wip.kpsd.EllipseBoundary -> {
-                        val pad = bPadding.toInt()
-                        g2dBoundary.color = java.awt.Color(0, 229, 255)
-                        g2dBoundary.stroke = java.awt.BasicStroke(2.5f)
-                        g2dBoundary.drawOval(ibLeft + pad, ibTop + pad, maxOf(1, boxWidth - 2 * pad), maxOf(1, boxHeight - 2 * pad))
-
-                        g2dBoundary.color = java.awt.Color(0, 229, 255, 150)
-                        g2dBoundary.stroke = java.awt.BasicStroke(1f, java.awt.BasicStroke.CAP_BUTT, java.awt.BasicStroke.JOIN_BEVEL, 0f, floatArrayOf(4f, 4f), 0f)
-                        g2dBoundary.drawRect(ibLeft, ibTop, boxWidth, boxHeight)
-
-                        val cx = box.cx.toInt()
-                        val cy = box.cy.toInt()
-                        g2dBoundary.color = java.awt.Color.RED
-                        g2dBoundary.stroke = java.awt.BasicStroke(2f)
-                        g2dBoundary.drawLine(cx - 10, cy, cx + 10, cy)
-                        g2dBoundary.drawLine(cx, cy - 10, cx, cy + 10)
-
-                        g2dBoundary.color = java.awt.Color(0, 229, 255)
-                        g2dBoundary.drawString("Boundary #${index + 1}: Ellipse (pad=${bPadding.toInt()}px)", ibLeft + 4, maxOf(12, ibTop - 4))
-                    }
-                    is com.wip.kpsd.RectangleBoundary -> {
-                        val pad = bPadding.toInt()
-                        g2dBoundary.color = java.awt.Color(0, 255, 102)
-                        g2dBoundary.stroke = java.awt.BasicStroke(2.5f)
-                        g2dBoundary.drawRect(ibLeft + pad, ibTop + pad, maxOf(1, boxWidth - 2 * pad), maxOf(1, boxHeight - 2 * pad))
-
-                        val cx = box.cx.toInt()
-                        val cy = box.cy.toInt()
-                        g2dBoundary.color = java.awt.Color.RED
-                        g2dBoundary.stroke = java.awt.BasicStroke(2f)
-                        g2dBoundary.drawLine(cx - 10, cy, cx + 10, cy)
-                        g2dBoundary.drawLine(cx, cy - 10, cx, cy + 10)
-
-                        g2dBoundary.color = java.awt.Color(0, 255, 102)
-                        g2dBoundary.drawString("Boundary #${index + 1}: Rectangle (pad=${bPadding.toInt()}px)", ibLeft + 4, maxOf(12, ibTop - 4))
-                    }
-                }
-            }
+            drawBoundaryDebug(g2dBoundary, effTexts, boxDataList, matchedResults, customBoundaries, effShapes, settings.paddingPercentage)
             g2dBoundary.dispose()
+            boundaryDebugPixelData = bufferedImageToPixelData(boundaryDebugImg)
+            boundaryDebugImg.flush()
 
-            val boundaryDebugRgb = IntArray(width * height)
-            boundaryDebugImg.getRGB(0, 0, width, height, boundaryDebugRgb, 0, width)
-            val boundaryBytes = ByteArray(width * height * 4 + 64)
-            for (i in 0 until width * height) {
-                val argb = boundaryDebugRgb[i]
-                val a = (argb shr 24) and 0xff
-                val r = (argb shr 16) and 0xff
-                val g = (argb shr 8) and 0xff
-                val b = argb and 0xff
-                val base = i * 4
-                boundaryBytes[base] = r.toByte()
-                boundaryBytes[base + 1] = g.toByte()
-                boundaryBytes[base + 2] = b.toByte()
-                boundaryBytes[base + 3] = a.toByte()
-            }
-            boundaryDebugPixelData = PixelData(width, height, boundaryBytes)
-
-            // Write combined preview image
+            // 4. Combined preview image written to disk
             val debugImgFile = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
             val g2dFile = debugImgFile.createGraphics()
+            g2dFile.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
             g2dFile.drawImage(baseImage, 0, 0, null)
-            if (cleanerDebugImg != null) {
-                g2dFile.drawImage(cleanerDebugImg, 0, 0, null)
+            if (effectiveVisionResult != null && effectiveVisionResult.objects.isNotEmpty()) {
+                drawCleanerDebug(g2dFile, effectiveVisionResult, width, height)
             }
-            g2dFile.drawImage(ocrDebugImg, 0, 0, null)
-            g2dFile.drawImage(boundaryDebugImg, 0, 0, null)
+            drawOcrDebug(g2dFile, boxDataList, effShapes)
+            drawBoundaryDebug(g2dFile, effTexts, boxDataList, matchedResults, customBoundaries, effShapes, settings.paddingPercentage)
             g2dFile.dispose()
 
             val outDir = File("build/tmp")
@@ -1548,26 +1537,11 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                     ImageIO.write(debugImgFile, "png", File(outDir, "${baseName}_psd_builder.png"))
                 } catch (e: Exception) {
                     context.logger.warn("Failed to write debug image: ${e.message}")
+                } finally {
+                    debugImgFile.flush()
                 }
             }
         }
-
-        val rgbData = IntArray(width * height)
-        baseImage.getRGB(0, 0, width, height, rgbData, 0, width)
-        val bgBytes = ByteArray(width * height * 4 + 64) // Pad with 64 extra bytes to prevent RLE lookahead crashes in KPsd
-        for (i in 0 until width * height) {
-            val argb = rgbData[i]
-            val a = (argb shr 24) and 0xff
-            val r = (argb shr 16) and 0xff
-            val g = (argb shr 8) and 0xff
-            val b = argb and 0xff
-            val base = i * 4
-            bgBytes[base] = r.toByte()
-            bgBytes[base + 1] = g.toByte()
-            bgBytes[base + 2] = b.toByte()
-            bgBytes[base + 3] = a.toByte()
-        }
-        val bgPixelData = PixelData(width, height, bgBytes)
 
         return psd(width = width, height = height) {
             imageData = bgPixelData
@@ -1578,7 +1552,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                 left = 0
                 bottom = height
                 right = width
-                imageData = PixelData(width, height, bgBytes.copyOf())
+                imageData = bgPixelData
             }
 
             // 2. Clean folder containing the clean image / inpainting patches
