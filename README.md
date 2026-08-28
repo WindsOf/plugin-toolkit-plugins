@@ -14,7 +14,7 @@ A collection of high-performance Kotlin plugins for manhwa and webtoon processin
 | :--- | :--- | :--- | :--- | :--- |
 | **Vision** | `com.wip.vision` | `com.wip.vision.cpu` | `1.0.0` | Object detection (YOLO) and instance segmentation (RF-DETR) with SAHI sliding window for arbitrary image sizes. |
 | **Cleaner** | `com.wip.cleaner` | `com.wip.cleaner.cpu` | `1.0.0` | Image inpainting and text eraser plugin using segmentation maps and ROI patch-based background restoration. |
-| **Slicer** | `com.wip.slicer` | `com.wip.slicer.cpu` | `1.4.0` | Intelligent vertical image slicing with YOLO object detection boundary protection. |
+| **Slicer** | `com.wip.slicer` | `com.wip.slicer.cpu` | `1.4.1` | Intelligent vertical image slicing with YOLO object detection boundary protection. |
 | **OCR IA** | `com.wip.ocr_ia` | `com.wip.ocr_ia.cpu` | `2.6.0` | Advanced OCR text extraction with bounding boxes, speech bubble classification, and font style detection. |
 | **PSD Builder Native** | `com.wip.psdbuilder.native` | — | `5.3.1` | Native PSD generation from images, typography, and OCR data using KPsd (pure library, zero ONNX runtime bundled). |
 | **BetterIMG** | `com.wip.betterimg` | — | `2.1.0` | Image upscaling and grain enhancement powered by VapourSynth and vsmlrt. |

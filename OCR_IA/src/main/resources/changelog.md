@@ -1,3 +1,8 @@
+Version: 2.7.1
+Date: 2026-08-29
+Fixed:
+  - Sorted folder image inputs naturally using NaturalOrderComparator.
+-------------------------------------------------------------------------------------------------
 Version: 2.7.0
 Date: 2026-08-27
 Added:

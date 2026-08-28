@@ -12,6 +12,7 @@ import com.wip.common.models.ChapterVisionResult
 import com.wip.common.models.ModelCatalog
 import com.wip.common.models.ModelManager
 import com.wip.common.models.OCRResult
+import com.wip.common.models.sortedNaturally
 import com.wip.ocrAI.models.OcrIASettings
 import java.awt.image.BufferedImage
 import java.io.File
@@ -74,7 +75,7 @@ class UnlimitedOcrRunner(
             Files.isDirectory(inputPath) -> {
                 inputPath.toFile()
                     .listFiles { f -> f.extension.lowercase() in imageExtensions }
-                    ?.sortedBy { it.name }
+                    ?.sortedNaturally()
                     ?.let { files.addAll(it) }
             }
             else -> {

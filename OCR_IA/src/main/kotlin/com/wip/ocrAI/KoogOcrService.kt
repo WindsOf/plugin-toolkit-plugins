@@ -23,6 +23,7 @@ import com.wip.common.models.AdvancedOcrServiceResult
 import com.wip.common.models.BalloonsResponse
 import com.wip.common.models.ChapterVisionResult
 import com.wip.common.models.OcrServiceResult
+import com.wip.common.models.sortedNaturally
 import com.wip.ocrAI.models.AIModel
 import com.wip.ocrAI.models.OcrIASettings
 import kotlinx.io.files.Path
@@ -256,7 +257,7 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
             Files.isDirectory(inputPath) -> {
                 inputPath.toFile()
                     .listFiles { f -> f.extension.lowercase() in imageExtensions }
-                    ?.sortedBy { it.name }
+                    ?.sortedNaturally()
                     ?.let { files.addAll(it) }
             }
             else -> {

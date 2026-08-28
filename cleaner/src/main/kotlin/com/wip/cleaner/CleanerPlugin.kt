@@ -12,6 +12,7 @@ import com.wip.common.models.ModelSpec
 import com.wip.common.models.OnnxInferenceEngine
 import com.wip.common.models.OnnxInferenceSession
 import com.wip.common.models.VisionResult
+import com.wip.common.models.sortedNaturally
 import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
@@ -43,7 +44,7 @@ import org.wip.plugintoolkit.api.annotations.RequiresLock
 @PluginInfo(
     id = "com.wip.cleaner",
     name = "Cleaner",
-    version = "1.0.0",
+    version = "1.0.1",
     description = "Inpaints and erases segmented text and artifacts from images using segmentation maps.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
@@ -446,7 +447,7 @@ class CleanerPlugin {
         val supportedExtensions = setOf("png", "jpg", "jpeg", "webp")
         val imageFiles = folder.listFiles { file ->
             file.isFile && file.extension.lowercase() in supportedExtensions
-        }?.sortedBy { it.name } ?: emptyList()
+        }?.sortedNaturally() ?: emptyList()
 
         if (imageFiles.isEmpty()) {
             throw IllegalArgumentException("No images found in folder: $inputFolder")

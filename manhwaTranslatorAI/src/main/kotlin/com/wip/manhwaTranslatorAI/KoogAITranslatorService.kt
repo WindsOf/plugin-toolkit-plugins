@@ -11,6 +11,7 @@ import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.LLMChoice
 import ai.koog.prompt.streaming.StreamFrame
 import kotlinx.coroutines.flow.Flow
+import com.wip.common.models.sortedNaturally
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import ai.koog.prompt.llm.LLMCapability
@@ -237,7 +238,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
                 val folder = File(inputFolder)
                 if (folder.exists() && folder.isDirectory) {
                     folder.listFiles { f -> f.isFile && f.extension.lowercase() in imageExtensions }
-                        ?.sortedBy { it.name }
+                        ?.sortedNaturally()
                         ?.toList() ?: emptyList()
                 } else {
                     emptyList()

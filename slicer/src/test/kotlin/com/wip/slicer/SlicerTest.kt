@@ -128,4 +128,39 @@ class SlicerTest {
         assertTrue(rowVariances[621])
         assertTrue(rowVariances[999])
     }
+
+    @Test
+    fun testFindOptimalCutsPerformanceOnLargeChapter() {
+        val slicer = Slicer()
+        val totalHeight = 150_000 // 150k pixels (~50 webtoon pages)
+        val rowVariances = ArrayList<Boolean>(totalHeight)
+        for (i in 0 until totalHeight) {
+            // Create white-gap cut opportunities every ~500 pixels
+            rowVariances.add(i % 500 in 0..20)
+        }
+
+        val progress = FakeProgress()
+        val startTime = System.currentTimeMillis()
+        val (cuts, error) = slicer.findOptimalCuts(
+            totalHeight = totalHeight,
+            usefulRowVarianceList = rowVariances,
+            minHeight = 1000,
+            desiredHeight = 10000,
+            maxHeight = 10000,
+            prioritizeSmallerImages = true,
+            progressReporter = progress
+        )
+        val durationMs = System.currentTimeMillis() - startTime
+
+        assertTrue(cuts.isNotEmpty(), "Cuts should not be empty")
+        assertEquals(totalHeight, cuts.last(), "Last cut must reach totalHeight")
+        assertTrue(durationMs < 500, "150k-pixel DP cut calculation should finish in under 500ms, took ${durationMs}ms")
+
+        var prev = 0
+        for (cut in cuts) {
+            val sliceH = cut - prev
+            assertTrue(sliceH in 1000..10000, "Slice height $sliceH must be within [1000, 10000]")
+            prev = cut
+        }
+    }
 }

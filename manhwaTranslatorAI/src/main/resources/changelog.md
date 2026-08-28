@@ -1,3 +1,8 @@
+Version: 1.4.1
+Date: 2026-08-29
+Fixed:
+  - Sorted folder image inputs naturally using NaturalOrderComparator for chapter summaries.
+-------------------------------------------------------------------------------------------------
 Version: 1.4.0
 Date: 2026-08-22
 Added:

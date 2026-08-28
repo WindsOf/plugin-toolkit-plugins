@@ -18,6 +18,7 @@ import com.wip.common.models.SahiConfig
 import com.wip.common.models.SahiInferenceRunner
 import com.wip.common.models.SegmentedObject
 import com.wip.common.models.VisionResult
+import com.wip.common.models.sortedNaturally
 import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
@@ -51,9 +52,9 @@ import org.wip.plugintoolkit.api.annotations.RequiresLock
 @PluginInfo(
     id = "com.wip.vision",
     name = "Vision",
-    version = "1.0.0",
+    version = "1.0.1",
     description = "Object detection and instance segmentation plugin using YOLO and RF-DETR.",
-    supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
+    supportedOs = [OS.WINDOWS, OS.LINUX]
 )
 class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
 
@@ -657,7 +658,7 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
         val supportedExtensions = setOf("png", "jpg", "jpeg", "webp")
         val imageFiles = folder.listFiles { file ->
             file.isFile && file.extension.lowercase() in supportedExtensions
-        }?.sortedBy { it.name } ?: emptyList()
+        }?.sortedNaturally() ?: emptyList()
 
         if (imageFiles.isEmpty()) {
             throw IllegalArgumentException("No valid images found in folder: $folderPath")

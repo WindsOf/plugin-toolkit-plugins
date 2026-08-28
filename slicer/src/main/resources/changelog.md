@@ -1,3 +1,16 @@
+Version: 1.4.2
+Date: 2026-08-29
+Fixed:
+  - Standardized image sorting using shared NaturalOrderComparator.
+  - Zero-padded slice output filenames (0001.png, 0002.png, ...) to ensure sequential order in file viewers and downstream plugins.
+-------------------------------------------------------------------------------------------------
+Version: 1.4.1
+Date: 2026-08-28
+Fixed:
+  - Resolved `OutOfMemoryError: Java heap space` by replacing monolithic `combinedImage` allocation with on-demand per-slice rendering.
+  - Eliminated post-YOLO/SAHI freeze and single-threaded CPU stalls by optimizing `findOptimalCuts` DP algorithm to candidate-only binary search (>1000x faster).
+  - Streaming image pipeline: images are loaded on-demand and immediately freed, eliminating 1.5–3 GB heap footprint during chapter slicing.
+-------------------------------------------------------------------------------------------------
 Version: 1.4.0
 Date: 2026-08-22
 Added:

@@ -1,3 +1,8 @@
+Version: 5.3.2
+Date: 2026-08-29
+Fixed:
+  - Sorted chapter image inputs naturally using shared NaturalOrderComparator (1.png, 2.png, 10.png, ...) preventing sequential PSD reordering and broken vertical merge groups.
+-------------------------------------------------------------------------------------------------
 Version: 5.3.1
 Date: 2026-08-28
 Fixed:

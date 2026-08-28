@@ -8,6 +8,7 @@ import com.wip.common.models.CleanerResult
 import com.wip.common.models.OCRResult
 import com.wip.common.models.OcrVisionMerger
 import com.wip.common.models.VisionResult
+import com.wip.common.models.sortedNaturally
 import com.wip.kpsd.Justification
 import com.wip.kpsd.KPsd
 import com.wip.kpsd.Layer
@@ -152,7 +153,7 @@ data class PSDBuilderSettings(
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "PSD Builder Native",
-    version = "5.3.1",
+    version = "5.3.2",
     description = "A plugin that builds layered PSD files natively in Kotlin.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
@@ -495,7 +496,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         val supportedExtensions = setOf("png", "jpg", "jpeg", "webp")
         val allImages = folder.listFiles { file ->
             file.isFile && file.extension.lowercase() in supportedExtensions
-        }?.sortedBy { it.name } ?: emptyList()
+        }?.sortedNaturally() ?: emptyList()
 
         val processedPages = java.util.concurrent.atomic.AtomicInteger(0)
         val maxConcurrent = maxOf(1, minOf(2, Runtime.getRuntime().availableProcessors()))

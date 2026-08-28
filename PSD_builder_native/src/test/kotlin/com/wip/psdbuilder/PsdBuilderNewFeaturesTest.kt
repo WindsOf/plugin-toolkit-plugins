@@ -254,4 +254,85 @@ class PsdBuilderNewFeaturesTest {
             assertEquals("Valid Text Layer", layers[0].name)
         }
     }
+
+    @Test
+    fun testNaturalOrderSequentialPsdNaming() {
+        runBlocking {
+            val plugin = PSDBuilderPlugin(PSDBuilderSettings(debugMode = false))
+            val ctx = mockk<PluginContext>(relaxed = true)
+
+            val tempInputDir = File.createTempFile("chapter_nat_in", "").apply {
+                delete()
+                mkdirs()
+                deleteOnExit()
+            }
+            val tempOutputDir = File.createTempFile("chapter_nat_out", "").apply {
+                delete()
+                mkdirs()
+                deleteOnExit()
+            }
+
+            // Create images named 1.png, 2.png, 10.png, 11.png (like Slicer output)
+            val names = listOf("1.png", "2.png", "10.png", "11.png")
+            for (name in names) {
+                val f = File(tempInputDir, name)
+                val img = BufferedImage(100, 300, BufferedImage.TYPE_INT_RGB)
+                ImageIO.write(img, "png", f)
+            }
+
+            val result = plugin.buildPsdForChapter(
+                inputFolder = tempInputDir.absolutePath,
+                texts = listOf("Text 1", "Text 2", "Text 10", "Text 11"),
+                balloonBoxes = listOf(
+                    listOf(0.1, 0.1, 0.3, 0.8),
+                    listOf(0.2, 0.2, 0.4, 0.7),
+                    listOf(0.15, 0.15, 0.35, 0.85),
+                    listOf(0.1, 0.1, 0.3, 0.8)
+                ),
+                pageNames = names,
+                outputDir = tempOutputDir.absolutePath,
+                desiredHeight = 0,
+                context = ctx,
+                hostFs = mockk(relaxed = true)
+            )
+
+            assertNotNull(result)
+            assertEquals(4, result.psdPaths.size)
+            assertEquals("001.psd", File(result.psdPaths[0]).name)
+            assertEquals("002.psd", File(result.psdPaths[1]).name)
+            assertEquals("003.psd", File(result.psdPaths[2]).name)
+            assertEquals("004.psd", File(result.psdPaths[3]).name)
+
+            // Also test merging respects natural sort order (1.png + 2.png -> 001.psd, 10.png + 11.png -> 002.psd)
+            val tempMergeDir = File.createTempFile("chapter_merge_out", "").apply {
+                delete()
+                mkdirs()
+                deleteOnExit()
+            }
+
+            val mergeResult = plugin.buildPsdForChapter(
+                inputFolder = tempInputDir.absolutePath,
+                texts = listOf("Text 1", "Text 2", "Text 10", "Text 11"),
+                balloonBoxes = listOf(
+                    listOf(0.1, 0.1, 0.3, 0.8),
+                    listOf(0.2, 0.2, 0.4, 0.7),
+                    listOf(0.15, 0.15, 0.35, 0.85),
+                    listOf(0.1, 0.1, 0.3, 0.8)
+                ),
+                pageNames = names,
+                outputDir = tempMergeDir.absolutePath,
+                desiredHeight = 600, // Merges 2 pages of height 300 each
+                context = ctx,
+                hostFs = mockk(relaxed = true)
+            )
+
+            assertEquals(2, mergeResult.psdPaths.size)
+            assertEquals("001.psd", File(mergeResult.psdPaths[0]).name)
+            assertEquals("002.psd", File(mergeResult.psdPaths[1]).name)
+
+            tempInputDir.deleteRecursively()
+            tempOutputDir.deleteRecursively()
+            tempMergeDir.deleteRecursively()
+        }
+    }
 }
