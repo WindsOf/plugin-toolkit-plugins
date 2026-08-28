@@ -14,8 +14,10 @@ data class SahiConfig(
     val includeFullImage: Boolean = true,
     val scoreThreshold: Double = 0.25,
     val iouThreshold: Double = 0.45,
+    val iosThreshold: Double = 0.65,
     val edgeMarginFilterPx: Int = 2,
-    val tileScale: Double = 1.0
+    val tileScale: Double = 1.0,
+    val tilingPasses: Int = 1
 )
 
 /**

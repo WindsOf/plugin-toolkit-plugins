@@ -13,11 +13,15 @@ import kotlin.math.min
 object SahiInferenceRunner {
 
     /**
-     * Generates a grid of overlapping sliding window slices across the image dimensions.
+     * Generates a grid of overlapping sliding window slices across the image dimensions,
+     * supporting multi-pass phase-shifted tiling for seam-free object detection.
      */
-    fun generateSlices(imageWidth: Int, imageHeight: Int, config: SahiConfig): List<SliceWindow> {
-        val slices = mutableListOf<SliceWindow>()
-
+    fun generateSlices(
+        imageWidth: Int,
+        imageHeight: Int,
+        config: SahiConfig,
+        passes: Int = config.tilingPasses
+    ): List<SliceWindow> {
         val effectiveW = (config.sliceWidth * config.tileScale).toInt().coerceAtLeast(64)
         val effectiveH = (config.sliceHeight * config.tileScale).toInt().coerceAtLeast(64)
         val sliceW = min(effectiveW, imageWidth)
@@ -26,28 +30,43 @@ object SahiInferenceRunner {
         val stepW = max(1, (sliceW * (1.0f - config.overlapWidthRatio)).toInt())
         val stepH = max(1, (sliceH * (1.0f - config.overlapHeightRatio)).toInt())
 
-        var y = 0
-        while (y < imageHeight) {
-            val actualY = if (y + sliceH > imageHeight) max(0, imageHeight - sliceH) else y
-            val actualH = min(sliceH, imageHeight - actualY)
+        val slices = mutableListOf<SliceWindow>()
+        val seenKeys = mutableSetOf<String>()
 
-            var x = 0
-            while (x < imageWidth) {
-                val actualX = if (x + sliceW > imageWidth) max(0, imageWidth - sliceW) else x
-                val actualW = min(sliceW, imageWidth - actualX)
+        val numPasses = passes.coerceIn(1, 4)
+        for (p in 0 until numPasses) {
+            val shiftX = (p * sliceW / numPasses)
+            val shiftY = (p * sliceH / numPasses)
 
-                slices.add(SliceWindow(x = actualX, y = actualY, width = actualW, height = actualH, isFullImage = false))
+            var y = shiftY
+            while (y < imageHeight) {
+                val actualY = if (y + sliceH > imageHeight) max(0, imageHeight - sliceH) else y
+                val actualH = min(sliceH, imageHeight - actualY)
 
-                if (actualX + actualW >= imageWidth) break
-                x += stepW
+                var x = shiftX
+                while (x < imageWidth) {
+                    val actualX = if (x + sliceW > imageWidth) max(0, imageWidth - sliceW) else x
+                    val actualW = min(sliceW, imageWidth - actualX)
+
+                    val key = "$actualX,$actualY,$actualW,$actualH"
+                    if (seenKeys.add(key)) {
+                        slices.add(SliceWindow(x = actualX, y = actualY, width = actualW, height = actualH, isFullImage = false))
+                    }
+
+                    if (actualX + actualW >= imageWidth) break
+                    x += stepW
+                }
+
+                if (actualY + actualH >= imageHeight) break
+                y += stepH
             }
-
-            if (actualY + actualH >= imageHeight) break
-            y += stepH
         }
 
         if (config.includeFullImage && (imageWidth > sliceW || imageHeight > sliceH)) {
-            slices.add(SliceWindow(x = 0, y = 0, width = imageWidth, height = imageHeight, isFullImage = true))
+            val fullKey = "0,0,$imageWidth,$imageHeight,full"
+            if (seenKeys.add(fullKey)) {
+                slices.add(SliceWindow(x = 0, y = 0, width = imageWidth, height = imageHeight, isFullImage = true))
+            }
         }
 
         return slices
@@ -64,7 +83,7 @@ object SahiInferenceRunner {
         logger: PluginLogger? = null
     ): List<SegmentedObject> {
         val slices = generateSlices(image.width, image.height, config)
-        logger?.info("SAHI Segmentation: Sliced image (${image.width}x${image.height}) into ${slices.size} tiles with scale ${config.tileScale}.")
+        logger?.info("SAHI Segmentation: Sliced image (${image.width}x${image.height}) into ${slices.size} tiles with scale ${config.tileScale} (passes=${config.tilingPasses}).")
 
         val inputName = session.session.inputNames.iterator().next()
         val allObjects = mutableListOf<SegmentedObject>()
@@ -100,7 +119,12 @@ object SahiInferenceRunner {
             }
         }
 
-        val mergedObjects = NmsUtils.applySegmentationNms(allObjects, config.iouThreshold, config.scoreThreshold)
+        val mergedObjects = NmsUtils.applySegmentationNms(
+            objects = allObjects,
+            iouThreshold = config.iouThreshold,
+            scoreThreshold = config.scoreThreshold,
+            iosThreshold = config.iosThreshold
+        )
         logger?.info("SAHI Segmentation: Merged ${allObjects.size} raw tile segmentations into ${mergedObjects.size} global segmentations.")
         return mergedObjects
     }
@@ -116,7 +140,7 @@ object SahiInferenceRunner {
         logger: PluginLogger? = null
     ): DetectionResult {
         val slices = generateSlices(image.width, image.height, config)
-        logger?.info("SAHI: Sliced image (${image.width}x${image.height}) into ${slices.size} tiles.")
+        logger?.info("SAHI: Sliced image (${image.width}x${image.height}) into ${slices.size} tiles (passes=${config.tilingPasses}).")
 
         val inputName = session.session.inputNames.iterator().next()
         val allBoxes = mutableListOf<DetectionBox>()
@@ -155,8 +179,13 @@ object SahiInferenceRunner {
             }
         }
 
-        // Global Cross-Tile NMS
-        val mergedBoxes = NmsUtils.applyNms(allBoxes, config.iouThreshold, config.scoreThreshold)
+        // Global Cross-Tile NMS with Containment (IOS)
+        val mergedBoxes = NmsUtils.applyNms(
+            boxes = allBoxes,
+            iouThreshold = config.iouThreshold,
+            scoreThreshold = config.scoreThreshold,
+            iosThreshold = config.iosThreshold
+        )
         logger?.info("SAHI: Merged ${allBoxes.size} raw tile detections into ${mergedBoxes.size} global detections.")
 
         return DetectionResult(

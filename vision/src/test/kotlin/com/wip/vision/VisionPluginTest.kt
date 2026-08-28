@@ -233,4 +233,80 @@ class VisionPluginTest {
             assertTrue(File(result.debugImagePath!!).length() > 0)
         }
     }
+
+    @Test
+    fun testVisionSettingsAndShiftedTilingExecution() {
+        val customSettings = VisionSettings(
+            enableShiftedTiling = true,
+            detectionTilingPasses = 2,
+            enableDynamicRoiExpansion = true,
+            maxRoiExpansionRetries = 1,
+            roiExpansionRatio = 0.25,
+            borderTouchThresholdPx = 3
+        )
+        val vision = VisionPlugin(settings = customSettings)
+        assertEquals(2, vision.settings.detectionTilingPasses)
+        assertTrue(vision.settings.enableDynamicRoiExpansion)
+
+        val tempDir = File("build/tmp/test_vision_settings").apply {
+            if (exists()) deleteRecursively()
+            mkdirs()
+        }
+
+        val testImage = File(tempDir, "manhwa_settings_page.png")
+        val img = BufferedImage(800, 1200, BufferedImage.TYPE_INT_RGB)
+        val g = img.createGraphics()
+        g.color = Color.WHITE
+        g.fillRect(0, 0, 800, 1200)
+        g.dispose()
+        ImageIO.write(img, "png", testImage)
+
+        val logger = FakeLogger()
+        val progress = FakeProgress()
+        val pluginFs = mockk<PluginFileSystem>(relaxed = true) {
+            coEvery { readFile(any()) } returns null
+            coEvery { readTextFile(any()) } returns null
+        }
+        val hostFs = mockk<HostFileSystem>(relaxed = true)
+
+        val context = mockk<PluginContext>(relaxed = true) {
+            every { this@mockk.logger } returns logger
+            every { this@mockk.progress } returns progress
+            every { this@mockk.fileSystem } returns pluginFs
+        }
+
+        runBlocking {
+            val result = vision.detectAndSegment(
+                imagePath = testImage.absolutePath,
+                detectionScoreThreshold = 0.25,
+                segmentationScoreThreshold = 0.25,
+                iouThreshold = 0.45,
+                iosThreshold = 0.65,
+                detectScale = 1.0,
+                detectOverlap = 0.25,
+                saveDebugImage = false,
+                outputDir = tempDir.absolutePath,
+                context = context,
+                hostFs = hostFs
+            )
+
+            assertEquals(800, result.imageWidth)
+            assertEquals(1200, result.imageHeight)
+
+            kotlin.test.assertFailsWith<IllegalStateException> {
+                vision.detect(
+                    imagePath = testImage.absolutePath,
+                    scoreThreshold = 0.25,
+                    iouThreshold = 0.45,
+                    iosThreshold = 0.65,
+                    detectScale = 1.0,
+                    detectOverlap = 0.25,
+                    saveDebugImage = false,
+                    outputDir = tempDir.absolutePath,
+                    context = context,
+                    hostFs = hostFs
+                )
+            }
+        }
+    }
 }

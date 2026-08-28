@@ -177,4 +177,32 @@ class SahiInferenceTest {
         assertEquals(3000, maxReachedY)
         assertEquals(2000, maxReachedX)
     }
+
+    @Test
+    fun testMultiPassShiftedSliceGeneration() {
+        val configSinglePass = SahiConfig(
+            sliceWidth = 640,
+            sliceHeight = 640,
+            overlapWidthRatio = 0.25f,
+            overlapHeightRatio = 0.25f,
+            tilingPasses = 1,
+            includeFullImage = false
+        )
+        val configTwoPass = SahiConfig(
+            sliceWidth = 640,
+            sliceHeight = 640,
+            overlapWidthRatio = 0.25f,
+            overlapHeightRatio = 0.25f,
+            tilingPasses = 2,
+            includeFullImage = false
+        )
+
+        val slices1 = SahiInferenceRunner.generateSlices(2000, 3000, configSinglePass)
+        val slices2 = SahiInferenceRunner.generateSlices(2000, 3000, configTwoPass)
+
+        assertTrue(slices2.size > slices1.size, "Two-pass shifted tiling should generate more staggered slices than single-pass")
+        // Verify that there are slices with non-zero initial offsets from the second pass
+        val shiftedSlices = slices2.filter { it.x > 0 && it.y > 0 }
+        assertTrue(shiftedSlices.isNotEmpty(), "Shifted pass must contain offset tile windows")
+    }
 }

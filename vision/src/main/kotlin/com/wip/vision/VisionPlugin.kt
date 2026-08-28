@@ -55,7 +55,7 @@ import org.wip.plugintoolkit.api.annotations.RequiresLock
     description = "Object detection and instance segmentation plugin using YOLO and RF-DETR.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
-class VisionPlugin {
+class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
 
     init {
         try {
@@ -255,6 +255,7 @@ class VisionPlugin {
                 classes = listOf("balloon", "text", "watermark")
             )
 
+        val effectiveTilingPasses = if (settings.enableShiftedTiling) settings.detectionTilingPasses.coerceIn(1, 4) else 1
         val yoloSahiConfig = SahiConfig(
             sliceWidth = yoloSpec.inputWidth,
             sliceHeight = yoloSpec.inputHeight,
@@ -262,7 +263,9 @@ class VisionPlugin {
             overlapHeightRatio = detectOverlap.toFloat().coerceIn(0.0f, 0.8f),
             scoreThreshold = detectionScoreThreshold,
             iouThreshold = iouThreshold,
-            tileScale = detectScale.coerceAtLeast(0.5)
+            iosThreshold = iosThreshold,
+            tileScale = detectScale.coerceAtLeast(0.5),
+            tilingPasses = effectiveTilingPasses
         )
         val detectSlices = SahiInferenceRunner.generateSlices(imgW, imgH, yoloSahiConfig)
 
@@ -369,17 +372,17 @@ class VisionPlugin {
                     segmentationRois.addAll(mergedRois)
 
                     for (box in mergedRois) {
-                        val pxX = (box.xmin * imgW).toInt().coerceIn(0, imgW - 1)
-                        val pxY = (box.ymin * imgH).toInt().coerceIn(0, imgH - 1)
+                        var pxX = (box.xmin * imgW).toInt().coerceIn(0, imgW - 1)
+                        var pxY = (box.ymin * imgH).toInt().coerceIn(0, imgH - 1)
                         val rawW = ((box.xmax - box.xmin) * imgW).toInt()
                         val rawH = ((box.ymax - box.ymin) * imgH).toInt()
-                        val pxW = max(1, rawW).coerceIn(1, imgW - pxX)
-                        val pxH = max(1, rawH).coerceIn(1, imgH - pxY)
+                        var pxW = max(1, rawW).coerceIn(1, imgW - pxX)
+                        var pxH = max(1, rawH).coerceIn(1, imgH - pxY)
 
-                        val actualRoiXmin = pxX.toDouble() / imgW.toDouble()
-                        val actualRoiYmin = pxY.toDouble() / imgH.toDouble()
-                        val actualRoiXmax = (pxX + pxW).toDouble() / imgW.toDouble()
-                        val actualRoiYmax = (pxY + pxH).toDouble() / imgH.toDouble()
+                        var actualRoiXmin = pxX.toDouble() / imgW.toDouble()
+                        var actualRoiYmin = pxY.toDouble() / imgH.toDouble()
+                        var actualRoiXmax = (pxX + pxW).toDouble() / imgW.toDouble()
+                        var actualRoiYmax = (pxY + pxH).toDouble() / imgH.toDouble()
 
                         val roiSubImage = baseImage.getSubimage(pxX, pxY, pxW, pxH)
                         val tensor = ImageTensorUtils.createTensor(
@@ -391,12 +394,83 @@ class VisionPlugin {
 
                         try {
                             val sessionResult = rfdetrSession.session.run(mapOf(inputName to tensor))
-                            val localSegs = RfDetrPostprocessor.decodeOutputs(
+                            var localSegs = RfDetrPostprocessor.decodeOutputs(
                                 sessionResult,
                                 rfdetrSpec,
                                 segmentationScoreThreshold
                             )
                             sessionResult.close()
+
+                            // Adaptive Dynamic Border-Touching ROI Expansion Loop
+                            var retries = 0
+                            while (settings.enableDynamicRoiExpansion && retries < settings.maxRoiExpansionRetries && localSegs.isNotEmpty()) {
+                                val touchingSides = mutableSetOf<String>()
+                                val normThreshX = (settings.borderTouchThresholdPx.toDouble() / pxW.toDouble()).coerceIn(0.001, 0.05)
+                                val normThreshY = (settings.borderTouchThresholdPx.toDouble() / pxH.toDouble()).coerceIn(0.001, 0.05)
+                                for (seg in localSegs) {
+                                    for (pt in seg.polygon) {
+                                        if (pt.x <= normThreshX) touchingSides.add("left")
+                                        if (pt.y <= normThreshY) touchingSides.add("top")
+                                        if (pt.x >= 1.0 - normThreshX) touchingSides.add("right")
+                                        if (pt.y >= 1.0 - normThreshY) touchingSides.add("bottom")
+                                    }
+                                }
+                                if (touchingSides.isEmpty()) break
+
+                                val bw = actualRoiXmax - actualRoiXmin
+                                val bh = actualRoiYmax - actualRoiYmin
+                                val expX = bw * settings.roiExpansionRatio
+                                val expY = bh * settings.roiExpansionRatio
+
+                                val expXmin = if ("left" in touchingSides) (actualRoiXmin - expX).coerceIn(0.0, 1.0) else actualRoiXmin
+                                val expYmin = if ("top" in touchingSides) (actualRoiYmin - expY).coerceIn(0.0, 1.0) else actualRoiYmin
+                                val expXmax = if ("right" in touchingSides) (actualRoiXmax + expX).coerceIn(0.0, 1.0) else actualRoiXmax
+                                val expYmax = if ("bottom" in touchingSides) (actualRoiYmax + expY).coerceIn(0.0, 1.0) else actualRoiYmax
+
+                                val newPxX = (expXmin * imgW).toInt().coerceIn(0, imgW - 1)
+                                val newPxY = (expYmin * imgH).toInt().coerceIn(0, imgH - 1)
+                                val newRawW = ((expXmax - expXmin) * imgW).toInt()
+                                val newRawH = ((expYmax - expYmin) * imgH).toInt()
+                                val newPxW = max(1, newRawW).coerceIn(1, imgW - newPxX)
+                                val newPxH = max(1, newRawH).coerceIn(1, imgH - newPxY)
+
+                                if (newPxX == pxX && newPxY == pxY && newPxW == pxW && newPxH == pxH) break
+
+                                val expSubImg = baseImage.getSubimage(newPxX, newPxY, newPxW, newPxH)
+                                val expTensor = ImageTensorUtils.createTensor(
+                                    rfdetrSession.environment,
+                                    expSubImg,
+                                    rfdetrSpec.inputWidth,
+                                    rfdetrSpec.inputHeight
+                                )
+                                try {
+                                    val expResult = rfdetrSession.session.run(mapOf(inputName to expTensor))
+                                    val expSegs = RfDetrPostprocessor.decodeOutputs(
+                                        expResult,
+                                        rfdetrSpec,
+                                        segmentationScoreThreshold
+                                    )
+                                    expResult.close()
+                                    if (expSegs.isNotEmpty()) {
+                                        localSegs = expSegs
+                                        pxX = newPxX
+                                        pxY = newPxY
+                                        pxW = newPxW
+                                        pxH = newPxH
+                                        actualRoiXmin = newPxX.toDouble() / imgW.toDouble()
+                                        actualRoiYmin = newPxY.toDouble() / imgH.toDouble()
+                                        actualRoiXmax = (newPxX + newPxW).toDouble() / imgW.toDouble()
+                                        actualRoiYmax = (newPxY + newPxH).toDouble() / imgH.toDouble()
+                                        logger.debug("Dynamic ROI expansion applied on $touchingSides: ${pxW}x${pxH}")
+                                    }
+                                } catch (e: Exception) {
+                                    logger.warn("Dynamic ROI expansion retry failed: ${e.message}")
+                                    break
+                                } finally {
+                                    expTensor.close()
+                                }
+                                retries++
+                            }
 
                             val roiBox = DetectionBox(
                                 label = box.label,
@@ -439,7 +513,9 @@ class VisionPlugin {
                         overlapHeightRatio = segmentOverlap.toFloat().coerceIn(0.0f, 0.8f),
                         scoreThreshold = segmentationScoreThreshold,
                         iouThreshold = iouThreshold,
-                        tileScale = segmentScale.coerceAtLeast(0.5)
+                        iosThreshold = iosThreshold,
+                        tileScale = segmentScale.coerceAtLeast(0.5),
+                        tilingPasses = 1
                     )
                     val segs = SahiInferenceRunner.runSlicedSegmentation(
                         image = baseImage,
@@ -676,6 +752,7 @@ class VisionPlugin {
         val session = ModelManager.Default.createInferenceSession(yoloModelId, context.fileSystem, ExecutionDevice.AUTO, context.logger)
             ?: throw IllegalStateException("Model '$yoloModelId' is not installed or could not be loaded.")
         return try {
+            val effectiveTilingPasses = if (settings.enableShiftedTiling) settings.detectionTilingPasses.coerceIn(1, 4) else 1
             val sahiConfig = SahiConfig(
                 sliceWidth = yoloSpec.inputWidth,
                 sliceHeight = yoloSpec.inputHeight,
@@ -683,7 +760,9 @@ class VisionPlugin {
                 overlapHeightRatio = detectOverlap.toFloat().coerceIn(0.0f, 0.8f),
                 scoreThreshold = scoreThreshold,
                 iouThreshold = iouThreshold,
-                tileScale = detectScale.coerceAtLeast(0.5)
+                iosThreshold = iosThreshold,
+                tileScale = detectScale.coerceAtLeast(0.5),
+                tilingPasses = effectiveTilingPasses
             )
             val slices = SahiInferenceRunner.generateSlices(imgW, imgH, sahiConfig)
 
