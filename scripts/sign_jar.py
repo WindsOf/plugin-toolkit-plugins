@@ -1,9 +1,8 @@
 """
-JAR Signing, Header Normalization, and Signature Verification Utility.
+JAR Signing and Signature Verification Utility.
 
 Provides reusable functionality to:
-- Normalize fat-JAR local file headers left in inconsistent states by Gradle/zipTree.
-- Sign JAR archives internally using JDK jarsigner and RSA-SHA256 PKCS12 keystores.
+- Sign JAR archives using JDK jarsigner and RSA-SHA256 PKCS12 keystores.
 - Generate and verify detached RSA-SHA256 signatures and SHA-256 digests.
 - Support both programmatic module imports and standalone CLI execution.
 """
@@ -13,11 +12,10 @@ import base64
 import hashlib
 import os
 import shutil
-import struct
 import subprocess
 import sys
 import tempfile
-import zipfile
+import time
 from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 
@@ -88,114 +86,6 @@ def run_command(command: list[str], cwd: str | None = None, verbose: bool = True
     return result.returncode == 0, result.stdout, result.stderr
 
 
-def has_local_header_mismatch(jar_path: Path | str) -> bool:
-    """
-    Returns True if any entry in the JAR has a local file header whose
-    compression type or sizes differ from its central directory record.
-
-    Gradle's zipTree fat-JAR bundling can leave local headers with stale values
-    from source archives. Java's ZipInputStream/jarsigner reads local headers
-    and fails with ZipException if they mismatch.
-    """
-    jar_file = Path(jar_path)
-    if not jar_file.exists():
-        return False
-
-    with open(jar_file, "rb") as f:
-        raw = f.read()
-
-    with zipfile.ZipFile(jar_file, "r") as z:
-        for info in z.infolist():
-            offset = info.header_offset
-            if raw[offset:offset + 4] != b"PK\x03\x04":
-                return True
-            # Local file header layout (26 bytes starting at offset + 4):
-            # <HHHHHIIIHH: version_needed(2), bit_flag(2), compress_type(2),
-            #              mod_time(2), mod_date(2), crc32(4), compress_size(4),
-            #              uncompress_size(4), fname_len(2), extra_len(2)
-            lh = struct.unpack_from("<HHHHHIIIHH", raw, offset + 4)
-            local_bit_flag = lh[1]
-            local_compress = lh[2]
-            local_compress_size = lh[6]
-            local_file_size = lh[7]
-
-            cd_compress_size = info.compress_size
-            cd_file_size = info.file_size
-
-            # Check compression method mismatch
-            if local_compress != info.compress_type:
-                return True
-
-            # If bit 3 is not set, sizes in local header should match central directory
-            has_data_descriptor = bool(local_bit_flag & 0x08)
-            if not has_data_descriptor:
-                if cd_compress_size < 0xFFFFFFFF and local_compress_size != cd_compress_size:
-                    return True
-                if cd_file_size < 0xFFFFFFFF and local_file_size != cd_file_size:
-                    return True
-
-    return False
-
-
-def repack_jar_if_needed(jar_path: Path | str, output_path: Path | str | None = None, verbose: bool = True) -> bool:
-    """
-    Detects Gradle fat-JAR local file header discrepancies and rewrites the archive
-    with fresh, normalized headers so Java tools (jarsigner/ZipInputStream) can
-    process every entry without error.
-
-    Returns True if repacked or already clean, False if repacking failed.
-    """
-    src_path = Path(jar_path)
-    dst_path = Path(output_path) if output_path else src_path
-
-    if not src_path.exists():
-        if verbose:
-            print(f"  [ERROR] File not found: {src_path}")
-        return False
-
-    try:
-        if not has_local_header_mismatch(src_path):
-            if output_path and src_path != dst_path:
-                shutil.copy2(src_path, dst_path)
-            return True
-    except Exception as probe_err:
-        if verbose:
-            print(f"  [WARN] Could not probe local headers ({probe_err}); attempting repack.")
-
-    if verbose:
-        print(f"  [REPACK] Local-header mismatches detected in {src_path.name}. Normalizing...")
-
-    tmp_path = dst_path.with_suffix(".repacking.tmp.jar")
-    try:
-        with zipfile.ZipFile(src_path, "r") as src_zip:
-            with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as dst_zip:
-                for info in src_zip.infolist():
-                    data = src_zip.read(info)
-                    new_info = zipfile.ZipInfo(info.filename, date_time=info.date_time)
-                    new_info.compress_type = info.compress_type
-                    new_info.comment = info.comment
-                    new_info.create_system = info.create_system
-                    new_info.create_version = info.create_version
-                    new_info.external_attr = info.external_attr
-                    dst_zip.writestr(new_info, data)
-
-        if dst_path.exists() and dst_path != src_path:
-            dst_path.unlink()
-        tmp_path.replace(dst_path)
-        if verbose:
-            print(f"  [REPACK] Successfully normalized {dst_path.name}.")
-        return True
-    except Exception as repack_err:
-        if verbose:
-            print(f"  [ERROR] Repack failed: {repack_err}")
-        if tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except Exception:
-                pass
-        return False
-
-
 def sign_jar(
     jar_path: Path | str,
     private_key_b64: str | None = None,
@@ -214,24 +104,24 @@ def sign_jar(
             print("  [ERROR] No private signing key provided. Set PLUGIN_PRIVATE_SIGNING_KEY in .env or pass --key.")
         return False
 
-    src_path = Path(jar_path)
-    dst_path = Path(output_path) if output_path else src_path
+    src_path = Path(jar_path).resolve()
+    dst_path = Path(output_path).resolve() if output_path else src_path
 
     if not src_path.exists():
         if verbose:
             print(f"  [ERROR] JAR file not found: {src_path}")
         return False
 
+    # Ensure destination directory exists and copy source if different
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    if dst_path != src_path:
+        shutil.copy2(src_path, dst_path)
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
         priv_key_file = tmp_path / "private.pem"
         cert_file = tmp_path / "cert.pem"
         p12_file = tmp_path / "keystore.p12"
-        working_jar = tmp_path / "working.jar"
-        signed_jar_temp = tmp_path / "signed_output.jar"
-
-        # Copy source to working temp jar
-        shutil.copy2(src_path, working_jar)
 
         # 1. Prepare Private Key PEM
         priv_key_pem = f"-----BEGIN PRIVATE KEY-----\n{key_b64.strip()}\n-----END PRIVATE KEY-----\n"
@@ -269,13 +159,7 @@ def sign_jar(
         if not ok:
             return False
 
-        # 5. Repack/normalize local headers if needed before jarsigner
-        if not repack_jar_if_needed(working_jar, verbose=verbose):
-            if verbose:
-                print(f"  [ERROR] Header normalization failed for {src_path.name}.")
-            return False
-
-        # 6. Sign using jarsigner
+        # 5. Sign dst_path directly using jarsigner (with retry for Windows file handle release)
         jarsigner_tool = find_jdk_tool("jarsigner")
         sign_cmd = [
             jarsigner_tool,
@@ -284,21 +168,38 @@ def sign_jar(
             "-storepass", password,
             "-sigalg", "SHA256withRSA",
             "-digestalg", "SHA-256",
-            "-signedjar", str(signed_jar_temp),
-            str(working_jar),
+            str(dst_path),
             alias
         ]
-        ok, _, _ = run_command(sign_cmd, verbose=verbose)
-        if not ok or not signed_jar_temp.exists():
-            if verbose:
-                print(f"  [ERROR] jarsigner failed to sign {src_path.name}")
-            return False
 
-        # Move output to destination
-        dst_path.parent.mkdir(parents=True, exist_ok=True)
-        if dst_path.exists():
-            dst_path.unlink()
-        shutil.move(str(signed_jar_temp), str(dst_path))
+        ok = False
+        for attempt in range(3):
+            ok, _, _ = run_command(sign_cmd, verbose=verbose)
+            if ok:
+                break
+
+            # Handle Windows jarsigner .sig replacement
+            sig_file_temp = Path(f"{dst_path}.sig")
+            if sig_file_temp.exists():
+                time.sleep(0.5)
+                try:
+                    if dst_path.exists():
+                        dst_path.unlink()
+                    sig_file_temp.replace(dst_path)
+                    ok = True
+                    break
+                except Exception:
+                    pass
+
+            if attempt < 2:
+                time.sleep(1.0)
+                if dst_path != src_path:
+                    shutil.copy2(src_path, dst_path)
+
+        if not ok:
+            if verbose:
+                print(f"  [ERROR] jarsigner failed to sign {dst_path.name}")
+            return False
 
         if verbose:
             print(f"  [SIGN] Successfully signed {dst_path.name}")
@@ -420,7 +321,7 @@ def verify_detached_signature(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Sign, repack, or verify JAR files for Plugin Toolkit.",
+        description="Sign or verify JAR files for Plugin Toolkit.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -434,20 +335,16 @@ Examples:
   # Verify internal signature and detached hash:
   python scripts/sign_jar.py path/to/plugin.jar --verify
 
-  # Only normalize fat-JAR local headers (no signing):
-  python scripts/sign_jar.py path/to/plugin.jar --repack-only
-
   # Print detached SHA-256 hash and RSA signature:
   python scripts/sign_jar.py path/to/plugin.jar --detached-only
 """
     )
-    parser.add_argument("jar", help="Path to the JAR file to sign, repack, or verify")
+    parser.add_argument("jar", help="Path to the JAR file to sign or verify")
     parser.add_argument("output", nargs="?", default=None, help="Optional output path for signed JAR (default: in-place)")
     parser.add_argument("-o", "--out", dest="out_flag", default=None, help="Output path for signed JAR (alternative to positional output)")
     parser.add_argument("-k", "--key", help="Base64-encoded RSA private key (default: from .env PLUGIN_PRIVATE_SIGNING_KEY)")
     parser.add_argument("--public-key", help="Base64-encoded RSA public key (default: from .env PLUGIN_PUBLIC_SIGNING_KEY)")
     parser.add_argument("-v", "--verify", action="store_true", help="Verify the JAR signature instead of signing")
-    parser.add_argument("--repack-only", action="store_true", help="Only normalize local file headers without signing")
     parser.add_argument("--detached-only", action="store_true", help="Calculate SHA-256 and detached signature without modifying file")
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress verbose execution logs")
 
@@ -486,14 +383,7 @@ Examples:
 
         return 0 if ok_internal else 1
 
-    # Mode 3: Repack only
-    if args.repack_only:
-        target_out = Path(output_destination).resolve() if output_destination else jar_path
-        print(f"\nNormalizing local headers for: {jar_path.name} -> {target_out.name}...")
-        ok = repack_jar_if_needed(jar_path, output_path=target_out, verbose=verbose)
-        return 0 if ok else 1
-
-    # Mode 4: Sign JAR (Default)
+    # Mode 3: Sign JAR (Default)
     target_out = Path(output_destination).resolve() if output_destination else jar_path
     print(f"\nSigning JAR: {jar_path.name} -> {target_out.name}...")
     success = sign_jar(
@@ -504,7 +394,6 @@ Examples:
     )
 
     if success:
-        # Also print detached info
         h, s = get_detached_signature(target_out, private_key_b64=args.key, verbose=False)
         print(f"  [OK] JAR signed successfully.")
         print(f"  [INFO] SHA-256: {h}")

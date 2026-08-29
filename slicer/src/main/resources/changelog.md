@@ -46,11 +46,11 @@ Bugfix:
 Version: 1.1.4
 Date: 2026-06-01
 Added:
-  - Introdotto supporto nativo per le immagini in formato `.webp` tramite l'integrazione di `imageio-webp` (TwelveMonkeys).
+  - Introdotto supporto nativo per le immagini in formato `.webp` tramite l'integrazione di `imageio-webp` (TwelveMonkeys), consentendo al plugin di elaborare direttamente i file WebP senza doverli pre-convertire o causare eccezioni `NoClassDefFoundError`.
 Fixed:
-  - Risolti blocchi durante l'elaborazione di formati WebP con lettura diretta da file.
+  - Risolti blocchi infiniti (hang/freeze per svariati minuti) durante l'elaborazione di formati complessi come il WebP. Modificato il parser I/O per leggere direttamente da `java.io.File` anziché da uno Stream in memoria, garantendo stabilità nativa e supporto all'accesso random-access.
 Changed:
-  - Ottimizzazione delle prestazioni nell'analisi dei pixel tramite estrazione massiva a buffer.
+  - Enorme ottimizzazione delle prestazioni nell'analisi dei pixel (`analyzeSingleRowVariance`): rimosso il fetch "pixel per pixel", sostituendolo con un'estrazione massiva di intere righe tramite buffer di memoria. Abbattuti drasticamente i tempi di esecuzione sui panel webtoon ad alta risoluzione.
 -------------------------------------------------------------------------------------------------
 Version: 1.1.0
 Date: 2026-05-23
@@ -69,13 +69,16 @@ Date: 2026-05-12
 Added:
     - Support for toolkit 1.4.0
 -------------------------------------------------------------------------------------------------
-Version: 1.0.1
-Date: 2026-05-10
+version: 1.0.1
+date: 2026-05-10
 Changes:
     - Recompiled for 1.3.1
     - Switched from including the plugin-api as a module to including it as a dependency
--------------------------------------------------------------------------------------------------
-Version: 1.0.0
-Date: 2026-05-04
+----------------------------------------------------------------------------------------------------
+version: 1.0.0
+date: 2026-05-04
 Added:
-    - Initial release of Slicer
+    - Slicer
+    - Valid cut distance checker
+Planned:
+    - Dynamic image loading in teh slicer to avoid loading all the images bitmap in ram

@@ -2,11 +2,8 @@
 Unit tests for scripts/sign_jar.py.
 """
 
-import base64
 import hashlib
 import os
-import shutil
-import struct
 import tempfile
 import unittest
 import zipfile
@@ -36,36 +33,6 @@ class TestSignJar(unittest.TestCase):
     def test_find_jdk_tool_fallback(self):
         tool = sign_jar.find_jdk_tool("nonexistent_tool_12345")
         self.assertEqual(tool, "nonexistent_tool_12345")
-
-    def test_has_local_header_mismatch_clean_jar(self):
-        jar_path = self._create_dummy_jar("clean.jar")
-        self.assertFalse(sign_jar.has_local_header_mismatch(jar_path))
-
-    def test_repack_jar_if_needed_clean_jar(self):
-        jar_path = self._create_dummy_jar("clean_repack.jar")
-        out_path = self.tmp_path / "clean_out.jar"
-        result = sign_jar.repack_jar_if_needed(jar_path, output_path=out_path, verbose=False)
-        self.assertTrue(result)
-        self.assertTrue(out_path.exists())
-
-    def test_repack_jar_normalizes_mismatch(self):
-        # Create a JAR and artificially alter the local compression method vs central directory
-        jar_path = self._create_dummy_jar("mismatched.jar")
-        with open(jar_path, "r+b") as f:
-            raw = f.read()
-            offset = raw.find(b"PK\x03\x04")
-            self.assertNotEqual(offset, -1)
-            # Local header compress_type is at offset + 8 (2 bytes)
-            f.seek(offset + 8)
-            f.write(struct.pack("<H", 0))  # Mismatched method (0 vs 8)
-
-        self.assertTrue(sign_jar.has_local_header_mismatch(jar_path))
-
-        out_path = self.tmp_path / "normalized.jar"
-        result = sign_jar.repack_jar_if_needed(jar_path, output_path=out_path, verbose=False)
-        self.assertTrue(result)
-        self.assertTrue(out_path.exists())
-        self.assertFalse(sign_jar.has_local_header_mismatch(out_path))
 
     def test_get_detached_signature_hash_computation(self):
         jar_path = self._create_dummy_jar("hash_test.jar")

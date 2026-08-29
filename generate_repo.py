@@ -33,7 +33,6 @@ from scripts.generate_repo import (
     get_remote_file_size,
     main,
     push_to_git,
-    repack_jar_if_needed,
     resolve_and_ensure_remote_base_dir,
     run_command,
     sign_jar,

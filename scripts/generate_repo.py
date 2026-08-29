@@ -31,8 +31,6 @@ if str(_PROJECT_ROOT) not in sys.path:
 from scripts.sign_jar import (
     find_jdk_tool,
     get_detached_signature,
-    has_local_header_mismatch,
-    repack_jar_if_needed,
     run_command,
     sign_jar,
     verify_detached_signature,
@@ -238,7 +236,7 @@ def generate_repo(name: str, url: str, output_dir: str, clean: bool = False, tar
         display_name = base_name
         display_desc = base_desc
         gradle_wrapper = "gradlew.bat" if os.name == "nt" else "./gradlew"
-        gradle_args = [gradle_wrapper, f":{plugin_dir.name}:clean", f":{plugin_dir.name}:build", "--no-configuration-cache"] if clean else [gradle_wrapper, f":{plugin_dir.name}:jar"]
+        gradle_args = [gradle_wrapper, f":{plugin_dir.name}:clean", f":{plugin_dir.name}:jar", "--no-configuration-cache"] if clean else [gradle_wrapper, f":{plugin_dir.name}:jar"]
         target_jar_filename = f"{plugin_dir.name}-{base_version}.jar"
 
         print(f"\n{bold}Processing {display_name}{reset} {green}[Standard Plugin]{reset}...")

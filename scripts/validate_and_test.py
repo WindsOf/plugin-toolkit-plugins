@@ -20,7 +20,6 @@ from scripts.generate_repo import generate_repo
 from scripts.sign_jar import (
     find_jdk_tool,
     get_detached_signature,
-    repack_jar_if_needed,
     run_command,
     sign_jar,
     verify_detached_signature,
