@@ -45,24 +45,18 @@ tasks.jar {
     dependsOn(configurations.runtimeClasspath)
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     isZip64 = true
-
+    
     // Include all dependencies in the JAR except those provided by the host toolkit
     from(configurations.runtimeClasspath.get().filter { file ->
         val path = file.path
         !path.contains("plugin-api") &&
         !path.contains("kotlin-stdlib") &&
+        !path.contains("kotlin-reflect") &&
         !path.contains("kotlinx-coroutines") &&
         !path.contains("kotlinx-serialization") &&
         !path.contains("koin-core") &&
-        !path.contains("slf4j")
+        !path.contains("slf4j") &&
+        !path.contains("ktor")
     }.map { if (it.isDirectory) it else zipTree(it) })
-
-    exclude("**/.venv/**")
-    exclude("**/.env")
-    exclude("META-INF/*.RSA", "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.EC")
-    exclude("META-INF/versions/**/module-info.class")
-    exclude("module-info.class")
-    exclude("META-INF/INDEX.LIST")
-    exclude("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*")
 }
 

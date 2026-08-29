@@ -49,10 +49,12 @@ tasks.jar {
         val path = file.path
         !path.contains("plugin-api") &&
         !path.contains("kotlin-stdlib") &&
+        !path.contains("kotlin-reflect") &&
         !path.contains("kotlinx-coroutines") &&
         !path.contains("kotlinx-serialization") &&
         !path.contains("koin-core") &&
-        !path.contains("slf4j")
+        !path.contains("slf4j") &&
+        !path.contains("ktor")
     }.map { if (it.isDirectory) it else zipTree(it) })
 
     exclude("**/*.pdb")

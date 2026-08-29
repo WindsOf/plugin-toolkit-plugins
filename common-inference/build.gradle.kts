@@ -15,16 +15,9 @@ kotlin {
     }
 }
 
-val onnxVariant = providers.gradleProperty("onnxVariant").orElse("gpu").get().lowercase()
-val onnxDependency = if (onnxVariant == "cpu") {
-    libs.onnxruntime
-} else {
-    libs.onnxruntime.gpu
-}
-
 dependencies {
     api(project(":common-models"))
-    api(onnxDependency)
+    api(libs.onnxruntime.gpu)
     implementation(libs.kaml)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.cio)
