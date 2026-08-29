@@ -10,6 +10,10 @@ import re
 import zipfile
 import struct
 import zlib
+import ftplib
+import ssl
+import time
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -18,9 +22,6 @@ load_dotenv()
 
 PRIVATE_KEY_B64 = os.getenv("PLUGIN_PRIVATE_SIGNING_KEY")
 PUBLIC_KEY_B64 = os.getenv("PLUGIN_PUBLIC_SIGNING_KEY")
-
-# Set of plugins that utilize ONNX runtime and support both GPU+CPU and CPU-only variants
-AI_INFERENCE_PLUGINS = {"vision", "cleaner", "slicer"}
 
 # Modules that are shared libraries and should not be published as standalone plugins
 EXCLUDED_DIRS = {"build", "dist", "dist_backup", "gradle", "common-models", "common-inference", "commonMain", "ag-psd", "runs"}
@@ -178,31 +179,28 @@ def sign_jar(jar_path, private_key_b64):
         if not run_command(cmd):
             return False
 
-        # 4. Sign the JAR using jarsigner
-        sig_file_temp = Path(f"{jar_path}.sig")
-        if sig_file_temp.exists():
-            try:
-                sig_file_temp.unlink()
-            except Exception:
-                pass
+        # 4. Normalise local headers if Gradle left them stale (required by Java's ZipInputStream)
+        repack_jar_if_needed(jar_path)
 
+        # 5. Sign the JAR using jarsigner -signedjar to write a fresh, uncorrupted archive
+        signed_jar_temp = tmp_path / "signed_output.jar"
         jarsigner_tool = find_jdk_tool("jarsigner")
-        cmd = [jarsigner_tool, "-keystore", str(p12_file), "-storetype", "PKCS12", "-storepass", "password", "-sigalg", "SHA256withRSA", "-digestalg", "SHA-256", str(jar_path), "plugin-key"]
+        cmd = [
+            jarsigner_tool,
+            "-keystore", str(p12_file),
+            "-storetype", "PKCS12",
+            "-storepass", "password",
+            "-sigalg", "SHA256withRSA",
+            "-digestalg", "SHA-256",
+            "-signedjar", str(signed_jar_temp),
+            str(jar_path),
+            "plugin-key"
+        ]
         if not run_command(cmd):
-            sig_file_temp = Path(f"{jar_path}.sig")
-            if sig_file_temp.exists():
-                import time
-                time.sleep(0.5)
-                try:
-                    if jar_path.exists():
-                        jar_path.unlink()
-                    sig_file_temp.replace(jar_path)
-                    print(f"  [SIGN] Successfully recovered signed {jar_path.name}")
-                    return True
-                except Exception as e:
-                    print(f"  [WARN] Failed to recover .sig file: {e}")
+            print(f"  [ERROR] jarsigner failed to sign {jar_path.name}")
             return False
             
+        shutil.move(str(signed_jar_temp), str(jar_path))
         print(f"  [SIGN] Successfully signed {jar_path.name}")
         return True
 
@@ -255,21 +253,82 @@ def find_jdk_tool(tool_name):
     return tool_name
 
 
-def inject_manifest_into_jar(jar_path, manifest_data):
+def _jar_has_local_header_mismatch(jar_path):
     """
-    Updates META-INF/manifest.json inside an existing JAR file safely using the JDK jar tool.
-    """
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        meta_inf = Path(tmp_dir) / "META-INF"
-        meta_inf.mkdir(parents=True, exist_ok=True)
-        manifest_file = meta_inf / "manifest.json"
-        with open(manifest_file, "w", encoding="utf-8") as f:
-            json.dump(manifest_data, f, indent=2)
+    Returns True if any entry in the JAR has a local file header whose
+    compress_type or sizes differ from the central directory record.
 
-        jar_tool = find_jdk_tool("jar")
-        cmd = [jar_tool, "uf", str(jar_path), "-C", str(tmp_dir), "META-INF/manifest.json"]
-        if not run_command(cmd):
-            raise RuntimeError(f"Failed to update manifest in {jar_path.name}")
+    Gradle's zipTree() fat-jar task can leave local headers with stale values
+    from the source archives. Python's zipfile reads only the central directory
+    so it reports the file as valid, but Java's ZipInputStream reads local
+    headers and raises ZipException / invalid stored block lengths errors.
+    """
+    with open(jar_path, "rb") as f:
+        raw = f.read()
+    with zipfile.ZipFile(jar_path, "r") as z:
+        for info in z.infolist():
+            offset = info.header_offset
+            if raw[offset:offset + 4] != b"PK\x03\x04":
+                return True
+            # Local file header fields (little-endian): skip 4-byte sig then 26 bytes
+            lh = struct.unpack_from("<IHHHHHIIIHH", raw, offset + 4)
+            local_compress = lh[4]
+            local_compress_size = lh[7]
+            local_file_size = lh[8]
+            # Only compare 32-bit fields (ZIP64 entries use 0xFFFFFFFF placeholders)
+            cd_compress_size = info.compress_size
+            cd_file_size = info.file_size
+            if local_compress != info.compress_type:
+                return True
+            if cd_compress_size < 0xFFFFFFFF and local_compress_size != cd_compress_size:
+                return True
+            if cd_file_size < 0xFFFFFFFF and local_file_size != cd_file_size:
+                return True
+    return False
+
+
+def repack_jar_if_needed(jar_path):
+    """
+    Detects Gradle-produced fat JARs whose local file headers don't match their
+    central directory records and rewrites them so that Java's ZipInputStream can
+    read every entry without errors (prerequisite for jarsigner).
+
+    Returns True if repacking was performed, False if the JAR was already clean.
+    """
+    try:
+        if not _jar_has_local_header_mismatch(jar_path):
+            return False
+    except Exception as probe_err:
+        print(f"  [WARN] Could not probe JAR local headers ({probe_err}); attempting repack anyway.")
+
+    print(f"  [REPACK] Local-header mismatches detected in {jar_path.name}. Repacking to fix…")
+    tmp_path = jar_path.with_suffix(".repacking.jar")
+    try:
+        with zipfile.ZipFile(jar_path, "r") as src_zip:
+            with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as dst_zip:
+                for info in src_zip.infolist():
+                    data = src_zip.read(info.filename)
+                    # Write with fresh local header derived from central-directory info
+                    new_info = zipfile.ZipInfo(info.filename, date_time=info.date_time)
+                    new_info.compress_type = info.compress_type
+                    new_info.comment = info.comment
+                    new_info.extra = info.extra
+                    new_info.create_system = info.create_system
+                    new_info.create_version = info.create_version
+                    new_info.external_attr = info.external_attr
+                    dst_zip.writestr(new_info, data)
+        # Replace original with repacked version
+        tmp_path.replace(jar_path)
+        print(f"  [REPACK] Done. {jar_path.name} local headers normalised.")
+        return True
+    except Exception as repack_err:
+        print(f"  [ERROR] Repack failed: {repack_err}")
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        return False
+
+
+
 
 
 def find_assets(plugin_path):
@@ -304,7 +363,7 @@ def find_assets(plugin_path):
     return assets
 
 
-def generate_repo(name, url, output_dir, clean=False, target_plugin=None, variant_filter="all"):
+def generate_repo(name, url, output_dir, clean=False, target_plugin=None):
     root_path = Path(".").resolve()
     dist_path = root_path / output_dir
     plugins_dist_path = dist_path / "plugins"
@@ -366,9 +425,7 @@ def generate_repo(name, url, output_dir, clean=False, target_plugin=None, varian
 
     print(f"{bold}Discovered Modules ({len(plugin_dirs)}):{reset}")
     for p_dir in plugin_dirs:
-        is_ai = p_dir.name.lower() in AI_INFERENCE_PLUGINS
-        category = f"{magenta}[AI Inference: GPU+CPU & CPU-Only]{reset}" if is_ai else f"{green}[Standard / Pure Plugin]{reset}"
-        print(f"  • {bold}{p_dir.name:<24}{reset} {category}")
+        print(f"  • {bold}{p_dir.name:<24}{reset} {green}[Standard Plugin]{reset}")
     print()
 
     for plugin_dir in plugin_dirs:
@@ -386,171 +443,152 @@ def generate_repo(name, url, output_dir, clean=False, target_plugin=None, varian
 
         if target_plugin and not is_target:
             # Preserve existing entry if available
-            for candidate_pkg in [base_pkg, f"{base_pkg}.cpu"]:
-                if candidate_pkg in previous_plugins:
-                    repo_plugins.append(previous_plugins[candidate_pkg])
+            if base_pkg in previous_plugins:
+                repo_plugins.append(previous_plugins[base_pkg])
             continue
 
-        is_ai_plugin = plugin_dir.name.lower() in AI_INFERENCE_PLUGINS
+        target_pkg = base_pkg
+        display_name = base_name
+        display_desc = base_desc
+        gradle_wrapper = "gradlew.bat" if os.name == "nt" else "./gradlew"
+        gradle_args = [gradle_wrapper, f":{plugin_dir.name}:clean", f":{plugin_dir.name}:jar", "--no-configuration-cache"] if clean else [gradle_wrapper, f":{plugin_dir.name}:jar"]
+        target_jar_filename = f"{plugin_dir.name}-{base_version}.jar"
 
-        # Determine which variants to build for this plugin
-        variants_to_build = []
-        if is_ai_plugin:
-            if variant_filter in ("all", "gpu"):
-                variants_to_build.append("gpu")
-            if variant_filter in ("all", "cpu"):
-                variants_to_build.append("cpu")
-        else:
-            variants_to_build.append("standard")
+        print(f"\n{bold}Processing {display_name}{reset} {green}[Standard Plugin]{reset}...")
 
-        for variant in variants_to_build:
-            if variant == "gpu":
-                variant_label = f"{bold}{magenta}[AI Inference: GPU + CPU]{reset}"
-                target_pkg = base_pkg
-                display_name = f"{base_name} (GPU + CPU)"
-                display_desc = f"{base_desc} (GPU acceleration via CUDA / DirectML and CPU fallback)" if base_desc else "GPU + CPU accelerated build"
-                gradle_args = ["gradlew.bat", f":{plugin_dir.name}:jar", "-PonnxVariant=gpu", "--no-configuration-cache", "--rerun-tasks"]
-                target_jar_filename = f"{plugin_dir.name}-{base_version}-gpu.jar"
-            elif variant == "cpu":
-                variant_label = f"{bold}{cyan}[AI Inference: CPU-Only]{reset}"
-                target_pkg = f"{base_pkg}.cpu"
-                display_name = f"{base_name} (CPU)"
-                display_desc = f"{base_desc} (CPU inference only, lightweight build)" if base_desc else "CPU-only lightweight build"
-                gradle_args = ["gradlew.bat", f":{plugin_dir.name}:jar", "-PonnxVariant=cpu", "--no-configuration-cache", "--rerun-tasks"]
-                target_jar_filename = f"{plugin_dir.name}-{base_version}-cpu.jar"
-            else:
-                variant_label = f"{bold}{green}[Standard / Pure Plugin]{reset}"
-                target_pkg = base_pkg
-                display_name = base_name
-                display_desc = base_desc
-                gradle_args = ["gradlew.bat", f":{plugin_dir.name}:jar", "--no-configuration-cache", "--rerun-tasks"] if clean else ["gradlew.bat", f":{plugin_dir.name}:jar"]
-                target_jar_filename = f"{plugin_dir.name}-{base_version}.jar"
+        # Check if we can reuse previous build
+        should_build = True
+        if not clean and target_pkg in previous_plugins:
+            prev_p = previous_plugins[target_pkg]
+            if prev_p.get("version") == base_version:
+                stored_file = prev_p.get("fileName")
+                if stored_file:
+                    target_jar_path = plugins_dist_path / target_pkg / stored_file
+                    manifest_path = plugins_dist_path / target_pkg / "manifest.json"
+                    if target_jar_path.exists() and manifest_path.exists():
+                        # Validate cached JAR integrity before reusing it.
+                        # A previous failed jarsigner run can leave a corrupted file.
+                        jar_is_valid = False
+                        try:
+                            with zipfile.ZipFile(target_jar_path, 'r') as _zf:
+                                bad_entry = _zf.testzip()
+                                jar_is_valid = bad_entry is None
+                            if not jar_is_valid:
+                                print(f"  [WARN] Cached JAR for {target_pkg} is corrupted (bad entry: {bad_entry}). Forcing rebuild.")
+                        except Exception as _zip_err:
+                            print(f"  [WARN] Cached JAR for {target_pkg} failed integrity check ({_zip_err}). Forcing rebuild.")
 
-            print(f"\n{bold}Processing {display_name}{reset} {variant_label}...")
-
-            # Check if we can reuse previous build
-            should_build = True
-            if not clean and target_pkg in previous_plugins:
-                prev_p = previous_plugins[target_pkg]
-                if prev_p.get("version") == base_version:
-                    stored_file = prev_p.get("fileName")
-                    if stored_file:
-                        target_jar_path = plugins_dist_path / target_pkg / stored_file
-                        manifest_path = plugins_dist_path / target_pkg / "manifest.json"
-                        if target_jar_path.exists() and manifest_path.exists():
+                        if jar_is_valid:
                             print(f"  -> Reusing existing build for {target_pkg} v{base_version}")
                             repo_plugins.append(prev_p)
                             should_build = False
 
-            if not should_build:
+        if not should_build:
+            continue
+
+        # Execute Gradle build
+        if not run_command(gradle_args, cwd=str(root_path)):
+            print(f"  [ERROR] Failed to compile {plugin_dir.name}, skipping.")
+            continue
+
+        assets = find_assets(plugin_dir)
+
+        # Load or construct manifest
+        manifest_path = assets.get("manifest")
+        build_manifest = plugin_dir / "build" / "resources" / "main" / "META-INF" / "manifest.json"
+        if build_manifest.exists():
+            manifest_path = build_manifest
+
+        if not manifest_path or not manifest_path.exists():
+            print(f"  [ERROR] No manifest.json found for {plugin_dir.name}, skipping.")
+            continue
+
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+
+        # Fix optional settings in manifest
+        optional_settings = find_optional_settings(plugin_dir)
+        if "settings" in manifest and manifest["settings"] is not None:
+            for sname, sdata in manifest["settings"].items():
+                if sname in optional_settings:
+                    sdata["required"] = False
+
+        # Update manifest metadata
+        if "plugin" not in manifest:
+            manifest["plugin"] = {}
+
+        manifest["plugin"]["id"] = target_pkg
+        manifest["plugin"]["name"] = display_name
+        manifest["plugin"]["version"] = base_version
+        manifest["plugin"]["description"] = display_desc
+        manifest["plugin"]["targetAppVersion"] = default_target_version
+        if "requirements" not in manifest:
+            manifest["requirements"] = {}
+        manifest["requirements"]["targetAppVersion"] = default_target_version
+        manifest["targetAppVersion"] = default_target_version
+
+        # Find built JAR
+        jar_dir = plugin_dir / "build" / "libs"
+        primary_jar = jar_dir / f"{plugin_dir.name}.jar"
+        if primary_jar.exists():
+            source_jar = primary_jar
+        else:
+            jars = [j for j in jar_dir.glob("*.jar") if not "tmp" in j.name and not "sanitized" in j.name]
+            if not jars:
+                print(f"  [ERROR] No JAR found in {jar_dir}, skipping.")
                 continue
+            source_jar = jars[0]
 
-            # Execute Gradle build
-            if not run_command(gradle_args, cwd=str(root_path)):
-                print(f"  [ERROR] Failed to compile {plugin_dir.name} ({variant}), skipping.")
-                continue
+        # Prepare dist directory for this package
+        pkg_dist_path = plugins_dist_path / target_pkg
+        pkg_dist_path.mkdir(parents=True, exist_ok=True)
+        for item in pkg_dist_path.iterdir():
+            try:
+                if item.is_file() or item.is_symlink():
+                    item.unlink()
+                elif item.is_dir():
+                    shutil.rmtree(item, ignore_errors=True)
+            except Exception:
+                pass
 
-            assets = find_assets(plugin_dir)
+        target_jar_path = pkg_dist_path / target_jar_filename
+        shutil.copy2(source_jar, target_jar_path)
 
-            # Load or construct manifest
-            manifest_path = assets.get("manifest")
-            build_manifest = plugin_dir / "build" / "resources" / "main" / "META-INF" / "manifest.json"
-            if build_manifest.exists():
-                manifest_path = build_manifest
+        # Sign the JAR in the dist folder
+        sign_jar(target_jar_path, PRIVATE_KEY_B64)
 
-            if not manifest_path or not manifest_path.exists():
-                print(f"  [ERROR] No manifest.json found for {plugin_dir.name}, skipping.")
-                continue
+        # Compute detached signature and hash
+        jar_hash, jar_sig = get_detached_signature(target_jar_path, PRIVATE_KEY_B64)
 
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                manifest = json.load(f)
+        # Copy assets to dist
+        if "changelog" in assets:
+            shutil.copy2(assets["changelog"], pkg_dist_path / "changelog.md")
+        if "icon" in assets:
+            shutil.copy2(assets["icon"], pkg_dist_path / f"icon{assets['icon'].suffix}")
 
-            # Fix optional settings in manifest
-            optional_settings = find_optional_settings(plugin_dir)
-            if "settings" in manifest and manifest["settings"] is not None:
-                for sname, sdata in manifest["settings"].items():
-                    if sname in optional_settings:
-                        sdata["required"] = False
+        # Save manifest in dist folder
+        with open(pkg_dist_path / "manifest.json", "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
 
-            # Update manifest metadata for variant
-            if "plugin" not in manifest:
-                manifest["plugin"] = {}
+        file_size_mb = target_jar_path.stat().st_size / (1024 * 1024)
 
-            manifest["plugin"]["id"] = target_pkg
-            manifest["plugin"]["name"] = display_name
-            manifest["plugin"]["version"] = base_version
-            manifest["plugin"]["description"] = display_desc
-            manifest["plugin"]["targetAppVersion"] = default_target_version
-            if "requirements" not in manifest:
-                manifest["requirements"] = {}
-            manifest["requirements"]["targetAppVersion"] = default_target_version
-            manifest["targetAppVersion"] = default_target_version
+        plugin_entry = {
+            "name": display_name,
+            "pkg": target_pkg,
+            "version": base_version,
+            "fileName": target_jar_filename,
+            "description": display_desc,
+            "targetAppVersion": manifest["plugin"]["targetAppVersion"],
+        }
 
-            # Find built JAR
-            jar_dir = plugin_dir / "build" / "libs"
-            primary_jar = jar_dir / f"{plugin_dir.name}.jar"
-            if primary_jar.exists():
-                source_jar = primary_jar
-            else:
-                jars = [j for j in jar_dir.glob("*.jar") if not "tmp" in j.name and not "sanitized" in j.name]
-                if not jars:
-                    print(f"  [ERROR] No JAR found in {jar_dir}, skipping.")
-                    continue
-                source_jar = jars[0]
+        if jar_hash:
+            plugin_entry["hash"] = jar_hash
+        if jar_sig:
+            plugin_entry["signature"] = jar_sig
 
-            # Prepare dist directory for this package
-            pkg_dist_path = plugins_dist_path / target_pkg
-            pkg_dist_path.mkdir(parents=True, exist_ok=True)
-            for item in pkg_dist_path.iterdir():
-                try:
-                    if item.is_file() or item.is_symlink():
-                        item.unlink()
-                    elif item.is_dir():
-                        shutil.rmtree(item, ignore_errors=True)
-                except Exception:
-                    pass
+        repo_plugins.append(plugin_entry)
 
-            target_jar_path = pkg_dist_path / target_jar_filename
-            shutil.copy2(source_jar, target_jar_path)
-
-            # Inject updated manifest inside the JAR
-            inject_manifest_into_jar(target_jar_path, manifest)
-
-            # Sign the JAR in the dist folder
-            sign_jar(target_jar_path, PRIVATE_KEY_B64)
-
-            # Compute detached signature and hash
-            jar_hash, jar_sig = get_detached_signature(target_jar_path, PRIVATE_KEY_B64)
-
-            # Copy assets to dist
-            if "changelog" in assets:
-                shutil.copy2(assets["changelog"], pkg_dist_path / "changelog.md")
-            if "icon" in assets:
-                shutil.copy2(assets["icon"], pkg_dist_path / f"icon{assets['icon'].suffix}")
-
-            # Save manifest in dist folder
-            with open(pkg_dist_path / "manifest.json", "w", encoding="utf-8") as f:
-                json.dump(manifest, f, indent=2)
-
-            file_size_mb = target_jar_path.stat().st_size / (1024 * 1024)
-
-            plugin_entry = {
-                "name": display_name,
-                "pkg": target_pkg,
-                "version": base_version,
-                "fileName": target_jar_filename,
-                "description": display_desc,
-                "targetAppVersion": manifest["plugin"]["targetAppVersion"],
-            }
-
-            if jar_hash:
-                plugin_entry["hash"] = jar_hash
-            if jar_sig:
-                plugin_entry["signature"] = jar_sig
-
-            repo_plugins.append(plugin_entry)
-
-            print(f"  -> {green}Added {display_name} v{base_version} ({target_pkg}) [{file_size_mb:.2f} MB]{reset}")
+        print(f"  -> {green}Added {display_name} v{base_version} ({target_pkg}) [{file_size_mb:.2f} MB]{reset}")
 
     # Clean up stale plugins in dist
     active_pkgs = {p["pkg"] for p in repo_plugins}
@@ -661,32 +699,319 @@ def generate_repo(name, url, output_dir, clean=False, target_plugin=None, varian
     print(f"Total flows:   {len(repo_flows)}\n")
 
 
+def connect_ftp(host, port, user, password, secure=True, timeout=60, passive=True):
+    """
+    Connects to the remote FTP/FTPS server.
+    If secure=True, attempts FTPS (explicit TLS) first, falling back to plain FTP if TLS is not supported.
+    """
+    ftp = None
+    if secure:
+        try:
+            ftp = ftplib.FTP_TLS(timeout=timeout)
+            ftp.connect(host, port)
+            ftp.login(user, password)
+            ftp.prot_p()  # Switch data transfer channel to TLS
+            ftp.set_pasv(passive)
+            return ftp, "FTPS (Explicit TLS)"
+        except Exception as e:
+            print(f"  [FTP] FTPS failed ({e}). Falling back to standard FTP...")
+            if ftp is not None:
+                try:
+                    ftp.close()
+                except Exception:
+                    pass
+
+    ftp = ftplib.FTP(timeout=timeout)
+    ftp.connect(host, port)
+    ftp.login(user, password)
+    ftp.set_pasv(passive)
+    return ftp, "FTP (Plain)"
+
+
+def ensure_remote_dir(ftp, remote_dir_path, start_from_root=False):
+    """
+    Recursively ensures that remote_dir_path exists on the FTP server and navigates into it.
+    If start_from_root is True or remote_dir_path starts with '/', starts navigation from '/'.
+    Otherwise, navigates relative to the current working directory.
+    """
+    norm_path = remote_dir_path.replace("\\", "/").strip()
+    if not norm_path or norm_path == ".":
+        return
+
+    is_absolute = start_from_root or norm_path.startswith("/")
+    clean_path = norm_path.strip("/")
+
+    if is_absolute:
+        try:
+            ftp.cwd("/")
+        except Exception:
+            pass
+
+    parts = [p for p in clean_path.split("/") if p]
+    for part in parts:
+        try:
+            ftp.cwd(part)
+        except ftplib.error_perm:
+            try:
+                ftp.mkd(part)
+                ftp.cwd(part)
+            except ftplib.error_perm as e:
+                try:
+                    ftp.cwd(part)
+                except ftplib.error_perm:
+                    curr_pwd = "?"
+                    try:
+                        curr_pwd = ftp.pwd()
+                    except Exception:
+                        pass
+                    raise ftplib.error_perm(
+                        f"Failed to access or create directory '{part}' in '{curr_pwd}'. Error: {e}"
+                    )
+
+
+def resolve_and_ensure_remote_base_dir(ftp, remote_base_dir):
+    """
+    Navigates to remote_base_dir. If direct navigation from '/' fails,
+    checks if a domain directory (e.g. www.windsofresub.cloud) exists that contains remote_base_dir.
+    """
+    # 1. Try direct navigation from root
+    try:
+        ensure_remote_dir(ftp, remote_base_dir, start_from_root=True)
+        return ftp.pwd()
+    except Exception:
+        pass
+
+    # 2. Check if a domain folder exists in root (common on shared hosts like Aruba/cPanel)
+    try:
+        ftp.cwd("/")
+        entries = []
+        try:
+            entries = ftp.nlst()
+        except Exception:
+            pass
+
+        for entry in entries:
+            clean_entry = entry.strip("/")
+            candidate = f"{clean_entry}/{remote_base_dir.strip('/')}"
+            try:
+                ensure_remote_dir(ftp, candidate, start_from_root=True)
+                print(f"  [FTP] Auto-detected domain directory: using '{candidate}'")
+                return ftp.pwd()
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    # 3. If auto-detection didn't succeed, re-try direct with full error message
+    ensure_remote_dir(ftp, remote_base_dir, start_from_root=True)
+    return ftp.pwd()
+
+
+def get_remote_file_size(ftp, filename):
+    """
+    Returns remote file size in bytes using SIZE command, or None if unavailable/error.
+    """
+    try:
+        return ftp.size(filename)
+    except (ftplib.error_perm, ftplib.error_reply, Exception):
+        return None
+
+
+def upload_file_with_progress(ftp, local_file_path, remote_filename, force=False):
+    """
+    Uploads a single local file to the current remote directory with smart skip and progress output.
+    """
+    local_size = local_file_path.stat().st_size
+    local_size_mb = local_size / (1024 * 1024)
+
+    # Check if we can skip unchanged files (except metadata files like index.json and manifest.json)
+    is_metadata = remote_filename in ("index.json", "manifest.json")
+    if not force and not is_metadata:
+        remote_size = get_remote_file_size(ftp, remote_filename)
+        if remote_size is not None and remote_size == local_size:
+            print(f"  -> [SKIP] {remote_filename} ({local_size_mb:.2f} MB) already up to date on server.")
+            return True
+
+    uploaded_bytes = 0
+    last_reported_pct = -1
+    start_time = time.time()
+    large_file = local_size > 5 * 1024 * 1024  # > 5 MB
+
+    def progress_callback(chunk):
+        nonlocal uploaded_bytes, last_reported_pct
+        uploaded_bytes += len(chunk)
+        if large_file:
+            pct = int((uploaded_bytes / local_size) * 100)
+            if pct != last_reported_pct and (pct % 10 == 0 or pct == 100):
+                elapsed = max(time.time() - start_time, 0.001)
+                speed_mbps = (uploaded_bytes / (1024 * 1024)) / elapsed
+                sys.stdout.write(f"\r     Uploading {remote_filename}: {pct}% ({uploaded_bytes / (1024*1024):.1f}/{local_size_mb:.1f} MB, {speed_mbps:.2f} MB/s)  ")
+                sys.stdout.flush()
+                last_reported_pct = pct
+
+    with open(local_file_path, "rb") as f:
+        ftp.storbinary(f"STOR {remote_filename}", f, blocksize=65536, callback=progress_callback)
+
+    if large_file:
+        print()  # Print newline after progress updates
+    print(f"  -> [UPLOADED] {remote_filename} ({local_size_mb:.2f} MB)")
+    return True
+
+
+def upload_to_ftp(output_dir="dist", force=False, dry_run=False):
+    """
+    Synchronizes the output_dir to the configured FTP/FTPS server.
+    """
+    host = os.getenv("FTP_HOST")
+    user = os.getenv("FTP_USER") or os.getenv("FTP_USERNAME")
+    password = os.getenv("FTP_PASS") or os.getenv("FTP_PASSWORD")
+    port_str = os.getenv("FTP_PORT", "21")
+    remote_base_dir = os.getenv("FTP_DIR") or os.getenv("FTP_PATH") or os.getenv("FTP_REMOTE_DIR") or "plugins"
+    secure_str = os.getenv("FTP_SECURE", os.getenv("FTP_TLS", "true")).lower()
+    secure = secure_str not in ("0", "false", "no", "off")
+    timeout = int(os.getenv("FTP_TIMEOUT", "60"))
+
+    if not host or not user or not password:
+        print("\n[ERROR] FTP credentials not configured in environment or .env file.")
+        print("Please configure the following keys in your .env file:")
+        print("  FTP_HOST=ftp.windsofresub.cloud")
+        print("  FTP_USER=your_ftp_username")
+        print("  FTP_PASS=your_ftp_password")
+        print("  FTP_DIR=www.windsofresub.cloud/plugins  (or plugins)")
+        print("  FTP_PORT=21                            (optional, default: 21)")
+        print("  FTP_TLS=true                           (optional, default: true)")
+        return False
+
+    try:
+        port = int(port_str)
+    except ValueError:
+        print(f"[ERROR] Invalid FTP_PORT: '{port_str}'. Must be an integer.")
+        return False
+
+    dist_path = Path(output_dir).resolve()
+    if not dist_path.exists():
+        print(f"[ERROR] Output directory '{output_dir}' does not exist.")
+        return False
+
+    prefix = "[DRY RUN] " if dry_run else ""
+    print(f"\n{prefix}[FTP] Connecting to {host}:{port} as '{user}'...")
+
+    try:
+        ftp, mode_str = connect_ftp(host, port, user, password, secure=secure, timeout=timeout)
+        print(f"{prefix}[FTP] Connected successfully via {mode_str}.")
+    except Exception as e:
+        print(f"[ERROR] Failed to connect or authenticate to FTP server ({host}:{port}): {e}")
+        return False
+
+    try:
+        # Navigate or create remote base directory
+        print(f"{prefix}[FTP] Navigating to remote directory: '{remote_base_dir}'")
+        base_remote_pwd = resolve_and_ensure_remote_base_dir(ftp, remote_base_dir)
+        print(f"{prefix}[FTP] Remote working directory is: '{base_remote_pwd}'")
+
+        # Collect all files to upload from dist_path (excluding .git and backup/temp files)
+        all_files = []
+        for root, dirs, files in os.walk(dist_path):
+            dirs[:] = [d for d in dirs if d != ".git"]
+            for file in files:
+                if file.startswith(".git") or file.endswith((".orig", ".bak", ".tmp", ".sig")):
+                    continue
+                full_path = Path(root) / file
+                rel_path = full_path.relative_to(dist_path)
+                all_files.append((full_path, rel_path))
+
+        # Always upload index.json last to guarantee repository consistency
+        all_files.sort(key=lambda item: 1 if item[1].name == "index.json" else 0)
+
+        action_desc = "Simulating synchronization of" if dry_run else "Synchronizing"
+        print(f"{prefix}[FTP] {action_desc} {len(all_files)} files from '{output_dir}/' to '{base_remote_pwd}'...\n")
+
+        for local_file, rel_path in all_files:
+            # Change back to base_remote_pwd
+            ftp.cwd(base_remote_pwd)
+
+            # If the file is in a subdirectory (e.g. plugins/com.wip.slicer/slicer.jar)
+            rel_parent = rel_path.parent
+            if str(rel_parent) != ".":
+                ensure_remote_dir(ftp, str(rel_parent).replace("\\", "/"), start_from_root=False)
+
+            if dry_run:
+                local_size = local_file.stat().st_size
+                local_size_mb = local_size / (1024 * 1024)
+                is_metadata = rel_path.name in ("index.json", "manifest.json")
+                remote_size = get_remote_file_size(ftp, rel_path.name)
+                rel_str = str(rel_path).replace("\\", "/")
+                if not force and not is_metadata and remote_size == local_size:
+                    print(f"  -> [DRY RUN SKIP] {rel_str} ({local_size_mb:.2f} MB) - already up to date on server.")
+                else:
+                    print(f"  -> [DRY RUN UPLOAD] Would upload {rel_str} ({local_size_mb:.2f} MB)")
+            else:
+                upload_file_with_progress(ftp, local_file, rel_path.name, force=force)
+
+        if dry_run:
+            print(f"\n[DRY RUN] Verification successful! Connection, credentials, and '{base_remote_pwd}' were verified.")
+        else:
+            print(f"\n[FTP] Repository successfully deployed to {host}:{base_remote_pwd}!")
+        return True
+
+    except Exception as e:
+        print(f"\n[ERROR] An error occurred during FTP operation: {e}")
+        return False
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            try:
+                ftp.close()
+            except Exception:
+                pass
+
+
+
 def push_to_git(output_dir):
     dist_path = Path(output_dir).resolve()
     if not (dist_path / ".git").exists():
         print(f"Error: '{output_dir}' is not a git repository. Cannot push.")
-        return
-        
-    print(f"\nPushing changes in '{output_dir}' to remote...")
-    
+        return False
+
+    print(f"\nPushing changes in '{output_dir}' to remote git repository...")
+
     if not run_command(["git", "add", "."], cwd=str(dist_path)):
         print("Failed to add files.")
-        return
-        
+        return False
+
     status = subprocess.run(["git", "status", "--porcelain"], cwd=str(dist_path), capture_output=True, text=True)
     if not status.stdout.strip():
         print("No changes to commit in dist folder.")
-        return
-        
+        return True
+
     if not run_command(["git", "commit", "-m", "Auto-update plugins via generate_repo.py"], cwd=str(dist_path)):
         print("Failed to commit changes.")
-        return
-        
+        return False
+
     if not run_command(["git", "push"], cwd=str(dist_path)):
         print("Failed to push changes.")
-        return
-        
-    print("Successfully pushed changes to remote repository.")
+        return False
+
+    print("Successfully pushed changes to remote git repository.")
+    return True
+
+
+def deploy_repository(output_dir, force=False, dry_run=False):
+    """
+    Deploys repository: prefers FTP if FTP_HOST is configured in .env,
+    otherwise falls back to git push if dist/.git exists.
+    """
+    has_ftp_config = bool(os.getenv("FTP_HOST"))
+    dist_has_git = (Path(output_dir).resolve() / ".git").exists()
+
+    if has_ftp_config:
+        return upload_to_ftp(output_dir, force=force, dry_run=dry_run)
+    elif dist_has_git:
+        return push_to_git(output_dir)
+    else:
+        # Prompt user with FTP setup instructions
+        return upload_to_ftp(output_dir, force=force, dry_run=dry_run)
 
 
 if __name__ == "__main__":
@@ -697,8 +1022,9 @@ if __name__ == "__main__":
     parser.add_argument("--out", help="Output directory")
     parser.add_argument("--clean", action="store_true", help="Force clean build (recompile target or all plugins)")
     parser.add_argument("--force", action="store_true", help="Force regenerate (recompile target or all plugins)")
-    parser.add_argument("--variant", choices=["all", "gpu", "cpu"], default="all", help="Plugin variant to build for AI plugins: all, gpu, or cpu (default: all)")
-    parser.add_argument("--push", action="store_true", help="Automatically commit and push the output directory to git")
+    parser.add_argument("--push", action="store_true", help="Automatically upload/push the output directory (prefers FTP if configured, else Git)")
+    parser.add_argument("--ftp", action="store_true", help="Upload the output directory directly to FTP server")
+    parser.add_argument("--ftp-dry-run", action="store_true", help="Simulate FTP upload without sending files")
 
     args = parser.parse_args()
 
@@ -728,9 +1054,10 @@ if __name__ == "__main__":
         config["url"],
         config["out"],
         clean=clean_build,
-        target_plugin=args.plugin,
-        variant_filter=args.variant
+        target_plugin=args.plugin
     )
 
-    if args.push:
-        push_to_git(config["out"])
+    if args.ftp or args.ftp_dry_run:
+        upload_to_ftp(config["out"], force=clean_build, dry_run=args.ftp_dry_run)
+    elif args.push:
+        deploy_repository(config["out"], force=clean_build, dry_run=args.ftp_dry_run)

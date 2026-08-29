@@ -163,4 +163,16 @@ class SlicerTest {
             prev = cut
         }
     }
+
+    @Test
+    fun testSlicerModelEnums() {
+        assertEquals("yolo-det-x-best-v3", SlicerModel.YOLO_DET_X.modelId)
+        assertEquals(SlicerModel.YOLO_DET_X, SlicerModel.fromModelId("yolo-det-x-best-v3"))
+        assertEquals(SlicerModel.YOLO_DET_X, SlicerModel.fromModelId("YOLO-DET-X-BEST-V3"))
+        assertEquals(null, SlicerModel.fromModelId("unknown-model"))
+
+        assertEquals("yolo-det-x-best-v3", SlicerDownloadModel.YOLO_DET_X.modelId)
+        assertEquals(SlicerDownloadModel.YOLO_DET_X, SlicerDownloadModel.fromModelId("yolo-det-x-best-v3"))
+        assertEquals(1, SlicerDownloadModel.entries.size)
+    }
 }

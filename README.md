@@ -34,9 +34,28 @@ A collection of high-performance Kotlin plugins for manhwa and webtoon processin
 # Run unit tests across all modules
 ./gradlew test
 
-# Generate and sign the complete plugin repository (both GPU and CPU variants)
+# Generate and sign the complete plugin repository
 python generate_repo.py --force
+
+# Generate and deploy to server via FTP
+python generate_repo.py --push
 
 # Verify repository signatures, hashes, and metadata
 python verify_repo.py
 ```
+
+## Repository Deployment Configuration
+
+For repository hosting (e.g. on `www.windsofresub.cloud/plugins/`), configure FTP credentials in your `.env` file:
+
+```env
+FTP_HOST=ftp.windsofresub.cloud
+FTP_USER=your_ftp_username
+FTP_PASS=your_ftp_password
+FTP_DIR=plugins
+FTP_PORT=21
+FTP_TLS=true
+```
+
+Running `python generate_repo.py --push` will automatically upload new or modified plugin JARs, flows, icons, changelogs, and `index.json` to the target server directory via FTPS/FTP.
+

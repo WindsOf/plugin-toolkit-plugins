@@ -74,7 +74,13 @@ class Slicer {
     suspend fun checkLocks(context: PluginContext): Map<String, Boolean> {
         val logger = context.logger
         logger.info("[Slicer] checkLocks: Checking model locks...")
-        val locks = ModelManager.Default.getLocksState(context.fileSystem, logger)
+        val locks = mutableMapOf<String, Boolean>()
+        for (model in SlicerModel.entries) {
+            val installed = ModelManager.Default.isModelInstalled(model.modelId, context.fileSystem, logger)
+            logger.info("[Slicer] checkLocks: SlicerModel ${model.name} (${model.modelId}) installed: $installed")
+            locks["model:${model.modelId}"] = installed
+            locks[model.modelId] = installed
+        }
         logger.info("[Slicer] checkLocks: Locks check completed: $locks")
         return locks
     }
@@ -83,15 +89,20 @@ class Slicer {
         name = "Download Model",
         description = "Downloads a specific ONNX model and descriptor to local plugin storage"
     )
-    suspend fun downloadModel(modelName: String, context: PluginContext) {
+    suspend fun downloadModel(
+        @CapabilityParam(description = "Select model to download", defaultValue = "\"YOLO_DET_X\"")
+        model: SlicerDownloadModel? = SlicerDownloadModel.YOLO_DET_X,
+        context: PluginContext
+    ) {
         val logger = context.logger
-        logger.info("[Slicer] downloadModel action triggered for: $modelName")
-        val result = ModelManager.Default.downloadModel(modelName, context)
+        val targetModel = model ?: SlicerDownloadModel.YOLO_DET_X
+        logger.info("[Slicer] downloadModel action triggered for: ${targetModel.displayName} (${targetModel.modelId})")
+        val result = ModelManager.Default.downloadModel(targetModel.modelId, context)
         if (result.isFailure) {
-            logger.error("[Slicer] downloadModel action failed for $modelName: ${result.exceptionOrNull()?.message}")
-            throw result.exceptionOrNull() ?: RuntimeException("Failed to download model $modelName")
+            logger.error("[Slicer] downloadModel action failed for ${targetModel.modelId}: ${result.exceptionOrNull()?.message}")
+            throw result.exceptionOrNull() ?: RuntimeException("Failed to download model ${targetModel.modelId}")
         }
-        logger.info("[Slicer] downloadModel action succeeded for: $modelName")
+        logger.info("[Slicer] downloadModel action succeeded for: ${targetModel.modelId}")
     }
 
     @PluginAction(
@@ -101,10 +112,11 @@ class Slicer {
     suspend fun downloadAllModels(context: PluginContext) {
         val logger = context.logger
         logger.info("[Slicer] downloadAllModels action triggered")
-        val result = ModelManager.Default.downloadAllModels(context)
+        val slicerModelIds = SlicerDownloadModel.entries.map { it.modelId }
+        val result = ModelManager.Default.downloadModels(slicerModelIds, context)
         if (result.isFailure) {
             logger.error("[Slicer] downloadAllModels action failed: ${result.exceptionOrNull()?.message}")
-            throw result.exceptionOrNull() ?: RuntimeException("Failed to download all models")
+            throw result.exceptionOrNull() ?: RuntimeException("Failed to download all slicer models")
         }
         logger.info("[Slicer] downloadAllModels action succeeded")
     }
