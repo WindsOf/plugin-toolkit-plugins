@@ -276,4 +276,145 @@ class InpaintingUtilsTest {
         assertEquals(width, debugImg.width)
         assertEquals(height, debugImg.height)
     }
+
+    @Test
+    fun testSnapToMultiple() {
+        assertEquals(32, ImageTensorUtils.snapToMultiple(10, 32))
+        assertEquals(32, ImageTensorUtils.snapToMultiple(32, 32))
+        assertEquals(64, ImageTensorUtils.snapToMultiple(33, 32))
+        assertEquals(256, ImageTensorUtils.snapToMultiple(250, 32))
+    }
+
+    @Test
+    fun testAnalyzeRegionHomogeneitySolidWhite() {
+        val width = 100
+        val height = 100
+        val img = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+        val g = img.createGraphics()
+        g.color = Color.WHITE
+        g.fillRect(0, 0, width, height)
+        g.color = Color.BLACK
+        g.fillRect(30, 30, 40, 40) // Masked text
+        g.dispose()
+
+        val mask = BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY)
+        val gM = mask.createGraphics()
+        gM.color = Color.BLACK
+        gM.fillRect(0, 0, width, height)
+        gM.color = Color.WHITE
+        gM.fillRect(30, 30, 40, 40)
+        gM.dispose()
+
+        val region = SliceWindow(20, 20, 60, 60)
+        val result = InpaintingUtils.analyzeRegionHomogeneity(img, mask, region)
+
+        assertTrue(result.isHomogeneous, "Solid white bubble background must be detected as homogeneous")
+        assertEquals(255, result.meanR)
+        assertEquals(255, result.meanG)
+        assertEquals(255, result.meanB)
+        assertTrue(result.stdDev <= 1.0)
+    }
+
+    @Test
+    fun testAnalyzeRegionHomogeneityGradient() {
+        val width = 100
+        val height = 100
+        val img = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val shade = (100 + x).coerceIn(0, 255)
+                val rgb = (shade shl 16) or (shade shl 8) or shade
+                img.setRGB(x, y, rgb)
+            }
+        }
+
+        val mask = BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY)
+        val gM = mask.createGraphics()
+        gM.color = Color.BLACK
+        gM.fillRect(0, 0, width, height)
+        gM.color = Color.WHITE
+        gM.fillRect(30, 30, 40, 40)
+        gM.dispose()
+
+        val region = SliceWindow(20, 20, 60, 60)
+        val result = InpaintingUtils.analyzeRegionHomogeneity(img, mask, region)
+
+        assertTrue(result.isGradient, "Smooth linear X-gradient must be detected as gradient")
+        assertTrue(result.aR > 0.5, "Gradient slope aR must be positive along X-axis")
+    }
+
+    @Test
+    fun testInpaintProductionHybridSolid() {
+        val width = 100
+        val height = 100
+        val img = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+        val g = img.createGraphics()
+        g.color = Color.WHITE
+        g.fillRect(0, 0, width, height)
+        g.color = Color.BLACK
+        g.fillRect(35, 35, 30, 30) // Text
+        g.dispose()
+
+        val mask = BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY)
+        val gM = mask.createGraphics()
+        gM.color = Color.BLACK
+        gM.fillRect(0, 0, width, height)
+        gM.color = Color.WHITE
+        gM.fillRect(35, 35, 30, 30)
+        gM.dispose()
+
+        val cleaned = InpaintingUtils.inpaintProductionHybrid(
+            sourceImage = img,
+            mask = mask,
+            deterministicFill = true
+        )
+
+        val centerRgb = cleaned.getRGB(50, 50)
+        val r = (centerRgb shr 16) and 0xFF
+        val gChan = (centerRgb shr 8) and 0xFF
+        val b = centerRgb and 0xFF
+
+        assertEquals(255, r)
+        assertEquals(255, gChan)
+        assertEquals(255, b)
+    }
+
+    @Test
+    fun testInpaintProductionHybridIsolatedAlpha() {
+        val width = 100
+        val height = 100
+        val img = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+        val g = img.createGraphics()
+        g.color = Color.WHITE
+        g.fillRect(0, 0, width, height)
+        g.color = Color.BLACK
+        g.fillRect(35, 35, 30, 30)
+        g.dispose()
+
+        val mask = BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY)
+        val gM = mask.createGraphics()
+        gM.color = Color.BLACK
+        gM.fillRect(0, 0, width, height)
+        gM.color = Color.WHITE
+        gM.fillRect(35, 35, 30, 30)
+        gM.dispose()
+
+        val isolated = InpaintingUtils.inpaintProductionHybridIsolated(
+            sourceImage = img,
+            mask = mask,
+            deterministicFill = true
+        )
+
+        assertEquals(width, isolated.width)
+        assertEquals(height, isolated.height)
+
+        // Pixel outside mask (10, 10) must be fully transparent (alpha == 0)
+        val outAlpha = (isolated.getRGB(10, 10) ushr 24) and 0xFF
+        assertEquals(0, outAlpha)
+
+        // Pixel inside mask (50, 50) must be visible (alpha == 255)
+        val inAlpha = (isolated.getRGB(50, 50) ushr 24) and 0xFF
+        assertEquals(255, inAlpha)
+    }
 }
+

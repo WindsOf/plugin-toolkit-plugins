@@ -2,7 +2,6 @@ package com.wip.cleaner
 
 import com.wip.common.models.ChapterVisionResult
 import com.wip.common.models.DetectionBox
-import com.wip.common.models.InpaintingModel
 import com.wip.common.models.PolygonPoint
 import com.wip.common.models.SegmentedObject
 import com.wip.common.models.VisionResult
@@ -337,4 +336,171 @@ class CleanerPluginTest {
             assertTrue(insideAlpha > 0, "Inpainted patch pixel should be visible (alpha > 0)")
         }
     }
+
+    @Test
+    fun testCleanImageHybridDeterministic() {
+        val cleaner = CleanerPlugin()
+        val tempDir = File("build/tmp/test_clean_hybrid").apply {
+            if (exists()) deleteRecursively()
+            mkdirs()
+        }
+        val outDir = File(tempDir, "cleaned").apply { mkdirs() }
+
+        val testImage = File(tempDir, "balloon_page.png")
+        val img = BufferedImage(150, 150, BufferedImage.TYPE_INT_RGB)
+        val g = img.createGraphics()
+        g.color = Color.WHITE
+        g.fillRect(0, 0, 150, 150)
+        g.color = Color.BLACK
+        g.fillRect(30, 30, 40, 20) // Black text inside white balloon
+        g.dispose()
+        ImageIO.write(img, "png", testImage)
+
+        val textObj = SegmentedObject(
+            label = "text",
+            confidence = 0.99,
+            box = DetectionBox("text", 0.99, 0.2, 0.2, 0.5, 0.4),
+            polygon = listOf(
+                PolygonPoint(0.2, 0.2),
+                PolygonPoint(0.5, 0.2),
+                PolygonPoint(0.5, 0.4),
+                PolygonPoint(0.2, 0.4)
+            )
+        )
+        val vResult = VisionResult(
+            objects = listOf(textObj),
+            imageWidth = 150,
+            imageHeight = 150,
+            pageName = "balloon_page.png"
+        )
+
+        val logger = FakeLogger()
+        val progress = FakeProgress()
+        val pluginFs = mockk<PluginFileSystem>(relaxed = true) {
+            coEvery { readFile(any()) } returns null
+            coEvery { exists(any()) } returns false
+        }
+        val hostFs = mockk<HostFileSystem>(relaxed = true)
+
+        val context = mockk<PluginContext>(relaxed = true) {
+            every { this@mockk.logger } returns logger
+            every { this@mockk.progress } returns progress
+            every { this@mockk.fileSystem } returns pluginFs
+        }
+
+        runBlocking {
+            val result = cleaner.cleanImageHybrid(
+                imagePath = testImage.absolutePath,
+                segmentationData = vResult,
+                outputDir = outDir.absolutePath,
+                model = InpaintingModel.MANGA,
+                strategy = CleaningStrategy.AUTO_HYBRID,
+                targetClasses = listOf("text"),
+                dilationRadius = 2,
+                adaptivePadding = true,
+                context = context,
+                hostFs = hostFs
+            )
+
+            assertTrue(File(result.cleanedImagePath).exists())
+            val cleanedImg = ImageIO.read(File(result.cleanedImagePath))
+
+            // Center of text area (45, 40) should be filled pure white (RGB 255, 255, 255)
+            val centerPixel = cleanedImg.getRGB(45, 40)
+            val r = (centerPixel shr 16) and 0xFF
+            val gChan = (centerPixel shr 8) and 0xFF
+            val b = centerPixel and 0xFF
+
+            assertEquals(255, r, "Hybrid solid balloon fill should be pure white R")
+            assertEquals(255, gChan, "Hybrid solid balloon fill should be pure white G")
+            assertEquals(255, b, "Hybrid solid balloon fill should be pure white B")
+        }
+    }
+
+    @Test
+    fun testCleanChapterHybridExecution() {
+        val cleaner = CleanerPlugin()
+        val tempDir = File("build/tmp/test_clean_chapter_hybrid").apply {
+            if (exists()) deleteRecursively()
+            mkdirs()
+        }
+        val inFolder = File(tempDir, "input").apply { mkdirs() }
+        val outFolder = File(tempDir, "output").apply { mkdirs() }
+
+        // Create 2 test pages with solid balloons
+        for (i in 1..2) {
+            val img = BufferedImage(100, 100, BufferedImage.TYPE_INT_RGB)
+            val g = img.createGraphics()
+            g.color = Color.WHITE
+            g.fillRect(0, 0, 100, 100)
+            g.color = Color.BLACK
+            g.fillRect(20, 20, 20, 20)
+            g.dispose()
+            ImageIO.write(img, "png", File(inFolder, "page_$i.png"))
+        }
+
+        val v1 = VisionResult(
+            objects = listOf(
+                SegmentedObject(
+                    label = "text",
+                    confidence = 0.95,
+                    box = DetectionBox("text", 0.95, 0.2, 0.2, 0.4, 0.4),
+                    polygon = listOf(PolygonPoint(0.2, 0.2), PolygonPoint(0.4, 0.2), PolygonPoint(0.4, 0.4), PolygonPoint(0.2, 0.4))
+                )
+            ),
+            imageWidth = 100,
+            imageHeight = 100,
+            pageName = "page_1.png"
+        )
+        val v2 = VisionResult(
+            objects = listOf(
+                SegmentedObject(
+                    label = "text",
+                    confidence = 0.95,
+                    box = DetectionBox("text", 0.95, 0.2, 0.2, 0.4, 0.4),
+                    polygon = listOf(PolygonPoint(0.2, 0.2), PolygonPoint(0.4, 0.2), PolygonPoint(0.4, 0.4), PolygonPoint(0.2, 0.4))
+                )
+            ),
+            imageWidth = 100,
+            imageHeight = 100,
+            pageName = "page_2.png"
+        )
+        val chapterVision = ChapterVisionResult(results = listOf(v1, v2), totalObjectsDetected = 2)
+
+        val logger = FakeLogger()
+        val progress = FakeProgress()
+        val pluginFs = mockk<PluginFileSystem>(relaxed = true) {
+            coEvery { readFile(any()) } returns null
+            coEvery { exists(any()) } returns false
+        }
+        val hostFs = mockk<HostFileSystem>(relaxed = true)
+
+        val context = mockk<PluginContext>(relaxed = true) {
+            every { this@mockk.logger } returns logger
+            every { this@mockk.progress } returns progress
+            every { this@mockk.fileSystem } returns pluginFs
+        }
+
+        runBlocking {
+            val result = cleaner.cleanChapterHybrid(
+                inputFolder = inFolder.absolutePath,
+                chapterVisionResult = chapterVision,
+                outputDir = outFolder.absolutePath,
+                model = InpaintingModel.MANGA,
+                strategy = CleaningStrategy.AUTO_HYBRID,
+                targetClasses = listOf("text"),
+                dilationRadius = 2,
+                adaptivePadding = true,
+                saveMasks = false,
+                context = context,
+                hostFs = hostFs
+            )
+
+            assertEquals(2, result.totalCleanedPages)
+            assertEquals(2, result.cleanedImagePaths.size)
+            assertTrue(File(result.cleanedImagePaths[0]).exists())
+            assertTrue(File(result.cleanedImagePaths[1]).exists())
+        }
+    }
 }
+

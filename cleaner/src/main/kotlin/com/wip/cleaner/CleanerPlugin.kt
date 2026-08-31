@@ -44,7 +44,7 @@ import org.wip.plugintoolkit.api.annotations.RequiresLock
 @PluginInfo(
     id = "com.wip.cleaner",
     name = "Cleaner",
-    version = "1.0.1",
+    version = "1.1.0",
     description = "Inpaints and erases segmented text and artifacts from images using segmentation maps.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
@@ -102,6 +102,26 @@ class CleanerPlugin {
                     locks["migan"] = installed
                     locks["model:migan_traced"] = installed
                     locks["migan_traced"] = installed
+                }
+                InpaintingModel.MAT -> {
+                    locks["model:mat"] = installed
+                    locks["mat"] = installed
+                    locks["model:Places_512_FullData_G"] = installed
+                    locks["Places_512_FullData_G"] = installed
+                    locks["model:places_512_fulldata_g"] = installed
+                    locks["places_512_fulldata_g"] = installed
+                }
+                InpaintingModel.ZITS -> {
+                    locks["model:zits"] = installed
+                    locks["zits"] = installed
+                    locks["model:zits-inpaint-0717"] = installed
+                    locks["zits-inpaint-0717"] = installed
+                }
+                InpaintingModel.DIFFUSION_OVERKILL -> {
+                    locks["model:diffusion"] = installed
+                    locks["diffusion"] = installed
+                    locks["model:ldm"] = installed
+                    locks["ldm"] = installed
                 }
             }
         }
@@ -180,7 +200,7 @@ class CleanerPlugin {
         }
 
         if (!anyInstalled) {
-            val msg = "No inpainting models installed (LaMa, Manga, MIGAN). Please download a model first."
+            val msg = "No inpainting models installed (LaMa, Manga, MIGAN, MAT, ZITS, Diffusion). Please download a model first."
             logger.warn("[Cleaner] validate: Validation failed: $msg")
             return Result.failure(IllegalStateException(msg))
         }
@@ -315,6 +335,104 @@ class CleanerPlugin {
         )
     }
 
+    private suspend fun cleanImageInternalHybrid(
+        imagePath: String,
+        segmentationData: VisionResult,
+        outputDir: String,
+        model: InpaintingModel,
+        strategy: CleaningStrategy,
+        sessionPair: Pair<OnnxInferenceSession, ModelSpec>?,
+        targetClasses: List<String>,
+        dilationRadius: Int,
+        adaptivePadding: Boolean,
+        saveMask: Boolean,
+        isolatedRegionsOnly: Boolean,
+        context: PluginContext,
+        hostFs: HostFileSystem
+    ): CleanerResult {
+        val logger = context.logger
+        val inputFile = File(imagePath)
+        if (!inputFile.exists()) {
+            throw IllegalArgumentException("Input image does not exist: $imagePath")
+        }
+
+        val outDir = File(outputDir)
+        if (!outDir.exists()) outDir.mkdirs()
+
+        val baseImage = withContext(Dispatchers.IO) {
+            ImageIO.read(inputFile)
+        } ?: throw IllegalArgumentException("Failed to decode image from path: $imagePath")
+
+        val targetSet = targetClasses.map { it.trim().lowercase() }.toSet()
+        val textObjects = segmentationData.objects.filter { it.label.trim().lowercase() in targetSet }
+
+        val mask = InpaintingUtils.renderMaskFromObjects(
+            objects = segmentationData.objects,
+            imageWidth = baseImage.width,
+            imageHeight = baseImage.height,
+            targetClasses = targetSet,
+            dilationPx = dilationRadius
+        )
+
+        var maskPath: String? = null
+        if (saveMask) {
+            val maskFile = File(outDir, "${inputFile.nameWithoutExtension}_mask.png")
+            withContext(Dispatchers.IO) {
+                ImageIO.write(mask, "png", maskFile)
+            }
+            maskPath = maskFile.absolutePath
+        }
+
+        val deterministicFill = strategy != CleaningStrategy.NEURAL_ONLY
+        val activeSession = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else sessionPair?.first
+        val activeSpec = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else sessionPair?.second
+
+        val cleanedImage = if (isolatedRegionsOnly) {
+            InpaintingUtils.inpaintProductionHybridIsolated(
+                sourceImage = baseImage,
+                mask = mask,
+                session = activeSession,
+                spec = activeSpec,
+                adaptivePadding = adaptivePadding,
+                deterministicFill = deterministicFill,
+                minContextSize = 256,
+                featherRadiusPx = 2
+            )
+        } else {
+            InpaintingUtils.inpaintProductionHybrid(
+                sourceImage = baseImage,
+                mask = mask,
+                session = activeSession,
+                spec = activeSpec,
+                adaptivePadding = adaptivePadding,
+                deterministicFill = deterministicFill,
+                minContextSize = 256
+            )
+        }
+
+        val outputFormat = if (isolatedRegionsOnly) {
+            "png"
+        } else if (inputFile.extension.lowercase() in setOf("jpg", "jpeg", "webp", "png")) {
+            inputFile.extension.lowercase()
+        } else {
+            "png"
+        }
+
+        val suffix = if (isolatedRegionsOnly) "_patches" else ""
+        val outputFile = File(outDir, "${inputFile.nameWithoutExtension}$suffix.$outputFormat")
+        withContext(Dispatchers.IO) {
+            ImageIO.write(cleanedImage, outputFormat, outputFile)
+        }
+
+        logger.info("Hybrid cleaning complete for $imagePath with ${model.displayName} [${strategy.displayName}] (isolatedRegionsOnly=$isolatedRegionsOnly). Cleaned ${textObjects.size} text instances -> ${outputFile.absolutePath}")
+
+        return CleanerResult(
+            cleanedImagePath = outputFile.absolutePath,
+            maskPath = maskPath,
+            cleanedObjectsCount = textObjects.size
+        )
+    }
+
     @Capability(
         name = "Clean Image",
         description = "Inpaints and erases segmented text regions from an image using segmentation data"
@@ -366,6 +484,62 @@ class CleanerPlugin {
     }
 
     @Capability(
+        name = "Clean Image (Production Hybrid)",
+        description = "High-precision comic cleaner using instant deterministic balloon fills and context-aware neural inpainting for complex redraws"
+    )
+    @RequiresLock(locks = ["model:lama"])
+    suspend fun cleanImageHybrid(
+        @CapabilityInput(description = "Path to the base image to clean", semanticTypes = ["path/file"])
+        imagePath: String,
+        @CapabilityParam(description = "Segmentation result containing objects to inpaint")
+        segmentationData: VisionResult,
+        @CapabilityOutput(
+            description = "Directory to save cleaned image",
+            autogeneratedPattern = "{imagePath}/clean_chapter/",
+            semanticTypes = ["path/folder"]
+        )
+        outputDir: String,
+        @CapabilityParam(description = "Inpainting model to use for complex redraws", defaultValue = "\"MANGA\"")
+        model: InpaintingModel = InpaintingModel.MANGA,
+        @CapabilityParam(description = "Cleaning strategy mode", defaultValue = "\"AUTO_HYBRID\"")
+        strategy: CleaningStrategy = CleaningStrategy.AUTO_HYBRID,
+        @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
+        targetClasses: List<String> = listOf("text"),
+        @CapabilityParam(description = "Mask dilation radius in pixels for contour coverage", defaultValue = "3")
+        dilationRadius: Int = 3,
+        @CapabilityParam(description = "Enable adaptive 2.5x context expansion for neural redraws", defaultValue = "true")
+        adaptivePadding: Boolean = true,
+        @CapabilityParam(description = "Save the generated binary mask file alongside the cleaned image", defaultValue = "false")
+        saveMask: Boolean = false,
+        @CapabilityParam(description = "Output only the isolated inpainted regions with transparency (PNG)", defaultValue = "false")
+        isolatedRegionsOnly: Boolean = false,
+        context: PluginContext,
+        hostFs: HostFileSystem
+    ): CleanerResult {
+        context.logger.info("Starting Hybrid Cleaner on image: $imagePath with model: ${model.displayName} [${strategy.displayName}]. Targeting classes: $targetClasses, adaptivePadding: $adaptivePadding")
+        val sessionPair = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else getInpaintingSession(model, context)
+        return try {
+            cleanImageInternalHybrid(
+                imagePath = imagePath,
+                segmentationData = segmentationData,
+                outputDir = outputDir,
+                model = model,
+                strategy = strategy,
+                sessionPair = sessionPair,
+                targetClasses = targetClasses,
+                dilationRadius = dilationRadius,
+                adaptivePadding = adaptivePadding,
+                saveMask = saveMask,
+                isolatedRegionsOnly = isolatedRegionsOnly,
+                context = context,
+                hostFs = hostFs
+            )
+        } finally {
+            sessionPair?.first?.close()
+        }
+    }
+
+    @Capability(
         name = "Clean Image (Patches Only)",
         description = "Inpaints segmented text regions and outputs only the reconstructed patches on a transparent PNG canvas"
     )
@@ -397,6 +571,51 @@ class CleanerPlugin {
             model = model,
             targetClasses = targetClasses,
             dilationRadius = dilationRadius,
+            saveMask = false,
+            isolatedRegionsOnly = true,
+            context = context,
+            hostFs = hostFs
+        )
+    }
+
+    @Capability(
+        name = "Clean Image (Patches Only - Production Hybrid)",
+        description = "Inpaints segmented text regions and outputs only the reconstructed patches on a transparent PNG canvas using the production hybrid pipeline"
+    )
+    @RequiresLock(locks = ["model:lama"])
+    suspend fun cleanImagePatchesOnlyHybrid(
+        @CapabilityInput(description = "Path to the base image to clean", semanticTypes = ["path/file"])
+        imagePath: String,
+        @CapabilityParam(description = "Segmentation result containing objects to inpaint")
+        segmentationData: VisionResult,
+        @CapabilityOutput(
+            description = "Directory to save transparent patch image",
+            autogeneratedPattern = "{imagePath}/clean_chapter_patches/",
+            semanticTypes = ["path/folder"]
+        )
+        outputDir: String,
+        @CapabilityParam(description = "Inpainting model to use for complex redraws", defaultValue = "\"MANGA\"")
+        model: InpaintingModel = InpaintingModel.MANGA,
+        @CapabilityParam(description = "Cleaning strategy mode", defaultValue = "\"AUTO_HYBRID\"")
+        strategy: CleaningStrategy = CleaningStrategy.AUTO_HYBRID,
+        @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
+        targetClasses: List<String> = listOf("text"),
+        @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
+        dilationRadius: Int = 3,
+        @CapabilityParam(description = "Enable adaptive 2.5x context expansion for neural redraws", defaultValue = "true")
+        adaptivePadding: Boolean = true,
+        context: PluginContext,
+        hostFs: HostFileSystem
+    ): CleanerResult {
+        return cleanImageHybrid(
+            imagePath = imagePath,
+            segmentationData = segmentationData,
+            outputDir = outputDir,
+            model = model,
+            strategy = strategy,
+            targetClasses = targetClasses,
+            dilationRadius = dilationRadius,
+            adaptivePadding = adaptivePadding,
             saveMask = false,
             isolatedRegionsOnly = true,
             context = context,
@@ -501,6 +720,108 @@ class CleanerPlugin {
     }
 
     @Capability(
+        name = "Clean Chapter (Production Hybrid)",
+        description = "Cleans an entire folder of chapter images using the production hybrid pipeline with instant deterministic balloon fill and adaptive context neural inpainting"
+    )
+    @RequiresLock(locks = ["model:lama"])
+    suspend fun cleanChapterHybrid(
+        @CapabilityInput(description = "Path to folder containing original chapter images", semanticTypes = ["path/folder"])
+        inputFolder: String,
+        @CapabilityParam(description = "Chapter vision result containing segmentations for each page")
+        chapterVisionResult: ChapterVisionResult,
+        @CapabilityOutput(
+            description = "Directory to save cleaned chapter images",
+            autogeneratedPattern = "{inputFolder}/clean_chapter/",
+            semanticTypes = ["path/folder"]
+        )
+        outputDir: String,
+        @CapabilityParam(description = "Inpainting model to use for complex redraws", defaultValue = "\"MANGA\"")
+        model: InpaintingModel = InpaintingModel.MANGA,
+        @CapabilityParam(description = "Cleaning strategy mode", defaultValue = "\"AUTO_HYBRID\"")
+        strategy: CleaningStrategy = CleaningStrategy.AUTO_HYBRID,
+        @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
+        targetClasses: List<String> = listOf("text"),
+        @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
+        dilationRadius: Int = 3,
+        @CapabilityParam(description = "Enable adaptive 2.5x context expansion for neural redraws", defaultValue = "true")
+        adaptivePadding: Boolean = true,
+        @CapabilityParam(description = "Save generated binary masks", defaultValue = "false")
+        saveMasks: Boolean = false,
+        @CapabilityParam(description = "Output only the isolated inpainted regions with transparency (PNG)", defaultValue = "false")
+        isolatedRegionsOnly: Boolean = false,
+        context: PluginContext,
+        hostFs: HostFileSystem
+    ): ChapterCleanerResult {
+        val logger = context.logger
+        val progressReporter = context.progress
+
+        val folder = File(inputFolder)
+        if (!folder.exists() || !folder.isDirectory) {
+            throw IllegalArgumentException("Input folder not found or is not a directory: $inputFolder")
+        }
+
+        val outDir = File(outputDir).apply { mkdirs() }
+        val visionMap = chapterVisionResult.results.associateBy { it.pageName }
+
+        val supportedExtensions = setOf("png", "jpg", "jpeg", "webp")
+        val imageFiles = folder.listFiles { file ->
+            file.isFile && file.extension.lowercase() in supportedExtensions
+        }?.sortedNaturally() ?: emptyList()
+
+        if (imageFiles.isEmpty()) {
+            throw IllegalArgumentException("No images found in folder: $inputFolder")
+        }
+
+        logger.info("Starting Chapter Hybrid Cleaner for ${imageFiles.size} images with model ${model.displayName} [${strategy.displayName}] (isolatedRegionsOnly=$isolatedRegionsOnly).")
+
+        val totalImages = imageFiles.size
+        val results = mutableListOf<CleanerResult>()
+
+        val sessionPair = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else getInpaintingSession(model, context)
+        try {
+            for ((index, file) in imageFiles.withIndex()) {
+                val vResult = visionMap[file.name] ?: VisionResult(
+                    objects = emptyList(),
+                    imageWidth = 0,
+                    imageHeight = 0,
+                    pageName = file.name
+                )
+
+                val cResult = cleanImageInternalHybrid(
+                    imagePath = file.absolutePath,
+                    segmentationData = vResult,
+                    outputDir = outDir.absolutePath,
+                    model = model,
+                    strategy = strategy,
+                    sessionPair = sessionPair,
+                    targetClasses = targetClasses,
+                    dilationRadius = dilationRadius,
+                    adaptivePadding = adaptivePadding,
+                    saveMask = saveMasks,
+                    isolatedRegionsOnly = isolatedRegionsOnly,
+                    context = context,
+                    hostFs = hostFs
+                )
+                results.add(cResult)
+                progressReporter.report((index + 1).toFloat() / totalImages.toFloat())
+            }
+        } finally {
+            sessionPair?.first?.close()
+        }
+
+        val cleanedPaths = results.map { it.cleanedImagePath }
+        val maskPaths = results.mapNotNull { it.maskPath }
+
+        logger.info("Chapter Hybrid Cleaner complete. Cleaned $totalImages pages.")
+
+        return ChapterCleanerResult(
+            cleanedImagePaths = cleanedPaths,
+            maskPaths = maskPaths,
+            totalCleanedPages = totalImages
+        )
+    }
+
+    @Capability(
         name = "Clean Chapter (Patches Only)",
         description = "Inpaints segmented text across an entire chapter and outputs only transparent PNG patch layers"
     )
@@ -532,6 +853,51 @@ class CleanerPlugin {
             model = model,
             targetClasses = targetClasses,
             dilationRadius = dilationRadius,
+            saveMasks = false,
+            isolatedRegionsOnly = true,
+            context = context,
+            hostFs = hostFs
+        )
+    }
+
+    @Capability(
+        name = "Clean Chapter (Patches Only - Production Hybrid)",
+        description = "Inpaints segmented text across an entire chapter and outputs transparent PNG patch layers using the production hybrid pipeline"
+    )
+    @RequiresLock(locks = ["model:lama"])
+    suspend fun cleanChapterPatchesOnlyHybrid(
+        @CapabilityInput(description = "Path to folder containing original chapter images", semanticTypes = ["path/folder"])
+        inputFolder: String,
+        @CapabilityParam(description = "Chapter vision result containing segmentations for each page")
+        chapterVisionResult: ChapterVisionResult,
+        @CapabilityOutput(
+            description = "Directory to save transparent patch images",
+            autogeneratedPattern = "{inputFolder}/clean_chapter_patches/",
+            semanticTypes = ["path/folder"]
+        )
+        outputDir: String,
+        @CapabilityParam(description = "Inpainting model to use for complex redraws", defaultValue = "\"MANGA\"")
+        model: InpaintingModel = InpaintingModel.MANGA,
+        @CapabilityParam(description = "Cleaning strategy mode", defaultValue = "\"AUTO_HYBRID\"")
+        strategy: CleaningStrategy = CleaningStrategy.AUTO_HYBRID,
+        @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
+        targetClasses: List<String> = listOf("text"),
+        @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
+        dilationRadius: Int = 3,
+        @CapabilityParam(description = "Enable adaptive 2.5x context expansion for neural redraws", defaultValue = "true")
+        adaptivePadding: Boolean = true,
+        context: PluginContext,
+        hostFs: HostFileSystem
+    ): ChapterCleanerResult {
+        return cleanChapterHybrid(
+            inputFolder = inputFolder,
+            chapterVisionResult = chapterVisionResult,
+            outputDir = outputDir,
+            model = model,
+            strategy = strategy,
+            targetClasses = targetClasses,
+            dilationRadius = dilationRadius,
+            adaptivePadding = adaptivePadding,
             saveMasks = false,
             isolatedRegionsOnly = true,
             context = context,
@@ -573,3 +939,4 @@ class CleanerPlugin {
         return maskFile.absolutePath
     }
 }
+

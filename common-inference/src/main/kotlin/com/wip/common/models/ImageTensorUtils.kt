@@ -160,7 +160,16 @@ object ImageTensorUtils {
     }
 
     /**
-     * Decodes an ONNX inpainting output tensor [1, 3, H, W] into a [BufferedImage] (TYPE_INT_RGB).
+     * Snaps a dimension to the nearest higher or equal multiple of [factor].
+     */
+    fun snapToMultiple(value: Int, factor: Int = 32): Int {
+        val snapped = ((value + factor - 1) / factor) * factor
+        return maxOf(factor, snapped)
+    }
+
+    /**
+     * Decodes an ONNX inpainting output tensor [1, 3, H, W] into a [BufferedImage] (TYPE_INT_RGB)
+     * using explicit architecture-safe normalization mapping.
      */
     fun tensorToBufferedImage(tensor: OnnxTensor, normMode: String = "zero_to_one"): BufferedImage {
         val shape = tensor.info.shape
@@ -192,18 +201,7 @@ object ImageTensorUtils {
         val img = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
         val pixels = IntArray(w * h)
 
-        // Sample first few values to auto-detect scale range if needed
-        var sampleMin = Float.MAX_VALUE
-        var sampleMax = Float.MIN_VALUE
-        val sampleLimit = minOf(100, buffer.capacity())
-        for (i in 0 until sampleLimit) {
-            val v = buffer.get(i)
-            if (v < sampleMin) sampleMin = v
-            if (v > sampleMax) sampleMax = v
-        }
-
-        val isZeroToOne = normMode.equals("zero_to_one", ignoreCase = true) || (sampleMax <= 1.05f && sampleMin >= -0.05f)
-        val isNegOne = normMode.equals("neg_one_to_one", ignoreCase = true) || (sampleMin < -0.1f)
+        val isNegOne = normMode.equals("neg_one_to_one", ignoreCase = true)
 
         for (i in 0 until channelSize) {
             val rawR = buffer.get(rOffset + i)
@@ -212,18 +210,18 @@ object ImageTensorUtils {
 
             val r = when {
                 isNegOne -> ((rawR + 1.0f) * 127.5f).toInt().coerceIn(0, 255)
-                isZeroToOne -> (rawR * 255.0f).toInt().coerceIn(0, 255)
-                else -> rawR.toInt().coerceIn(0, 255)
+                rawR > 1.5f -> rawR.toInt().coerceIn(0, 255) // Already in 0..255 space
+                else -> (rawR * 255.0f).toInt().coerceIn(0, 255) // Standard 0.0..1.0 float space
             }
             val g = when {
                 isNegOne -> ((rawG + 1.0f) * 127.5f).toInt().coerceIn(0, 255)
-                isZeroToOne -> (rawG * 255.0f).toInt().coerceIn(0, 255)
-                else -> rawG.toInt().coerceIn(0, 255)
+                rawG > 1.5f -> rawG.toInt().coerceIn(0, 255)
+                else -> (rawG * 255.0f).toInt().coerceIn(0, 255)
             }
             val b = when {
                 isNegOne -> ((rawB + 1.0f) * 127.5f).toInt().coerceIn(0, 255)
-                isZeroToOne -> (rawB * 255.0f).toInt().coerceIn(0, 255)
-                else -> rawB.toInt().coerceIn(0, 255)
+                rawB > 1.5f -> rawB.toInt().coerceIn(0, 255)
+                else -> (rawB * 255.0f).toInt().coerceIn(0, 255)
             }
 
             pixels[i] = (r shl 16) or (g shl 8) or b

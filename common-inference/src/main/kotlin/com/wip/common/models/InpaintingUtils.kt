@@ -980,4 +980,497 @@ object InpaintingUtils {
         val maxY = max(a.ymax, b.ymax)
         return SliceWindow(x = minX, y = minY, width = maxX - minX, height = maxY - minY)
     }
+
+    /**
+     * Diagnostic result of background homogeneity analysis around a masked text region.
+     */
+    data class RegionHomogeneity(
+        val isHomogeneous: Boolean,
+        val isGradient: Boolean,
+        val meanR: Int,
+        val meanG: Int,
+        val meanB: Int,
+        val stdDev: Double,
+        val aR: Double = 0.0,
+        val bR: Double = 0.0,
+        val cR: Double = 0.0,
+        val aG: Double = 0.0,
+        val bG: Double = 0.0,
+        val cG: Double = 0.0,
+        val aB: Double = 0.0,
+        val bB: Double = 0.0,
+        val cB: Double = 0.0
+    )
+
+    /**
+     * Analyzes boundary pixels surrounding a masked region to determine if the background is a solid flat color
+     * or a smooth linear gradient balloon, allowing zero-latency deterministic reconstruction.
+     */
+    fun analyzeRegionHomogeneity(
+        sourceImage: BufferedImage,
+        mask: BufferedImage,
+        region: SliceWindow,
+        borderThickness: Int = 4
+    ): RegionHomogeneity {
+        val rx = region.x
+        val ry = region.y
+        val rw = region.width
+        val rh = region.height
+
+        val srcW = sourceImage.width
+        val srcH = sourceImage.height
+
+        val imgPixels = IntArray(rw * rh)
+        sourceImage.getRGB(rx, ry, rw, rh, imgPixels, 0, rw)
+
+        val maskRaster = mask.raster
+        val maskPixels = IntArray(rw * rh)
+        maskRaster.getSamples(rx, ry, rw, rh, 0, maskPixels)
+
+        val isMasked = BooleanArray(rw * rh) { i -> maskPixels[i] > 128 }
+
+        // Collect boundary pixels (unmasked pixels within borderThickness of any masked pixel)
+        var count = 0
+        var sumR = 0.0
+        var sumG = 0.0
+        var sumB = 0.0
+
+        val borderIndices = IntArray(rw * rh)
+        for (y in 0 until rh) {
+            val yOff = y * rw
+            for (x in 0 until rw) {
+                val idx = yOff + x
+                if (!isMasked[idx]) {
+                    // Check if close to mask
+                    var nearMask = false
+                    val yMin = max(0, y - borderThickness)
+                    val yMax = min(rh - 1, y + borderThickness)
+                    val xMin = max(0, x - borderThickness)
+                    val xMax = min(rw - 1, x + borderThickness)
+
+                    for (ny in yMin..yMax) {
+                        val nyOff = ny * rw
+                        for (nx in xMin..xMax) {
+                            if (isMasked[nyOff + nx]) {
+                                nearMask = true
+                                break
+                            }
+                        }
+                        if (nearMask) break
+                    }
+
+                    if (nearMask) {
+                        borderIndices[count++] = idx
+                        val rgb = imgPixels[idx]
+                        sumR += ((rgb shr 16) and 0xFF)
+                        sumG += ((rgb shr 8) and 0xFF)
+                        sumB += (rgb and 0xFF)
+                    }
+                }
+            }
+        }
+
+        if (count < 8) {
+            return RegionHomogeneity(
+                isHomogeneous = false,
+                isGradient = false,
+                meanR = 255,
+                meanG = 255,
+                meanB = 255,
+                stdDev = 999.0
+            )
+        }
+
+        val meanR = (sumR / count).toInt().coerceIn(0, 255)
+        val meanG = (sumG / count).toInt().coerceIn(0, 255)
+        val meanB = (sumB / count).toInt().coerceIn(0, 255)
+
+        var varSum = 0.0
+        for (i in 0 until count) {
+            val idx = borderIndices[i]
+            val rgb = imgPixels[idx]
+            val r = (rgb shr 16) and 0xFF
+            val g = (rgb shr 8) and 0xFF
+            val b = rgb and 0xFF
+
+            val dR = r - meanR
+            val dG = g - meanG
+            val dB = b - meanB
+            varSum += (dR * dR + dG * dG + dB * dB) / 3.0
+        }
+
+        val stdDev = sqrt(varSum / count)
+
+        // If variance is extremely low, it is a pure flat solid color (e.g. #FFFFFF balloon)
+        if (stdDev <= 4.0) {
+            return RegionHomogeneity(
+                isHomogeneous = true,
+                isGradient = false,
+                meanR = meanR,
+                meanG = meanG,
+                meanB = meanB,
+                stdDev = stdDev
+            )
+        }
+
+        // Fit 2D linear gradient plane R(u, v) = a*u + b*v + c
+        var sumU = 0.0
+        var sumV = 0.0
+        var sumUU = 0.0
+        var sumVV = 0.0
+        var sumUV = 0.0
+        var sumUR = 0.0
+        var sumVR = 0.0
+        var sumUG = 0.0
+        var sumVG = 0.0
+        var sumUB = 0.0
+        var sumVB = 0.0
+
+        for (i in 0 until count) {
+            val idx = borderIndices[i]
+            val u = (idx % rw).toDouble()
+            val v = (idx / rw).toDouble()
+            val rgb = imgPixels[idx]
+            val r = ((rgb shr 16) and 0xFF).toDouble()
+            val g = ((rgb shr 8) and 0xFF).toDouble()
+            val b = (rgb and 0xFF).toDouble()
+
+            sumU += u
+            sumV += v
+            sumUU += u * u
+            sumVV += v * v
+            sumUV += u * v
+            sumUR += u * r
+            sumVR += v * r
+            sumUG += u * g
+            sumVG += v * g
+            sumUB += u * b
+            sumVB += v * b
+        }
+
+        // 3x3 normal equation solve for [a, b, c]
+        val n = count.toDouble()
+        val det = sumUU * (sumVV * n - sumV * sumV) - sumUV * (sumUV * n - sumV * sumU) + sumU * (sumUV * sumV - sumVV * sumU)
+
+        if (abs(det) > 1e-4) {
+            fun solvePlane(sumUc: Double, sumVc: Double, sumC: Double): Triple<Double, Double, Double> {
+                val detA = sumUc * (sumVV * n - sumV * sumV) - sumUV * (sumVc * n - sumV * sumC) + sumU * (sumVc * sumV - sumVV * sumC)
+                val detB = sumUU * (sumVc * n - sumV * sumC) - sumUc * (sumUV * n - sumV * sumU) + sumU * (sumUV * sumC - sumVc * sumU)
+                val detC = sumUU * (sumVV * sumC - sumVc * sumV) - sumUV * (sumUV * sumC - sumVc * sumU) + sumUc * (sumUV * sumV - sumVV * sumU)
+                return Triple(detA / det, detB / det, detC / det)
+            }
+
+            val (aR, bR, cR) = solvePlane(sumUR, sumVR, sumR)
+            val (aG, bG, cG) = solvePlane(sumUG, sumVG, sumG)
+            val (aB, bB, cB) = solvePlane(sumUB, sumVB, sumB)
+
+            var residualSum = 0.0
+            for (i in 0 until count) {
+                val idx = borderIndices[i]
+                val u = (idx % rw).toDouble()
+                val v = (idx / rw).toDouble()
+                val rgb = imgPixels[idx]
+                val r = (rgb shr 16) and 0xFF
+                val g = (rgb shr 8) and 0xFF
+                val b = rgb and 0xFF
+
+                val predR = aR * u + bR * v + cR
+                val predG = aG * u + bG * v + cG
+                val predB = aB * u + bB * v + cB
+
+                val dR = r - predR
+                val dG = g - predG
+                val dB = b - predB
+                residualSum += (dR * dR + dG * dG + dB * dB) / 3.0
+            }
+
+            val residualStdDev = sqrt(residualSum / count)
+            val slopeMag = sqrt(aR * aR + bR * bR + aG * aG + bG * bG + aB * aB + bB * bB)
+
+            if (residualStdDev <= 5.5 && slopeMag > 0.02) {
+                return RegionHomogeneity(
+                    isHomogeneous = false,
+                    isGradient = true,
+                    meanR = meanR,
+                    meanG = meanG,
+                    meanB = meanB,
+                    stdDev = stdDev,
+                    aR = aR, bR = bR, cR = cR,
+                    aG = aG, bG = bG, cG = cG,
+                    aB = aB, bB = bB, cB = cB
+                )
+            }
+        }
+
+        return RegionHomogeneity(
+            isHomogeneous = false,
+            isGradient = false,
+            meanR = meanR,
+            meanG = meanG,
+            meanB = meanB,
+            stdDev = stdDev
+        )
+    }
+
+    /**
+     * Instantly fills the masked pixels in [region] with solid color (meanR, meanG, meanB).
+     */
+    fun fillSolidHomogeneousRegion(
+        targetImage: BufferedImage,
+        mask: BufferedImage,
+        region: SliceWindow,
+        meanR: Int,
+        meanG: Int,
+        meanB: Int
+    ) {
+        val rx = region.x
+        val ry = region.y
+        val rw = region.width
+        val rh = region.height
+
+        val maskRaster = mask.raster
+        val maskPixels = IntArray(rw * rh)
+        maskRaster.getSamples(rx, ry, rw, rh, 0, maskPixels)
+
+        val targetPixels = IntArray(rw * rh)
+        targetImage.getRGB(rx, ry, rw, rh, targetPixels, 0, rw)
+
+        val solidRgb = (meanR shl 16) or (meanG shl 8) or meanB
+        for (i in 0 until rw * rh) {
+            if (maskPixels[i] > 128) {
+                targetPixels[i] = solidRgb
+            }
+        }
+        targetImage.setRGB(rx, ry, rw, rh, targetPixels, 0, rw)
+    }
+
+    /**
+     * Instantly fills the masked pixels in [region] with a 2D fitted biharmonic linear gradient.
+     */
+    fun fillBiharmonicGradientRegion(
+        targetImage: BufferedImage,
+        mask: BufferedImage,
+        region: SliceWindow,
+        h: RegionHomogeneity
+    ) {
+        val rx = region.x
+        val ry = region.y
+        val rw = region.width
+        val rh = region.height
+
+        val maskRaster = mask.raster
+        val maskPixels = IntArray(rw * rh)
+        maskRaster.getSamples(rx, ry, rw, rh, 0, maskPixels)
+
+        val targetPixels = IntArray(rw * rh)
+        targetImage.getRGB(rx, ry, rw, rh, targetPixels, 0, rw)
+
+        for (y in 0 until rh) {
+            val yOff = y * rw
+            val v = y.toDouble()
+            for (x in 0 until rw) {
+                val idx = yOff + x
+                if (maskPixels[idx] > 128) {
+                    val u = x.toDouble()
+                    val r = (h.aR * u + h.bR * v + h.cR).toInt().coerceIn(0, 255)
+                    val g = (h.aG * u + h.bG * v + h.cG).toInt().coerceIn(0, 255)
+                    val b = (h.aB * u + h.bB * v + h.cB).toInt().coerceIn(0, 255)
+                    targetPixels[idx] = (r shl 16) or (g shl 8) or b
+                }
+            }
+        }
+        targetImage.setRGB(rx, ry, rw, rh, targetPixels, 0, rw)
+    }
+
+    /**
+     * Executes the Production Hybrid Cleaning Pipeline:
+     * 1. Analyzes background homogeneity around each mask cluster.
+     * 2. Cleans solid/gradient balloons in <1ms via deterministic mathematical fill (0 noise, perfect edges).
+     * 3. Routes complex textured/artwork regions to neural inpainting with adaptive context window expansion
+     *    and multiple-of-32 dimension snapping.
+     * 4. Seamlessly blends only the masked pixel areas back onto the canvas.
+     */
+    fun inpaintProductionHybrid(
+        sourceImage: BufferedImage,
+        mask: BufferedImage,
+        session: OnnxInferenceSession? = null,
+        spec: ModelSpec? = null,
+        adaptivePadding: Boolean = true,
+        deterministicFill: Boolean = true,
+        minContextSize: Int = 256,
+        roiPaddingPx: Int = 16
+    ): BufferedImage {
+        val width = sourceImage.width
+        val height = sourceImage.height
+
+        val outputImage = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+        val g2d = outputImage.createGraphics()
+        g2d.drawImage(sourceImage, 0, 0, null)
+        g2d.dispose()
+
+        val maskRegions = findMaskBoundingBoxes(mask, roiPaddingPx)
+        if (maskRegions.isEmpty()) {
+            return outputImage
+        }
+
+        val isDiffusion = spec?.pipelineType?.equals("diffusion_pipeline", ignoreCase = true) == true ||
+            spec?.inputNames?.contains("timestep_embed") == true ||
+            spec?.effectiveType?.equals("ldm", ignoreCase = true) == true ||
+            spec?.effectiveType?.equals("diffusion", ignoreCase = true) == true
+
+        for (region in maskRegions) {
+            if (deterministicFill) {
+                val homogeneity = analyzeRegionHomogeneity(sourceImage, mask, region)
+                if (homogeneity.isHomogeneous) {
+                    fillSolidHomogeneousRegion(outputImage, mask, region, homogeneity.meanR, homogeneity.meanG, homogeneity.meanB)
+                    continue
+                } else if (homogeneity.isGradient) {
+                    fillBiharmonicGradientRegion(outputImage, mask, region, homogeneity)
+                    continue
+                }
+            }
+
+            // Complex redraw / Textured background: Neural Inpainting with Adaptive Context Expansion
+            val targetContextW = if (adaptivePadding) maxOf(minContextSize, (region.width * 2.5).toInt()) else region.width
+            val targetContextH = if (adaptivePadding) maxOf(minContextSize, (region.height * 2.5).toInt()) else region.height
+
+            val snappedW = ImageTensorUtils.snapToMultiple(minOf(width, targetContextW), 32)
+            val snappedH = ImageTensorUtils.snapToMultiple(minOf(height, targetContextH), 32)
+
+            val centerX = region.x + region.width / 2
+            val centerY = region.y + region.height / 2
+
+            val cropX = (centerX - snappedW / 2).coerceIn(0, max(0, width - snappedW))
+            val cropY = (centerY - snappedH / 2).coerceIn(0, max(0, height - snappedH))
+            val cropW = minOf(snappedW, width - cropX)
+            val cropH = minOf(snappedH, height - cropY)
+
+            val contextImg = outputImage.getSubimage(cropX, cropY, cropW, cropH)
+            val contextMask = mask.getSubimage(cropX, cropY, cropW, cropH)
+
+            val cleanedPatch = if (session != null && spec != null) {
+                try {
+                    if (isDiffusion) {
+                        inpaintDiffusionPatch(session, contextImg, contextMask, spec)
+                    } else {
+                        val inW = if (spec.dynamicShape) ImageTensorUtils.snapToMultiple(cropW, 32) else if (spec.effectiveWidth > 0) spec.effectiveWidth else 512
+                        val inH = if (spec.dynamicShape) ImageTensorUtils.snapToMultiple(cropH, 32) else if (spec.effectiveHeight > 0) spec.effectiveHeight else 512
+
+                        val imgInputName = if (spec.inputNames.isNotEmpty()) spec.inputNames[0] else "image"
+                        val maskInputName = if (spec.inputNames.size > 1) spec.inputNames[1] else "mask"
+
+                        val imgTensor = ImageTensorUtils.createInpaintingImageTensor(session.environment, contextImg, inW, inH, spec.normMode)
+                        val maskTensor = ImageTensorUtils.createInpaintingMaskTensor(session.environment, contextMask, inW, inH, spec.maskMode)
+
+                        var results: OrtSession.Result? = null
+                        try {
+                            results = session.session.run(mapOf(imgInputName to imgTensor, maskInputName to maskTensor))
+                            val outputTensor = results.get(0) as? OnnxTensor
+                                ?: results.firstOrNull { it.value is OnnxTensor }?.value as? OnnxTensor
+
+                            if (outputTensor != null) {
+                                val rawCleaned = ImageTensorUtils.tensorToBufferedImage(outputTensor, spec.normMode)
+                                ImageTensorUtils.resizeImage(rawCleaned, cropW, cropH)
+                            } else {
+                                inpaintPatchPureKotlin(contextImg, contextMask)
+                            }
+                        } finally {
+                            results?.close()
+                            imgTensor.close()
+                            maskTensor.close()
+                        }
+                    }
+                } catch (e: Exception) {
+                    inpaintPatchPureKotlin(contextImg, contextMask)
+                }
+            } else {
+                inpaintPatchPureKotlin(contextImg, contextMask)
+            }
+
+            // Seamlessly paste ONLY the masked pixels from the cleaned context back onto the output image
+            val maskRaster = contextMask.raster
+            val patchMaskPixels = IntArray(cropW * cropH)
+            maskRaster.getSamples(0, 0, cropW, cropH, 0, patchMaskPixels)
+
+            val cleanedPatchPixels = IntArray(cropW * cropH)
+            cleanedPatch.getRGB(0, 0, cropW, cropH, cleanedPatchPixels, 0, cropW)
+
+            val currentCanvasPixels = IntArray(cropW * cropH)
+            outputImage.getRGB(cropX, cropY, cropW, cropH, currentCanvasPixels, 0, cropW)
+
+            for (i in 0 until cropW * cropH) {
+                if (patchMaskPixels[i] > 128) {
+                    currentCanvasPixels[i] = cleanedPatchPixels[i]
+                }
+            }
+            outputImage.setRGB(cropX, cropY, cropW, cropH, currentCanvasPixels, 0, cropW)
+        }
+
+        return outputImage
+    }
+
+    /**
+     * Executes the Production Hybrid Cleaning Pipeline and returns an alpha-transparent canvas (TYPE_INT_ARGB)
+     * containing only the reconstructed patch layers.
+     */
+    fun inpaintProductionHybridIsolated(
+        sourceImage: BufferedImage,
+        mask: BufferedImage,
+        session: OnnxInferenceSession? = null,
+        spec: ModelSpec? = null,
+        adaptivePadding: Boolean = true,
+        deterministicFill: Boolean = true,
+        minContextSize: Int = 256,
+        roiPaddingPx: Int = 16,
+        featherRadiusPx: Int = 2
+    ): BufferedImage {
+        val fullyCleaned = inpaintProductionHybrid(
+            sourceImage = sourceImage,
+            mask = mask,
+            session = session,
+            spec = spec,
+            adaptivePadding = adaptivePadding,
+            deterministicFill = deterministicFill,
+            minContextSize = minContextSize,
+            roiPaddingPx = roiPaddingPx
+        )
+
+        val width = sourceImage.width
+        val height = sourceImage.height
+        val isolatedImage = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
+
+        val cleanedPixels = IntArray(width * height)
+        fullyCleaned.getRGB(0, 0, width, height, cleanedPixels, 0, width)
+
+        val maskRaster = mask.raster
+        val maskPixels = IntArray(width * height)
+        maskRaster.getSamples(0, 0, width, height, 0, maskPixels)
+
+        val alphaValues = IntArray(width * height)
+        for (i in 0 until width * height) {
+            if (maskPixels[i] > 128) {
+                alphaValues[i] = 255
+            }
+        }
+
+        val featheredAlpha = if (featherRadiusPx > 0) {
+            applyAlphaFeathering(alphaValues, width, height, featherRadiusPx)
+        } else {
+            alphaValues
+        }
+
+        val outPixels = IntArray(width * height)
+        for (i in 0 until width * height) {
+            val a = featheredAlpha[i].coerceIn(0, 255)
+            if (a > 0) {
+                val rgb = cleanedPixels[i] and 0x00FFFFFF
+                outPixels[i] = (a shl 24) or rgb
+            } else {
+                outPixels[i] = 0x00000000
+            }
+        }
+
+        isolatedImage.setRGB(0, 0, width, height, outPixels, 0, width)
+        return isolatedImage
+    }
 }
