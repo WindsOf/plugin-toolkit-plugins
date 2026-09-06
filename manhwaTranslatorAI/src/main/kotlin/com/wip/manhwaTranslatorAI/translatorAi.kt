@@ -10,6 +10,8 @@ import org.wip.plugintoolkit.api.annotations.Capability
 import org.wip.plugintoolkit.api.annotations.CapabilityInput
 import org.wip.plugintoolkit.api.annotations.CapabilityOutput
 import org.wip.plugintoolkit.api.annotations.CapabilityParam
+import com.wip.common.inference.lmstudio.LmStudioManager
+import org.wip.plugintoolkit.api.annotations.PluginAction
 import org.wip.plugintoolkit.api.annotations.PluginInfo
 import org.wip.plugintoolkit.api.annotations.PluginLoad
 import org.wip.plugintoolkit.api.annotations.PluginSetting
@@ -67,7 +69,7 @@ enum class AIModel(val id: String) {
 @PluginInfo(
     id = "com.wip.manhwa_translator_ai",
     name = "Manhwa Translator AI",
-    version = "1.4.1",
+    version = "1.4.2",
     description = "Translate text from Manhwa/Manga into Italian using Google AI via Koog",
     supportedOs = [OS.WINDOWS]
 )
@@ -77,6 +79,28 @@ class TranslatorAI(val settings: TranslatorAISettings) {
     fun onLoad(logger: PluginLogger): Result<Unit> {
         logger.info("[TranslatorAI] onLoad: Initializing Manhwa Translator AI (has googleApiKey: ${settings.googleApiKey.isNotBlank()}, useStructuredOutput: ${settings.useStructuredOutput}, lmStudioUrl: ${settings.lmStudioUrl})")
         return Result.success(Unit)
+    }
+
+    @PluginAction(
+        name = "Test LM Studio Connection",
+        description = "Checks connectivity to LM Studio and discovers active and available models"
+    )
+    suspend fun testLmStudioConnection(context: PluginContext) {
+        val logger = context.logger
+        val url = settings.lmStudioUrl?.ifBlank { "http://localhost:1234/v1" } ?: "http://localhost:1234/v1"
+        logger.info("[TranslatorAI] Testing LM Studio connection at: $url")
+        val status = LmStudioManager.Default.checkStatus(baseUrl = url, apiKey = settings.lmStudioApiKey, logger = logger)
+        if (status.connected) {
+            val modelDesc = if (!status.activeModel.isNullOrBlank()) " (Active model: ${status.activeModel})" else ""
+            val msg = "Connected to LM Studio at $url successfully!$modelDesc"
+            logger.info("[TranslatorAI] $msg")
+            context.showToast(msg)
+        } else {
+            val err = status.errorMessage ?: "Connection refused or unreachable"
+            val msg = "Failed to connect to LM Studio at $url: $err"
+            logger.warn("[TranslatorAI] $msg")
+            context.showToast(msg)
+        }
     }
 
     fun isHallucination(rawText: String?): Boolean {

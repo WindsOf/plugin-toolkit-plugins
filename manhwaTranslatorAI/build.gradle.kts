@@ -19,6 +19,7 @@ kotlin {
 dependencies {
     implementation(platform(libs.koin.bom))
     implementation(project(":common-models"))
+    implementation(project(":common-inference"))
     implementation(libs.koin.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.io.core)

@@ -44,7 +44,7 @@ import org.wip.plugintoolkit.api.annotations.RequiresLock
 @PluginInfo(
     id = "com.wip.cleaner",
     name = "Cleaner",
-    version = "1.1.0",
+    version = "1.1.1",
     description = "Inpaints and erases segmented text and artifacts from images using segmentation maps.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
@@ -143,10 +143,13 @@ class CleanerPlugin {
         logger.info("[Cleaner] downloadModel action triggered for: ${targetModel.name} (${targetModel.modelId})")
         val result = ModelManager.Default.downloadModel(targetModel.modelId, context)
         if (result.isFailure) {
-            logger.error("[Cleaner] downloadModel action failed for ${targetModel.modelId}: ${result.exceptionOrNull()?.message}")
+            val err = result.exceptionOrNull()?.message ?: "Unknown error"
+            logger.error("[Cleaner] downloadModel action failed for ${targetModel.modelId}: $err")
+            context.showToast("Failed to download model ${targetModel.name}: $err")
             throw result.exceptionOrNull() ?: RuntimeException("Failed to download model ${targetModel.modelId}")
         }
         logger.info("[Cleaner] downloadModel action succeeded for: ${targetModel.modelId}")
+        context.showToast("Downloaded model: ${targetModel.name} successfully!")
     }
 
     @PluginAction(
@@ -159,10 +162,13 @@ class CleanerPlugin {
         val inpaintingIds = InpaintingModel.entries.map { it.modelId }
         val result = ModelManager.Default.downloadModels(inpaintingIds, context)
         if (result.isFailure) {
-            logger.error("[Cleaner] downloadAllModels action failed: ${result.exceptionOrNull()?.message}")
+            val err = result.exceptionOrNull()?.message ?: "Unknown error"
+            logger.error("[Cleaner] downloadAllModels action failed: $err")
+            context.showToast("Failed to download all inpainting models: $err")
             throw result.exceptionOrNull() ?: RuntimeException("Failed to download all inpainting models")
         }
         logger.info("[Cleaner] downloadAllModels action succeeded")
+        context.showToast("All inpainting models downloaded successfully!")
     }
 
     @PluginSetup

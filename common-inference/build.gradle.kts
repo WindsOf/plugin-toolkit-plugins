@@ -27,6 +27,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.io.core)
     implementation(libs.plugin.api)
+    compileOnly(libs.koog.agents)
 
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlin.test.junit)

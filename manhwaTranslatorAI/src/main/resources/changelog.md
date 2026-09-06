@@ -1,3 +1,9 @@
+Version: 1.4.2
+Date: 2026-09-05
+Added:
+  - Added 'Test LM Studio Connection' action with toast notifications to verify connectivity and report active model.
+  - Refactored LM Studio integration to use unified LmStudioManager client with streaming support and auto-model discovery via /v1/models.
+-------------------------------------------------------------------------------------------------
 Version: 1.4.1
 Date: 2026-08-29
 Fixed:

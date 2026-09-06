@@ -43,7 +43,7 @@ import org.wip.plugintoolkit.api.annotations.RequiresLock
 @PluginInfo(
     id = "com.wip.slicer",
     name = "Slicer",
-    version = "1.4.2",
+    version = "1.4.3",
     description = "A plugin that provides vertical images sliding capabilities for manhwa.",
     supportedOs = [OS.WINDOWS]
 )
@@ -99,10 +99,13 @@ class Slicer {
         logger.info("[Slicer] downloadModel action triggered for: ${targetModel.displayName} (${targetModel.modelId})")
         val result = ModelManager.Default.downloadModel(targetModel.modelId, context)
         if (result.isFailure) {
-            logger.error("[Slicer] downloadModel action failed for ${targetModel.modelId}: ${result.exceptionOrNull()?.message}")
+            val errMsg = result.exceptionOrNull()?.message ?: "Unknown error"
+            logger.error("[Slicer] downloadModel action failed for ${targetModel.modelId}: $errMsg")
+            context.showToast("Failed to download model ${targetModel.displayName}: $errMsg")
             throw result.exceptionOrNull() ?: RuntimeException("Failed to download model ${targetModel.modelId}")
         }
         logger.info("[Slicer] downloadModel action succeeded for: ${targetModel.modelId}")
+        context.showToast("Downloaded model: ${targetModel.displayName} successfully!")
     }
 
     @PluginAction(
@@ -115,10 +118,13 @@ class Slicer {
         val slicerModelIds = SlicerDownloadModel.entries.map { it.modelId }
         val result = ModelManager.Default.downloadModels(slicerModelIds, context)
         if (result.isFailure) {
-            logger.error("[Slicer] downloadAllModels action failed: ${result.exceptionOrNull()?.message}")
+            val errMsg = result.exceptionOrNull()?.message ?: "Unknown error"
+            logger.error("[Slicer] downloadAllModels action failed: $errMsg")
+            context.showToast("Failed to download all slicer models: $errMsg")
             throw result.exceptionOrNull() ?: RuntimeException("Failed to download all slicer models")
         }
         logger.info("[Slicer] downloadAllModels action succeeded")
+        context.showToast("All slicer models downloaded successfully!")
     }
 
     @PluginSetup

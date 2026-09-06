@@ -96,7 +96,8 @@ class UnlimitedOcrRunner(
         ).distinct()
 
         val installedId = candidateGgufIds.firstOrNull {
-            ModelManager.Default.isModelInstalled(it, context.fileSystem, logger)
+            ModelManager.Default.isModelInstalled(it, context.fileSystem, logger) ||
+                ModelManager.Default.findLmStudioModelFile(it)?.exists() == true
         }
 
         if (installedId == null) {
@@ -111,6 +112,7 @@ class UnlimitedOcrRunner(
         }
 
         val mmprojPath = ModelManager.Default.getMmprojAbsolutePath(installedId, context.fileSystem)
+            ?: ModelManager.Default.findLmStudioMmprojFile()?.absolutePath
         if (mmprojPath != null) {
             logger.info("Found multimodal projector (mmproj) for Unlimited-OCR: $mmprojPath")
         } else {

@@ -120,4 +120,17 @@ class TranslatorAITest {
         kotlin.test.assertFalse(plugin.isHallucination("Hello, how are you?"))
         kotlin.test.assertFalse(plugin.isHallucination("Questo è un testo valido."))
     }
+
+    @Test
+    fun testTestLmStudioConnectionActionShowsToast() = kotlinx.coroutines.runBlocking {
+        val plugin = TranslatorAI(TranslatorAISettings(lmStudioUrl = "http://127.0.0.1:59999/v1"))
+        val toasts = mutableListOf<String>()
+        val context = io.mockk.mockk<PluginContext>(relaxed = true)
+        io.mockk.every { context.showToast(any()) } answers {
+            toasts.add(firstArg())
+        }
+        plugin.testLmStudioConnection(context)
+        assertTrue(toasts.isNotEmpty())
+        assertTrue(toasts.first().contains("LM Studio"))
+    }
 }

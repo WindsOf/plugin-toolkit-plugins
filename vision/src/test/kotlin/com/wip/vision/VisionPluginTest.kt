@@ -309,4 +309,40 @@ class VisionPluginTest {
             }
         }
     }
+
+    @Test
+    fun testDownloadModelActions() {
+        val vision = VisionPlugin()
+        val logger = FakeLogger()
+        val toastMessages = mutableListOf<String>()
+        val dummyYaml = """
+            name: TestModel
+            type: OBJECT_DETECTION
+            version: 1
+            files:
+              weights: test_model.onnx
+            inputs: []
+            outputs: []
+            executionProviders: []
+        """.trimIndent()
+        val pluginFs = mockk<PluginFileSystem>(relaxed = true) {
+            coEvery { exists(any()) } returns true
+            coEvery { readTextFile(any()) } returns dummyYaml
+        }
+        val context = mockk<PluginContext>(relaxed = true) {
+            every { this@mockk.logger } returns logger
+            every { this@mockk.fileSystem } returns pluginFs
+            every { showToast(any()) } answers {
+                toastMessages.add(firstArg())
+            }
+        }
+
+        runBlocking {
+            vision.downloadModel(VisionDownloadModel.YOLO_DET_X, context)
+            assertTrue(toastMessages.any { it.contains("Downloaded model: YOLO_DET_X") })
+
+            vision.downloadAllModels(context)
+            assertTrue(toastMessages.any { it.contains("All vision models downloaded successfully") })
+        }
+    }
 }

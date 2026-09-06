@@ -2,6 +2,8 @@ package com.wip.common.inference.llama
 
 import java.io.File
 import java.net.ServerSocket
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -46,6 +48,74 @@ class LlamaServerManager(
 ) {
     companion object {
         val Default = LlamaServerManager()
+        private val registeredProcesses = CopyOnWriteArrayList<LlamaServerProcess>()
+
+        init {
+            try {
+                Runtime.getRuntime().addShutdownHook(Thread {
+                    for (proc in registeredProcesses) {
+                        try { proc.stop(2L) } catch (_: Exception) {}
+                    }
+                })
+            } catch (_: Exception) {}
+        }
+
+        fun registerProcess(process: LlamaServerProcess) {
+            registeredProcesses.add(process)
+        }
+
+        fun unregisterProcess(process: LlamaServerProcess) {
+            registeredProcesses.remove(process)
+        }
+
+        /**
+         * Finds all active operating system processes executing llama-server or llama.
+         */
+        fun findRunningProcesses(): List<ProcessHandle> {
+            return try {
+                ProcessHandle.allProcesses().filter { handle ->
+                    val cmd = handle.info().command().orElse("").lowercase()
+                    val cmdLine = handle.info().commandLine().orElse("").lowercase()
+                    cmd.contains("llama-server") || cmd.contains("llama.exe") ||
+                        cmdLine.contains("llama-server") || (cmdLine.contains("llama") && cmdLine.contains("serve"))
+                }.toList()
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+
+        /**
+         * Returns true if any llama-server OS process is currently running on the host system.
+         */
+        fun hasRunningProcesses(): Boolean {
+            return findRunningProcesses().isNotEmpty()
+        }
+
+        /**
+         * Forcibly terminates all lingering llama-server OS processes found on the host system.
+         */
+        fun killAllRunningProcesses(logger: PluginLogger? = null) {
+            val processes = findRunningProcesses()
+            if (processes.isEmpty()) {
+                logger?.info("[LlamaServerManager] No running llama-server OS processes detected.")
+                return
+            }
+            logger?.info("[LlamaServerManager] Found ${processes.size} active llama-server OS process(es). Terminating...")
+            val isWindows = LlamaBinaryDownloader.isWindows()
+            for (proc in processes) {
+                val pid = proc.pid()
+                logger?.info("[LlamaServerManager] Terminating process PID=$pid")
+                if (isWindows) {
+                    try {
+                        ProcessBuilder("taskkill", "/PID", pid.toString(), "/T", "/F").start().waitFor(2, TimeUnit.SECONDS)
+                    } catch (_: Exception) {}
+                }
+                try {
+                    proc.descendants().forEach { it.destroyForcibly() }
+                    proc.destroyForcibly()
+                } catch (_: Exception) {}
+            }
+        }
 
         /**
          * Finds an available free TCP port on localhost.
@@ -394,13 +464,32 @@ class LlamaServerManager(
                 return@withLock existing
             } else {
                 logger?.warn("[LlamaServerManager] Existing session at ${existing.baseUrl} is unresponsive. Restarting...")
+                existing.process?.let { unregisterProcess(it) }
                 existing.close()
                 activeSession = null
             }
         } else if (existing != null) {
             logger?.info("[LlamaServerManager] Model/mmproj changed (previous: ${existing.modelPath} [${existing.mmprojPath}], new: $modelPath [${config.mmprojPath}]). Stopping previous server...")
+            existing.process?.let { unregisterProcess(it) }
             existing.close()
             activeSession = null
+        }
+
+        // Check if an already running external or managed instance is active on the configured port
+        if (config.port > 0) {
+            val targetUrl = "http://${config.host}:${config.port}"
+            if (client.checkHealth(targetUrl, logger)) {
+                logger?.info("[LlamaServerManager] Detected already running, healthy llama-server at $targetUrl. Attaching without spawning duplicate.")
+                val session = LlamaServerSession(
+                    baseUrl = targetUrl,
+                    modelPath = modelPath,
+                    process = null,
+                    isRemote = false,
+                    mmprojPath = config.mmprojPath
+                )
+                activeSession = session
+                return@withLock session
+            }
         }
 
         val executablePath = resolveExecutable(config, fileSystem, logger, progress)
@@ -415,6 +504,7 @@ class LlamaServerManager(
             config = effectiveConfig,
             logger = logger
         )
+        registerProcess(process)
         process.start()
 
         // Wait for health check
@@ -433,6 +523,7 @@ class LlamaServerManager(
                 if (exitCode != null && exitCode != 0) {
                     val stderrSnippet = process.lastStderr.ifBlank { "No stderr captured." }
                     logger?.error("[LlamaServerManager] llama-server process exited with code $exitCode during startup: $stderrSnippet")
+                    unregisterProcess(process)
                     throw IllegalStateException("llama-server process exited with code $exitCode during startup: $stderrSnippet")
                 } else if (exitCode == 0) {
                     consecutiveFailures++
@@ -450,6 +541,7 @@ class LlamaServerManager(
             if (client.checkHealth(baseUrl, logger)) {
                 ready = true
             } else {
+                unregisterProcess(process)
                 process.stop()
                 val stderrSnippet = process.lastStderr
                 val extraMsg = if (stderrSnippet.isNotBlank()) "\nRecent server output:\n$stderrSnippet" else ""
@@ -464,14 +556,23 @@ class LlamaServerManager(
     }
 
     /**
-     * Stops the currently active server session if running.
+     * Stops the currently active server session if running, optionally terminating any lingering orphan processes.
      */
-    suspend fun stopActiveServer(logger: PluginLogger? = null) = mutex.withLock {
+    suspend fun stopActiveServer(logger: PluginLogger? = null, terminateOrphans: Boolean = false) = mutex.withLock {
         val existing = activeSession
         if (existing != null) {
             logger?.info("[LlamaServerManager] Stopping active llama-server session at ${existing.baseUrl}...")
+            existing.process?.let { unregisterProcess(it) }
             existing.close()
             activeSession = null
         }
+        if (terminateOrphans) {
+            killAllRunningProcesses(logger)
+        }
     }
+
+    /**
+     * Stops both active sessions and any orphan llama-server OS processes.
+     */
+    suspend fun stopAllServers(logger: PluginLogger? = null) = stopActiveServer(logger, terminateOrphans = true)
 }

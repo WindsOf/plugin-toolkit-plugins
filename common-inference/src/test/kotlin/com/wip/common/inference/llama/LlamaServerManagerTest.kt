@@ -113,4 +113,35 @@ class LlamaServerManagerTest {
         assertTrue(candidates.any { it.contains("llama-server") })
         assertTrue(candidates.any { it.contains("llama") })
     }
+
+    @Test
+    fun testFindRunningProcessesDoesNotThrow() {
+        val running = LlamaServerManager.findRunningProcesses()
+        assertNotNull(running)
+        // Should not throw and returns a list
+        val hasAny = LlamaServerManager.hasRunningProcesses()
+        assertEquals(running.isNotEmpty(), hasAny)
+    }
+
+    @Test
+    fun testReuseRunningServerOnPort() = runBlocking {
+        val mockClient = mockk<LlamaInferenceClient>()
+        coEvery { mockClient.checkHealth("http://127.0.0.1:8080", any()) } returns true
+
+        val mockFs = mockk<PluginFileSystem>()
+        val manager = LlamaServerManager(client = mockClient)
+
+        val config = LlamaServerConfig(
+            port = 8080,
+            host = "127.0.0.1"
+        )
+
+        val session = manager.getOrStartServer("models/test.gguf", config, mockFs)
+        assertNotNull(session)
+        assertEquals("http://127.0.0.1:8080", session.baseUrl)
+        assertEquals("models/test.gguf", session.modelPath)
+
+        // Stopping active server
+        manager.stopActiveServer()
+    }
 }

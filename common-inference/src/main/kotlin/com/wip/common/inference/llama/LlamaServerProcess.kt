@@ -25,9 +25,18 @@ class LlamaServerProcess(
     private var stdoutJob: Job? = null
     private var stderrJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO)
+    private var targetPid: Long? = null
+
+    val pid: Long?
+        get() = targetPid ?: try { process?.pid() } catch (_: Exception) { null }
 
     val isRunning: Boolean
-        get() = process?.isAlive == true
+        get() {
+            val proc = process ?: return false
+            if (proc.isAlive) return true
+            val resolvedPid = targetPid ?: return false
+            return ProcessHandle.of(resolvedPid).map { it.isAlive }.orElse(false)
+        }
 
     val exitCode: Int?
         get() = try { process?.exitValue() } catch (_: Exception) { null }
@@ -106,6 +115,18 @@ class LlamaServerProcess(
 
         val proc = processBuilder.start()
         this.process = proc
+        this.targetPid = proc.pid()
+
+        if (isWindowsApp) {
+            try {
+                Thread.sleep(150)
+                val child = proc.descendants().findFirst()
+                if (child.isPresent) {
+                    this.targetPid = child.get().pid()
+                    logger?.info("[LlamaServerProcess] Resolved actual child process PID: ${this.targetPid}")
+                }
+            } catch (_: Exception) {}
+        }
 
         stdoutJob = scope.launch {
             try {
@@ -146,33 +167,53 @@ class LlamaServerProcess(
      * Gracefully stops the process, with a fallback to forcible destruction.
      */
     fun stop(timeoutSeconds: Long = 5L) {
-        val proc = process ?: return
-        if (!proc.isAlive) return
+        val proc = process
+        val resolvedPid = targetPid ?: proc?.pid()
 
-        logger?.info("[LlamaServerProcess] Stopping llama-server process (PID=${proc.pid()})...")
-        try {
-            proc.descendants().forEach { child ->
-                try { child.destroy() } catch (_: Exception) {}
+        if (resolvedPid == null && proc == null) return
+
+        logger?.info("[LlamaServerProcess] Stopping llama-server process (PID=$resolvedPid)...")
+
+        val isWindows = System.getProperty("os.name", "").lowercase().contains("win")
+
+        // 1. On Windows, taskkill /PID <pid> /T /F terminates the entire process tree reliably
+        if (isWindows && resolvedPid != null) {
+            try {
+                val killPb = ProcessBuilder("taskkill", "/PID", resolvedPid.toString(), "/T", "/F")
+                val killProc = killPb.start()
+                killProc.waitFor(2, TimeUnit.SECONDS)
+                logger?.info("[LlamaServerProcess] taskkill /PID $resolvedPid /T /F finished with code: ${killProc.exitValue()}")
+            } catch (e: Exception) {
+                logger?.warn("[LlamaServerProcess] taskkill failed: ${e.message}")
             }
-            proc.destroy()
-            if (!proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-                logger?.warn("[LlamaServerProcess] llama-server did not terminate within ${timeoutSeconds}s. Forcing kill...")
+        }
+
+        // 2. Kill via ProcessHandle descendants and self
+        if (resolvedPid != null) {
+            try {
+                ProcessHandle.of(resolvedPid).ifPresent { handle ->
+                    handle.descendants().forEach { child ->
+                        try { child.destroyForcibly() } catch (_: Exception) {}
+                    }
+                    try { handle.destroyForcibly() } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 3. Fallback on standard Process API
+        if (proc != null && proc.isAlive) {
+            try {
                 proc.descendants().forEach { child ->
                     try { child.destroyForcibly() } catch (_: Exception) {}
                 }
                 proc.destroyForcibly()
-                proc.waitFor(3, TimeUnit.SECONDS)
-            }
-        } catch (_: Exception) {
-            proc.descendants().forEach { child ->
-                try { child.destroyForcibly() } catch (_: Exception) {}
-            }
-            proc.destroyForcibly()
+                proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)
+            } catch (_: Exception) {}
         }
 
         stdoutJob?.cancel()
         stderrJob?.cancel()
-        logger?.info("[LlamaServerProcess] llama-server process stopped.")
+        logger?.info("[LlamaServerProcess] llama-server process cleanup completed.")
     }
 
     override fun close() {

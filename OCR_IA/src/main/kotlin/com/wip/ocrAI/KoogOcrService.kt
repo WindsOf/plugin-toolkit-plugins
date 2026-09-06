@@ -5,6 +5,7 @@ import ai.koog.prompt.executor.clients.openai.OpenAILLMClient
 import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
 import ai.koog.prompt.executor.clients.google.GoogleLLMClient
 import ai.koog.prompt.executor.clients.anthropic.AnthropicLLMClient
+import com.wip.common.inference.lmstudio.LmStudioManager
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
@@ -181,49 +182,13 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
                 MultiLLMPromptExecutor(OpenAILLMClient(apiKey = key, baseClient = createKoogHttpClient()))
             }
             AIModel.LM_STUDIO -> {
-                val key = settings.lmStudioApiKey!!.ifBlank { "lm-studio" }
-                val baseUrl = settings.lmStudioUrl!!.ifBlank { "http://localhost:1234/v1" }.trim().removeSuffix("/")
-                val customModelId = settings.lmStudioModelName!!.ifBlank { "default-model" }
-                
-                val wrapperClient = object : OpenAILLMClient(apiKey = key, settings = OpenAIClientSettings(baseUrl = baseUrl), baseClient = createKoogHttpClient()) {
-                    private val fullCapabilities = ai.koog.prompt.executor.clients.openai.OpenAIModels.Chat.GPT4o.capabilities
-                    
-                    private fun injectCapabilities(model: LLModel): LLModel {
-                        return if (model.capabilities.isNullOrEmpty()) {
-                            LLModel(
-                                provider = model.provider,
-                                id = model.id,
-                                capabilities = fullCapabilities,
-                                contextLength = 128000,
-                                maxOutputTokens = 16384
-                            )
-                        } else model
-                    }
-
-                    override suspend fun execute(
-                        prompt: Prompt,
-                        model: LLModel,
-                        tools: List<ToolDescriptor>
-                    ): List<Message.Response> {
-                        return super.execute(prompt, injectCapabilities(model), tools)
-                    }
-
-                    override fun executeStreaming(
-                        prompt: Prompt,
-                        model: LLModel,
-                        tools: List<ToolDescriptor>
-                    ): Flow<StreamFrame> {
-                        return super.executeStreaming(prompt, injectCapabilities(model), tools)
-                    }
-
-                    override suspend fun executeMultipleChoices(
-                        prompt: Prompt,
-                        model: LLModel,
-                        tools: List<ToolDescriptor>
-                    ): List<LLMChoice> {
-                        return super.executeMultipleChoices(prompt, injectCapabilities(model), tools)
-                    }
-                }
+                val key = settings.lmStudioApiKey?.ifBlank { "lm-studio" } ?: "lm-studio"
+                val baseUrl = (settings.lmStudioUrl ?: "http://localhost:1234/v1").ifBlank { "http://localhost:1234/v1" }.trim().removeSuffix("/")
+                val wrapperClient = LmStudioManager.Default.createKoogClient(
+                    baseUrl = baseUrl,
+                    apiKey = key,
+                    baseHttpClient = createKoogHttpClient()
+                )
                 MultiLLMPromptExecutor(wrapperClient)
             }
             AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M -> {
@@ -296,7 +261,15 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
             throw e
         }
 
-        val modelId = if (aiModel == AIModel.LM_STUDIO) settings.lmStudioModelName!!.ifBlank { "default-model" } else aiModel.id
+        val modelId = if (aiModel == AIModel.LM_STUDIO) {
+            val baseUrl = (settings.lmStudioUrl ?: "http://localhost:1234/v1").ifBlank { "http://localhost:1234/v1" }
+            LmStudioManager.Default.resolveModelName(
+                baseUrl = baseUrl,
+                configuredModel = settings.lmStudioModelName,
+                apiKey = settings.lmStudioApiKey,
+                logger = logger
+            )
+        } else aiModel.id
         logger.info("Defining LLModel: $modelId with provider ${getProvider(aiModel)}")
         val model = LLModel(
             provider = getProvider(aiModel),
@@ -541,7 +514,15 @@ class KoogOcrService(private val context: PluginContext, private val settings: O
         }
         
         val isGemma = aiModel == AIModel.GEMMA_26B || aiModel == AIModel.GEMMA_31B
-        val modelId = if (aiModel == AIModel.LM_STUDIO) settings.lmStudioModelName!!.ifBlank { "default-model" } else aiModel.id
+        val modelId = if (aiModel == AIModel.LM_STUDIO) {
+            val baseUrl = (settings.lmStudioUrl ?: "http://localhost:1234/v1").ifBlank { "http://localhost:1234/v1" }
+            LmStudioManager.Default.resolveModelName(
+                baseUrl = baseUrl,
+                configuredModel = settings.lmStudioModelName,
+                apiKey = settings.lmStudioApiKey,
+                logger = logger
+            )
+        } else aiModel.id
         logger.info("Found ${files.size} image(s). Advanced OCR with model: $modelId (isGemma: $isGemma, hasVisionResult=${chapterVisionResult != null}, cropPadding=$cropPadding)")
 
         val executor = try {

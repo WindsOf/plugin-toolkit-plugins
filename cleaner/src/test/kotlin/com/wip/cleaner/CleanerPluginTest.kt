@@ -502,5 +502,41 @@ class CleanerPluginTest {
             assertTrue(File(result.cleanedImagePaths[1]).exists())
         }
     }
+
+    @Test
+    fun testDownloadModelActions() {
+        val cleaner = CleanerPlugin()
+        val logger = FakeLogger()
+        val toastMessages = mutableListOf<String>()
+        val dummyYaml = """
+            name: TestModel
+            type: INPAINTING
+            version: 1
+            files:
+              weights: test_model.onnx
+            inputs: []
+            outputs: []
+            executionProviders: []
+        """.trimIndent()
+        val pluginFs = mockk<PluginFileSystem>(relaxed = true) {
+            coEvery { exists(any()) } returns true
+            coEvery { readTextFile(any()) } returns dummyYaml
+        }
+        val context = mockk<PluginContext>(relaxed = true) {
+            every { this@mockk.logger } returns logger
+            every { this@mockk.fileSystem } returns pluginFs
+            every { showToast(any()) } answers {
+                toastMessages.add(firstArg())
+            }
+        }
+
+        runBlocking {
+            cleaner.downloadModel(InpaintingDownloadModel.LAMA, context)
+            assertTrue(toastMessages.any { it.contains("Downloaded model: LAMA") })
+
+            cleaner.downloadAllModels(context)
+            assertTrue(toastMessages.any { it.contains("All inpainting models downloaded successfully") })
+        }
+    }
 }
 

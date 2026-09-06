@@ -1,3 +1,8 @@
+Version: 1.1.1
+Date: 2026-09-05
+Added:
+  - Added Toolkit 2.0.2 toast notifications to downloadModel and downloadAllModels plugin actions.
+-------------------------------------------------------------------------------------------------
 Version: 1.1.0
 Date: 2026-08-30
 Added:

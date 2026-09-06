@@ -52,7 +52,7 @@ import org.wip.plugintoolkit.api.annotations.RequiresLock
 @PluginInfo(
     id = "com.wip.vision",
     name = "Vision",
-    version = "1.0.1",
+    version = "1.0.2",
     description = "Object detection and instance segmentation plugin using YOLO and RF-DETR.",
     supportedOs = [OS.WINDOWS, OS.LINUX]
 )
@@ -109,10 +109,13 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
         logger.info("[Vision] downloadModel action triggered for: ${targetModel.name} (${targetModel.modelId})")
         val result = ModelManager.Default.downloadModel(targetModel.modelId, context)
         if (result.isFailure) {
-            logger.error("[Vision] downloadModel action failed for ${targetModel.modelId}: ${result.exceptionOrNull()?.message}")
+            val err = result.exceptionOrNull()?.message ?: "Unknown error"
+            logger.error("[Vision] downloadModel action failed for ${targetModel.modelId}: $err")
+            context.showToast("Failed to download model ${targetModel.name}: $err")
             throw result.exceptionOrNull() ?: RuntimeException("Failed to download model ${targetModel.modelId}")
         }
         logger.info("[Vision] downloadModel action succeeded for: ${targetModel.modelId}")
+        context.showToast("Downloaded model: ${targetModel.name} successfully!")
     }
 
     @PluginAction(
@@ -125,10 +128,13 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
         val visionIds = VisionModel.entries.map { it.modelId }
         val result = ModelManager.Default.downloadModels(visionIds, context)
         if (result.isFailure) {
-            logger.error("[Vision] downloadAllModels action failed: ${result.exceptionOrNull()?.message}")
+            val err = result.exceptionOrNull()?.message ?: "Unknown error"
+            logger.error("[Vision] downloadAllModels action failed: $err")
+            context.showToast("Failed to download all vision models: $err")
             throw result.exceptionOrNull() ?: RuntimeException("Failed to download all vision models")
         }
         logger.info("[Vision] downloadAllModels action succeeded")
+        context.showToast("All vision models downloaded successfully!")
     }
 
     @PluginSetup

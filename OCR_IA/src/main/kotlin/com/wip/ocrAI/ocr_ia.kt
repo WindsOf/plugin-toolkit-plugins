@@ -3,6 +3,7 @@ package com.wip.ocrAI
 import com.wip.common.inference.llama.LlamaBackend
 import com.wip.common.inference.llama.LlamaBinaryDownloader
 import com.wip.common.inference.llama.LlamaServerManager
+import com.wip.common.inference.lmstudio.LmStudioManager
 import com.wip.common.models.AdvancedOCRResult
 import com.wip.common.models.ChapterVisionResult
 import com.wip.common.models.ModelCatalog
@@ -33,7 +34,7 @@ import java.io.File
 @PluginInfo(
     id = "com.wip.ocr_ia",
     name = "OCR IA",
-    version = "2.7.1",
+    version = "2.7.2",
     description = "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog",
     supportedOs = [OS.WINDOWS]
 )
@@ -77,10 +78,13 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
         logger.info("[OCR_IA] downloadModel action triggered for: ${targetModel.name} (${targetModel.modelId})")
         val result = ModelManager.Default.downloadModel(targetModel.modelId, context)
         if (result.isFailure) {
-            logger.error("[OCR_IA] downloadModel action failed for ${targetModel.modelId}: ${result.exceptionOrNull()?.message}")
+            val errMsg = result.exceptionOrNull()?.message ?: "Unknown error"
+            logger.error("[OCR_IA] downloadModel action failed for ${targetModel.modelId}: $errMsg")
+            context.showToast("Failed to download model ${targetModel.name}: $errMsg")
             throw result.exceptionOrNull() ?: RuntimeException("Failed to download model ${targetModel.modelId}")
         }
         logger.info("[OCR_IA] downloadModel action succeeded for: ${targetModel.modelId}")
+        context.showToast("Downloaded model: ${targetModel.name} (${targetModel.modelId}) successfully!")
     }
 
     @PluginAction(
@@ -88,11 +92,17 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
         description = "Downloads all required ONNX or GGUF OCR models and descriptors to local plugin storage"
     )
     suspend fun downloadAllModels(context: PluginContext) {
+        val logger = context.logger
         val ocrIds = OcrDownloadModel.entries.map { it.modelId }
         val result = ModelManager.Default.downloadModels(ocrIds, context)
         if (result.isFailure) {
+            val errMsg = result.exceptionOrNull()?.message ?: "Unknown error"
+            logger.error("[OCR_IA] downloadAllModels failed: $errMsg")
+            context.showToast("Failed to download all OCR models: $errMsg")
             throw result.exceptionOrNull() ?: RuntimeException("Failed to download all models")
         }
+        logger.info("[OCR_IA] downloadAllModels succeeded")
+        context.showToast("All OCR models downloaded successfully!")
     }
 
     @PluginAction(
@@ -112,6 +122,8 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
             logger.info("[OCR_IA] • ${m.name.padEnd(20)} ($status)")
         }
         logger.info("[OCR_IA] ===========================================")
+        val installedCount = OcrDownloadModel.entries.count { locks[it.modelId] == true || locks["model:${it.modelId}"] == true }
+        context.showToast("OCR Models: $installedCount / ${OcrDownloadModel.entries.size} installed")
     }
 
     @PluginAction(
@@ -150,10 +162,13 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
 
         if (result.isFailure) {
             val err = result.exceptionOrNull()
-            logger.error("[OCR_IA] installLlamaServer failed: ${err?.message}", err)
+            val errMsg = err?.message ?: "Unknown error"
+            logger.error("[OCR_IA] installLlamaServer failed: $errMsg", err)
+            context.showToast("Failed to install llama-server: $errMsg")
             throw err ?: RuntimeException("Failed to install llama-server")
         }
         logger.info("[OCR_IA] installLlamaServer succeeded: ${result.getOrNull()}")
+        context.showToast("llama-server ($targetBackend) installed successfully!")
     }
 
     @PluginAction(
@@ -177,20 +192,45 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
                 logger.info("[OCR_IA] Version:    ${detection.version}")
             }
             logger.info("[OCR_IA] ===============================")
+            context.showToast("llama-server detected: ${detection.source} (${detection.version ?: "OK"})")
         } else {
             logger.warn("[OCR_IA] llama-server was not detected on this system or plugin storage. Use the 'Install Llama Server' action to download and configure it.")
+            context.showToast("llama-server was not detected on system or plugin storage.")
         }
     }
 
     @PluginAction(
         name = "Stop Llama Server",
-        description = "Gracefully stops any active local llama-server instance"
+        description = "Gracefully stops any active local llama-server instance and lingering orphan processes"
     )
     suspend fun stopLlamaServer(context: PluginContext) {
         val logger = context.logger
         logger.info("[OCR_IA] stopLlamaServer action triggered.")
-        LlamaServerManager.Default.stopActiveServer(logger)
-        logger.info("[OCR_IA] Any active llama-server has been stopped.")
+        LlamaServerManager.Default.stopAllServers(logger)
+        logger.info("[OCR_IA] Active and lingering llama-server instances have been stopped.")
+        context.showToast("Active and lingering llama-server instances stopped.")
+    }
+
+    @PluginAction(
+        name = "Test LM Studio Connection",
+        description = "Checks connectivity to LM Studio and discovers active and available models"
+    )
+    suspend fun testLmStudioConnection(context: PluginContext) {
+        val logger = context.logger
+        val url = settings.lmStudioUrl?.ifBlank { "http://localhost:1234/v1" } ?: "http://localhost:1234/v1"
+        logger.info("[OCR_IA] Testing LM Studio connection at: $url")
+        val status = LmStudioManager.Default.checkStatus(baseUrl = url, apiKey = settings.lmStudioApiKey, logger = logger)
+        if (status.connected) {
+            val modelDesc = if (!status.activeModel.isNullOrBlank()) " (Active model: ${status.activeModel})" else ""
+            val msg = "Connected to LM Studio at $url successfully!$modelDesc"
+            logger.info("[OCR_IA] $msg")
+            context.showToast(msg)
+        } else {
+            val err = status.errorMessage ?: "Connection refused or unreachable"
+            val msg = "Failed to connect to LM Studio at $url: $err"
+            logger.warn("[OCR_IA] $msg")
+            context.showToast(msg)
+        }
     }
     
     @Capability(

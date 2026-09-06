@@ -1,3 +1,13 @@
+Version: 2.7.2
+Date: 2026-09-05
+Added:
+  - Integrated Toolkit 2.0.2 toast notifications across model download, server detection/installation, and server lifecycle actions.
+  - Added 'Test LM Studio Connection' action to verify connectivity and display the currently loaded model.
+  - Added support for auto-resolving active LM Studio models via /v1/models when model setting is set to "default" or left empty.
+  - Enabled discovering local GGUF weights and mmproj files across standard LM Studio cache paths.
+Fixed:
+  - Robust llama-server lifecycle handling: Windows process tree termination via taskkill (/T /F), JVM shutdown hook cleanup, and stopping lingering server instances.
+-------------------------------------------------------------------------------------------------
 Version: 2.7.1
 Date: 2026-08-29
 Fixed:

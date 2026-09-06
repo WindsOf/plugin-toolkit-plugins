@@ -19,7 +19,17 @@ import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.params.LLMParams
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
+import com.wip.common.inference.lmstudio.LmStudioManager
 import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.PluginSignal
 import kotlinx.coroutines.delay
@@ -77,49 +87,13 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
 
     private fun getExecutor(modelId: String) = when (modelId) {
         AIModel.LM_STUDIO.id -> {
-            val key = settings.lmStudioApiKey!!.ifBlank { "lm-studio" }
-            val baseUrl = settings.lmStudioUrl!!.ifBlank { "http://localhost:1234/v1" }.trim().removeSuffix("/")
-            val customModelId = settings.lmStudioModelName!!.ifBlank { "default-model" }
-            
-            val wrapperClient = object : OpenAILLMClient(apiKey = key, settings = OpenAIClientSettings(baseUrl = baseUrl), baseClient = createKoogHttpClient()) {
-                private val fullCapabilities = ai.koog.prompt.executor.clients.openai.OpenAIModels.Chat.GPT4o.capabilities
-                
-                private fun injectCapabilities(model: LLModel): LLModel {
-                    return if (model.capabilities.isNullOrEmpty()) {
-                        LLModel(
-                            provider = model.provider,
-                            id = model.id,
-                            capabilities = fullCapabilities,
-                            contextLength = 128000,
-                            maxOutputTokens = 16384
-                        )
-                    } else model
-                }
-
-                override suspend fun execute(
-                    prompt: Prompt,
-                    model: LLModel,
-                    tools: List<ToolDescriptor>
-                ): List<Message.Response> {
-                    return super.execute(prompt, injectCapabilities(model), tools)
-                }
-
-                override fun executeStreaming(
-                    prompt: Prompt,
-                    model: LLModel,
-                    tools: List<ToolDescriptor>
-                ): Flow<StreamFrame> {
-                    return super.executeStreaming(prompt, injectCapabilities(model), tools)
-                }
-
-                override suspend fun executeMultipleChoices(
-                    prompt: Prompt,
-                    model: LLModel,
-                    tools: List<ToolDescriptor>
-                ): List<LLMChoice> {
-                    return super.executeMultipleChoices(prompt, injectCapabilities(model), tools)
-                }
-            }
+            val key = settings.lmStudioApiKey?.ifBlank { "lm-studio" } ?: "lm-studio"
+            val baseUrl = (settings.lmStudioUrl ?: "http://localhost:1234/v1").ifBlank { "http://localhost:1234/v1" }.trim().removeSuffix("/")
+            val wrapperClient = LmStudioManager.Default.createKoogClient(
+                baseUrl = baseUrl,
+                apiKey = key,
+                baseHttpClient = createKoogHttpClient()
+            )
             MultiLLMPromptExecutor(wrapperClient)
         }
         else -> {
@@ -377,7 +351,15 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
         chapterContext: String?
     ): List<String> {
         val executor = getExecutor(modelId)
-        val finalModelId = if (modelId == AIModel.LM_STUDIO.id) settings.lmStudioModelName!!.ifBlank { "default-model" } else modelId
+        val finalModelId = if (modelId == AIModel.LM_STUDIO.id) {
+            val baseUrl = (settings.lmStudioUrl ?: "http://localhost:1234/v1").ifBlank { "http://localhost:1234/v1" }
+            LmStudioManager.Default.resolveModelName(
+                baseUrl = baseUrl,
+                configuredModel = settings.lmStudioModelName,
+                apiKey = settings.lmStudioApiKey,
+                logger = logger
+            )
+        } else modelId
         
         val model = LLModel(
             provider = getProvider(modelId),

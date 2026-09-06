@@ -87,11 +87,17 @@ class OcrIATest {
 
     @Test
     fun testActions() = kotlinx.coroutines.runBlocking {
-        val plugin = OCR_IA(OcrIASettings())
+        val plugin = OCR_IA(OcrIASettings(lmStudioUrl = "http://127.0.0.1:59999/v1"))
+        val toasts = mutableListOf<String>()
         val context = io.mockk.mockk<PluginContext>(relaxed = true)
+        io.mockk.every { context.showToast(any()) } answers {
+            toasts.add(firstArg())
+        }
         plugin.detectLlamaServer(context)
         plugin.checkInstalledModels(context)
         plugin.stopLlamaServer(context)
+        plugin.testLmStudioConnection(context)
+        assertTrue(toasts.size >= 4, "Expected at least 4 toast messages from actions")
     }
     
     @Test

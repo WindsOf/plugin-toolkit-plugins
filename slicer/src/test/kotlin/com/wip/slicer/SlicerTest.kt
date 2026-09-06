@@ -165,6 +165,41 @@ class SlicerTest {
     }
 
     @Test
+    fun testDownloadModelActions() {
+        val slicer = Slicer()
+        val logger = FakeLogger()
+        val toastMessages = mutableListOf<String>()
+        val dummyYaml = """
+            name: YOLO
+            type: OBJECT_DETECTION
+            version: 1
+            onnxFile: yolo-det-x-best-v3.onnx
+            inputs: []
+            outputs: []
+            executionProviders: []
+        """.trimIndent()
+        val pluginFs = io.mockk.mockk<org.wip.plugintoolkit.api.PluginFileSystem>(relaxed = true) {
+            io.mockk.coEvery { exists(any()) } returns true
+            io.mockk.coEvery { readTextFile(any()) } returns dummyYaml
+        }
+        val context = io.mockk.mockk<PluginContext>(relaxed = true) {
+            io.mockk.every { this@mockk.logger } returns logger
+            io.mockk.every { this@mockk.fileSystem } returns pluginFs
+            io.mockk.every { showToast(any()) } answers {
+                toastMessages.add(firstArg())
+            }
+        }
+
+        kotlinx.coroutines.runBlocking {
+            slicer.downloadModel(SlicerDownloadModel.YOLO_DET_X, context)
+            assertTrue(toastMessages.any { it.contains("Downloaded model: YOLO Det X Best V3") })
+
+            slicer.downloadAllModels(context)
+            assertTrue(toastMessages.any { it.contains("All slicer models downloaded successfully") })
+        }
+    }
+
+    @Test
     fun testSlicerModelEnums() {
         assertEquals("yolo-det-x-best-v3", SlicerModel.YOLO_DET_X.modelId)
         assertEquals(SlicerModel.YOLO_DET_X, SlicerModel.fromModelId("yolo-det-x-best-v3"))

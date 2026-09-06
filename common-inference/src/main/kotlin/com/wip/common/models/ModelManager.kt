@@ -1,5 +1,6 @@
 package com.wip.common.models
 
+import com.wip.common.inference.lmstudio.LmStudioManager
 import java.io.File
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
@@ -110,54 +111,16 @@ class ModelManager(
      * Searches standard LM Studio directories for local GGUF model weights.
      */
     fun findLmStudioModelFile(modelId: String): File? {
-        val userHome = System.getProperty("user.home") ?: return null
-        val candidates = mutableListOf<File>()
         val catalogEntry = ModelCatalog.findById(modelId)
         val targetName = catalogEntry?.id ?: modelId.trim()
-
-        val lmStudioSpecific = File(userHome, ".lmstudio/models/sahilchachra/Unlimited-OCR-GGUF")
-        if (lmStudioSpecific.exists() && lmStudioSpecific.isDirectory) {
-            lmStudioSpecific.listFiles()?.forEach { candidates.add(it) }
-        }
-
-        val lmStudioGeneral = File(userHome, ".lmstudio/models")
-        if (lmStudioGeneral.exists() && lmStudioGeneral.isDirectory) {
-            lmStudioGeneral.walkTopDown().maxDepth(3).filter { it.isFile && it.extension.equals("gguf", ignoreCase = true) }.forEach {
-                candidates.add(it)
-            }
-        }
-
-        return candidates.firstOrNull { file ->
-            val nameWithoutExt = file.nameWithoutExtension
-            file.name.equals("$targetName.gguf", ignoreCase = true) ||
-            nameWithoutExt.equals(targetName, ignoreCase = true) ||
-            (targetName.contains("bf16", ignoreCase = true) && nameWithoutExt.contains("bf16", ignoreCase = true)) ||
-            (targetName.contains("q8_0", ignoreCase = true) && nameWithoutExt.contains("q8_0", ignoreCase = true)) ||
-            (targetName.contains("q4_k_m", ignoreCase = true) && nameWithoutExt.contains("q4_k_m", ignoreCase = true)) ||
-            (targetName.contains("iq2_m", ignoreCase = true) && nameWithoutExt.contains("iq2_m", ignoreCase = true))
-        }
+        return LmStudioManager.Default.findLmStudioModelFile(targetName)
     }
 
     /**
      * Searches standard LM Studio directories or local plugin storage for the multimodal projector (mmproj).
      */
     fun findLmStudioMmprojFile(): File? {
-        val userHome = System.getProperty("user.home") ?: return null
-        val lmStudioSpecific = File(userHome, ".lmstudio/models/sahilchachra/Unlimited-OCR-GGUF")
-        if (lmStudioSpecific.exists() && lmStudioSpecific.isDirectory) {
-            val direct = File(lmStudioSpecific, "mmproj-Unlimited-OCR-F16.gguf")
-            if (direct.exists()) return direct
-            val anyMmproj = lmStudioSpecific.listFiles()?.firstOrNull { it.name.startsWith("mmproj", ignoreCase = true) && it.extension.equals("gguf", ignoreCase = true) }
-            if (anyMmproj != null) return anyMmproj
-        }
-
-        val lmStudioGeneral = File(userHome, ".lmstudio/models")
-        if (lmStudioGeneral.exists() && lmStudioGeneral.isDirectory) {
-            return lmStudioGeneral.walkTopDown().maxDepth(3).firstOrNull {
-                it.isFile && it.name.startsWith("mmproj", ignoreCase = true) && it.extension.equals("gguf", ignoreCase = true)
-            }
-        }
-        return null
+        return LmStudioManager.Default.findLmStudioMmprojFile()
     }
 
     /**
