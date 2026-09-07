@@ -34,6 +34,12 @@ class BetterIMGTest {
     }
 
     @Test
+    fun testImageTypeEnum() {
+        assertEquals("Manga", ImageType.Manga.name)
+        assertEquals("Manwha", ImageType.Manwha.name)
+    }
+
+    @Test
     fun testLifecycleHooks() {
         val plugin = BetterIMG()
         val logger = FakeLogger()
