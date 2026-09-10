@@ -1,3 +1,8 @@
+Version: 1.1.2
+Date: 2026-09-10
+Changes:
+  - Renamed plugin from `Cleaner` to `WOM Cleaner`
+-------------------------------------------------------------------------------------------------
 Version: 1.1.1
 Date: 2026-09-05
 Added:

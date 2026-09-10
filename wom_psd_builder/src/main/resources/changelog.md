@@ -1,3 +1,8 @@
+Version: 5.3.3
+Date: 2026-09-10
+Changes:
+  - Renamed plugin from `PSD Builder Native` to `WOM PSD Builder`
+-------------------------------------------------------------------------------------------------
 Version: 5.3.2
 Date: 2026-08-29
 Fixed:

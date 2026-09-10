@@ -36,8 +36,8 @@ import javax.imageio.spi.IIORegistry
 
 @PluginInfo(
     id = "com.wip.cleaner",
-    name = "Cleaner",
-    version = "1.1.1",
+    name = "WOM Cleaner",
+    version = "1.1.2",
     description = "Inpaints and erases segmented text and artifacts from images using segmentation maps.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )

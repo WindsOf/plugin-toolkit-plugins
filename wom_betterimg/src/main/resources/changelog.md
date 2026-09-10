@@ -1,8 +1,8 @@
 Version: 2.5.1
 Date: 2026-09-10
 Changes:
-- Added advanced parameters tag to some capabilities properties
-- Renamed plugin from `BetterIMG` to `WOM BetterIMG`
+  - Added advanced parameters tag to some capabilities properties
+  - Renamed plugin from `BetterIMG` to `WOM BetterIMG`
 -------------------------------------------------------------------------------------------------
 Version: 2.4.0
 Version: 2.5.0

@@ -32,8 +32,8 @@ import org.wip.plugintoolkit.api.annotations.PluginValidate
 
 @PluginInfo(
     id = "com.wip.ocr_ia",
-    name = "OCR IA",
-    version = "2.7.2",
+    name = "WOM OCR",
+    version = "2.7.3",
     description = "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog",
     supportedOs = [OS.WINDOWS]
 )

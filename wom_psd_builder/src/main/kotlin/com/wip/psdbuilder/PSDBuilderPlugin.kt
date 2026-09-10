@@ -149,8 +149,8 @@ data class PSDBuilderSettings(
 
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
-    name = "PSD Builder Native",
-    version = "5.3.2",
+    name = "WOM PSD Builder",
+    version = "5.3.3",
     description = "A plugin that builds layered PSD files natively in Kotlin.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
@@ -201,7 +201,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         name = "Build PSD from Image and Texts",
         description = "Generates a layered PSD natively in Kotlin from an image, texts and bounding boxes"
     )
-    
+
     suspend fun buildPsdFromInputs(
         @CapabilityInput(description = "Path to the base image (JPG, PNG, WebP)", semanticTypes = ["path/file"])
         imagePath: String,
@@ -534,7 +534,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         coroutineScope {
             val imageDimensions = allImages.map { img ->
                 async(Dispatchers.IO) {
-                    var w = 0;
+                    var w = 0
                     var h = 0
                     val iter = ImageIO.getImageReadersBySuffix(img.extension)
                     if (iter.hasNext()) {

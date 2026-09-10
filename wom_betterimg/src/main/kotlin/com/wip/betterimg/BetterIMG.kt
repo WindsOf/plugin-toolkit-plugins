@@ -40,7 +40,7 @@ enum class ImageType {
 
 @PluginInfo(
     id = "com.wip.betterimg",
-    name = "BetterIMG",
+    name = "WOM BetterIMG",
     version = "2.5.1",
     description = "A plugin that processes images using BetterIMG.",
     supportedOs = [OS.WINDOWS]

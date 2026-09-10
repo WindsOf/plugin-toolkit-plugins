@@ -49,12 +49,12 @@ dependencyResolutionManagement {
 
 plugins { id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0" }
 
-include(":slicer")
-include(":betterimg")
-include(":OCR_IA")
-include(":manhwaTranslatorAI")
-include(":PSD_builder_native")
 include(":common-models")
 include(":common-inference")
-include(":vision")
-include(":cleaner")
+include(":wom_slicer")
+include(":wom_betterimg")
+include(":wom_ocr")
+include(":wom_translator")
+include(":wom_psd_builder")
+include(":wom_vision")
+include(":wom_cleaner")
