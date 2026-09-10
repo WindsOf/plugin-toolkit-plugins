@@ -74,7 +74,7 @@ for p_dir in possible_plugin_dirs:
 from vsscale import ArtCNN  # noqa
 from vsscale.onnx import Backend  # noqa
 from vsdeband import placebo_deband, Grainer  # noqa
-from vsdehalo import fine_dehalo  # noqa
+from vsdehalo import fine_dehalo, hq_dering  # noqa
 from vskernels import Bicubic  # noqa
 from vstools import depth, DitherType  # noqa
 
@@ -231,7 +231,13 @@ def process_image(
         if isinstance(target_width, str):
             tw_lower = target_width.lower()
             if tw_lower in ["1x", "x1"]:
-                target_width, target_height, ai_scaled_clip = clip.width, clip.height, clip
+                target_width, target_height = clip.width, clip.height
+                ai_scaled_clip = ArtCNN.R8F64_JPEG444(
+                    kernel=Bicubic(b=0, c=0),
+                    tilesize=TILE_SIZE,
+                    overlap=OVERLAP,
+                    backend=backend_cfg,
+                ).scale(clip, width=target_width, height=target_height)
             elif tw_lower in ["2x", "x2"]:
                 target_width, target_height = clip.width * 2, clip.height * 2
                 ai_scaled_clip = ArtCNN.R8F64_JPEG444(
@@ -291,6 +297,8 @@ def process_image(
 
         if is_manga:
             cas = core.cas.CAS(dehalo, sharpness=0.8, opt=0)
+            cas= fine_dehalo(cas, brightstr=0.8, rx=2,ry=2, exclude=False, planes=[0])
+            cas= hq_dering(cas, planes=[0])
             grained = Grainer.GAUSS(
                 cas,
                 strength=(grain, grain),
@@ -308,10 +316,12 @@ def process_image(
                 radius=14.0,
                 thr=1,
                 iterations=3,
-                grain=[2, 2, 2],
+                grain=[1, 1, 1],
                 planes=[0, 1, 2],
             )
             cas = core.cas.CAS(deband, sharpness=0.8, opt=0)
+            cas= fine_dehalo(cas, brightstr=0.8, rx=2,ry=2, exclude=False, planes=[0])
+            cas= hq_dering(cas, planes=[0])
             grained = Grainer.PERLIN(
                 cas,
                 strength=(grain * 2, 1),

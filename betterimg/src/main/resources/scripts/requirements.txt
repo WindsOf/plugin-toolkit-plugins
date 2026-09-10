@@ -1,3 +1,4 @@
+--extra-index-url https://pypi.nvidia.com
 --extra-index-url https://jaded-encoding-thaumaturgy.github.io/vs-wheels/simple
 vsjetpack[full,nvidia,cl,amd,vulkan]==2.2.4
 vapoursynth-cas==3.0
