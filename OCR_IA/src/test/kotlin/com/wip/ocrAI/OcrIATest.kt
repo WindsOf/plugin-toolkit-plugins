@@ -17,11 +17,25 @@ class OcrIATest {
 
     private class FakeLogger : PluginLogger {
         val messages = mutableListOf<String>()
-        override fun verbose(message: String) { messages.add("VERBOSE: $message") }
-        override fun debug(message: String) { messages.add("DEBUG: $message") }
-        override fun info(message: String) { messages.add("INFO: $message") }
-        override fun warn(message: String) { messages.add("WARN: $message") }
-        override fun error(message: String, throwable: Throwable?) { messages.add("ERROR: $message") }
+        override fun verbose(message: String) {
+            messages.add("VERBOSE: $message")
+        }
+
+        override fun debug(message: String) {
+            messages.add("DEBUG: $message")
+        }
+
+        override fun info(message: String) {
+            messages.add("INFO: $message")
+        }
+
+        override fun warn(message: String) {
+            messages.add("WARN: $message")
+        }
+
+        override fun error(message: String, throwable: Throwable?) {
+            messages.add("ERROR: $message")
+        }
     }
 
     @Test
@@ -99,7 +113,7 @@ class OcrIATest {
         plugin.testLmStudioConnection(context)
         assertTrue(toasts.size >= 4, "Expected at least 4 toast messages from actions")
     }
-    
+
     @Test
     fun testUnlimitedOcrRunnerParsing() {
         val context = io.mockk.mockk<PluginContext>(relaxed = true)
@@ -155,7 +169,8 @@ class OcrIATest {
         assertEquals(639.2, taggedRegions[0].xmax, 0.01)
 
         // Test 5: Hallucination explanation wall of text (from todebug/1.json)
-        val hallucinationOutput = "text [0, 0, 999, 999]The image contains no text. The OCR result \"1\" is a hallucination and does not correspond to any content in the source image. Therefore, the correct OCR output must reflect the absence of any visible text.\n\n(no text)"
+        val hallucinationOutput =
+            "text [0, 0, 999, 999]The image contains no text. The OCR result \"1\" is a hallucination and does not correspond to any content in the source image. Therefore, the correct OCR output must reflect the absence of any visible text.\n\n(no text)"
         val hallucinationRegions = runner.parseOcrOutput(hallucinationOutput, 940.0, 1918.0)
         assertEquals(0, hallucinationRegions.size, "Explanation hallucination must produce 0 regions")
 
@@ -297,7 +312,12 @@ class OcrIATest {
         assertEquals(0, advancedResult.texts.size)
         assertEquals(0, advancedResult.balloonBoxes.size)
 
-        for (m in listOf(AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M)) {
+        for (m in listOf(
+            AIModel.UNLIMITED_OCR_BF16,
+            AIModel.UNLIMITED_OCR_Q8_0,
+            AIModel.UNLIMITED_OCR_Q4_K_M,
+            AIModel.UNLIMITED_OCR_IQ2_M
+        )) {
             val res = plugin.ocr(
                 input = "non_existent_folder",
                 save = false,

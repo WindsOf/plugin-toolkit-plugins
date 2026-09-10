@@ -11,26 +11,13 @@ import com.wip.common.models.ModelCatalog
 import com.wip.common.models.ModelManager
 import com.wip.common.models.ModelSpec
 import com.wip.common.models.NmsUtils
-import com.wip.common.models.OnnxInferenceEngine
-import com.wip.common.models.OnnxInferenceSession
 import com.wip.common.models.RfDetrPostprocessor
 import com.wip.common.models.SahiConfig
 import com.wip.common.models.SahiInferenceRunner
 import com.wip.common.models.SegmentedObject
 import com.wip.common.models.VisionResult
 import com.wip.common.models.sortedNaturally
-import java.awt.image.BufferedImage
-import java.io.File
-import javax.imageio.ImageIO
-import javax.imageio.spi.IIORegistry
-import kotlin.math.max
-import kotlin.math.min
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.OS
@@ -48,6 +35,10 @@ import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
 import org.wip.plugintoolkit.api.annotations.RequiresLock
+import java.io.File
+import javax.imageio.ImageIO
+import javax.imageio.spi.IIORegistry
+import kotlin.math.max
 
 @PluginInfo(
     id = "com.wip.vision",
@@ -142,8 +133,10 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
         val logger = context.logger
         logger.info("[Vision] setup: Starting Vision Plugin setup...")
         return try {
-            val yoloInstalled = ModelManager.Default.isModelInstalled(ModelCatalog.YOLO_DET_X_ID, context.fileSystem, logger)
-            val rfdetrInstalled = ModelManager.Default.isModelInstalled(ModelCatalog.RFDETR_SEG_2XLARGE_ID, context.fileSystem, logger)
+            val yoloInstalled =
+                ModelManager.Default.isModelInstalled(ModelCatalog.YOLO_DET_X_ID, context.fileSystem, logger)
+            val rfdetrInstalled =
+                ModelManager.Default.isModelInstalled(ModelCatalog.RFDETR_SEG_2XLARGE_ID, context.fileSystem, logger)
             logger.info("[Vision] setup: YOLO installed: $yoloInstalled, RF-DETR installed: $rfdetrInstalled")
 
             if (!yoloInstalled) {
@@ -176,12 +169,15 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
     suspend fun validate(context: PluginContext): Result<Unit> {
         val logger = context.logger
         logger.info("[Vision] validate: Validating Vision Plugin requirements...")
-        val yoloInstalled = ModelManager.Default.isModelInstalled(ModelCatalog.YOLO_DET_X_ID, context.fileSystem, logger)
-        val rfdetrInstalled = ModelManager.Default.isModelInstalled(ModelCatalog.RFDETR_SEG_2XLARGE_ID, context.fileSystem, logger)
+        val yoloInstalled =
+            ModelManager.Default.isModelInstalled(ModelCatalog.YOLO_DET_X_ID, context.fileSystem, logger)
+        val rfdetrInstalled =
+            ModelManager.Default.isModelInstalled(ModelCatalog.RFDETR_SEG_2XLARGE_ID, context.fileSystem, logger)
         logger.info("[Vision] validate: YOLO installed: $yoloInstalled, RF-DETR installed: $rfdetrInstalled")
 
         if (!yoloInstalled || !rfdetrInstalled) {
-            val msg = "Vision models not yet downloaded (YOLO: $yoloInstalled, RF-DETR: $rfdetrInstalled). Please run setup or download actions."
+            val msg =
+                "Vision models not yet downloaded (YOLO: $yoloInstalled, RF-DETR: $rfdetrInstalled). Please run setup or download actions."
             logger.warn("[Vision] validate: Validation failed: $msg")
             return Result.failure(IllegalStateException(msg))
         }
@@ -204,31 +200,56 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
     suspend fun detectAndSegment(
         @CapabilityInput(description = "Path to input image (JPG, PNG, WebP)", semanticTypes = ["path/file"])
         imagePath: String,
-        @CapabilityParam(description = "Detection confidence threshold", defaultValue = "0.25")
+        @CapabilityParam(
+            description = "Detection confidence threshold",
+            defaultValue = "0.25"
+        )
         detectionScoreThreshold: Double = 0.25,
         @CapabilityParam(description = "Segmentation confidence threshold", defaultValue = "0.25")
         segmentationScoreThreshold: Double = 0.25,
         @CapabilityParam(description = "IoU NMS threshold", defaultValue = "0.45")
         iouThreshold: Double = 0.45,
-        @CapabilityParam(description = "Intersection over Smaller area (IOS) threshold for containment NMS suppression (0.0 to 1.0)", defaultValue = "0.65")
+        @CapabilityParam(
+            description = "Intersection over Smaller area (IOS) threshold for containment NMS suppression (0.0 to 1.0)",
+            defaultValue = "0.65"
+        )
         iosThreshold: Double = 0.65,
-        @CapabilityParam(description = "Detection tile resolution scale factor (e.g. 1.0 = 640px, 2.0 = 1280px downscaled)", defaultValue = "1.0")
+        @CapabilityParam(
+            description = "Detection tile resolution scale factor (e.g. 1.0 = 640px, 2.0 = 1280px downscaled)",
+            defaultValue = "1.0"
+        )
         detectScale: Double = 1.0,
         @CapabilityParam(description = "Detection sliding window overlap ratio (0.0 to 0.8)", defaultValue = "0.25")
         detectOverlap: Double = 0.25,
-        @CapabilityParam(description = "Segmentation tile/ROI resolution scale factor (e.g. 1.0 = 640px, 2.0 = 1280px)", defaultValue = "1.0")
+        @CapabilityParam(
+            description = "Segmentation tile/ROI resolution scale factor (e.g. 1.0 = 640px, 2.0 = 1280px)",
+            defaultValue = "1.0"
+        )
         segmentScale: Double = 1.0,
         @CapabilityParam(description = "Segmentation sliding window overlap ratio (0.0 to 0.8)", defaultValue = "0.25")
         segmentOverlap: Double = 0.25,
         @CapabilityParam(description = "Save binary mask image for detected text", defaultValue = "false")
         saveMask: Boolean = false,
-        @CapabilityParam(description = "Save visual debug image showing all detected/segmented bounding boxes and contours", defaultValue = "false")
+        @CapabilityParam(
+            description = "Save visual debug image showing all detected/segmented bounding boxes and contours",
+            defaultValue = "false"
+        )
         saveDebugImage: Boolean = false,
-        @CapabilityParam(description = "Draw sliding window tile slice grids with alternating colors on the debug image", defaultValue = "false")
+        @CapabilityParam(
+            description = "Draw sliding window tile slice grids with alternating colors on the debug image",
+            defaultValue = "false"
+        )
         drawTileGrid: Boolean = false,
-        @CapabilityParam(description = "Draw Stage 2 Segmentation ROI crop boxes on the debug image", defaultValue = "false")
+        @CapabilityParam(
+            description = "Draw Stage 2 Segmentation ROI crop boxes on the debug image",
+            defaultValue = "false"
+        )
         drawSegmentationRois: Boolean = false,
-        @CapabilityOutput(description = "Optional output directory to save mask/debug image", defaultValue = "", semanticTypes = ["path/folder"])
+        @CapabilityOutput(
+            description = "Optional output directory to save mask/debug image",
+            defaultValue = "",
+            semanticTypes = ["path/folder"]
+        )
         outputDir: String = "",
         context: PluginContext,
         hostFs: HostFileSystem
@@ -262,7 +283,8 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
                 classes = listOf("balloon", "text", "watermark")
             )
 
-        val effectiveTilingPasses = if (settings.enableShiftedTiling) settings.detectionTilingPasses.coerceIn(1, 4) else 1
+        val effectiveTilingPasses =
+            if (settings.enableShiftedTiling) settings.detectionTilingPasses.coerceIn(1, 4) else 1
         val yoloSahiConfig = SahiConfig(
             sliceWidth = yoloSpec.inputWidth,
             sliceHeight = yoloSpec.inputHeight,
@@ -276,7 +298,8 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
         )
         val detectSlices = SahiInferenceRunner.generateSlices(imgW, imgH, yoloSahiConfig)
 
-        val yoloSession = ModelManager.Default.createInferenceSession(yoloModelId, context.fileSystem, ExecutionDevice.AUTO, logger)
+        val yoloSession =
+            ModelManager.Default.createInferenceSession(yoloModelId, context.fileSystem, ExecutionDevice.AUTO, logger)
         val candidateBoxes = if (yoloSession != null) {
             try {
                 val detResult = SahiInferenceRunner.runSlicedInference(
@@ -312,7 +335,8 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
         val finalObjects = mutableListOf<SegmentedObject>()
         val segmentationRois = mutableListOf<DetectionBox>()
 
-        val rfdetrSession = ModelManager.Default.createInferenceSession(rfdetrModelId, context.fileSystem, ExecutionDevice.AUTO, logger)
+        val rfdetrSession =
+            ModelManager.Default.createInferenceSession(rfdetrModelId, context.fileSystem, ExecutionDevice.AUTO, logger)
         if (rfdetrSession != null) {
             try {
                 if (candidateBoxes.isNotEmpty()) {
@@ -412,8 +436,10 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
                             var retries = 0
                             while (settings.enableDynamicRoiExpansion && retries < settings.maxRoiExpansionRetries && localSegs.isNotEmpty()) {
                                 val touchingSides = mutableSetOf<String>()
-                                val normThreshX = (settings.borderTouchThresholdPx.toDouble() / pxW.toDouble()).coerceIn(0.001, 0.05)
-                                val normThreshY = (settings.borderTouchThresholdPx.toDouble() / pxH.toDouble()).coerceIn(0.001, 0.05)
+                                val normThreshX =
+                                    (settings.borderTouchThresholdPx.toDouble() / pxW.toDouble()).coerceIn(0.001, 0.05)
+                                val normThreshY =
+                                    (settings.borderTouchThresholdPx.toDouble() / pxH.toDouble()).coerceIn(0.001, 0.05)
                                 for (seg in localSegs) {
                                     for (pt in seg.polygon) {
                                         if (pt.x <= normThreshX) touchingSides.add("left")
@@ -429,10 +455,22 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
                                 val expX = bw * settings.roiExpansionRatio
                                 val expY = bh * settings.roiExpansionRatio
 
-                                val expXmin = if ("left" in touchingSides) (actualRoiXmin - expX).coerceIn(0.0, 1.0) else actualRoiXmin
-                                val expYmin = if ("top" in touchingSides) (actualRoiYmin - expY).coerceIn(0.0, 1.0) else actualRoiYmin
-                                val expXmax = if ("right" in touchingSides) (actualRoiXmax + expX).coerceIn(0.0, 1.0) else actualRoiXmax
-                                val expYmax = if ("bottom" in touchingSides) (actualRoiYmax + expY).coerceIn(0.0, 1.0) else actualRoiYmax
+                                val expXmin = if ("left" in touchingSides) (actualRoiXmin - expX).coerceIn(
+                                    0.0,
+                                    1.0
+                                ) else actualRoiXmin
+                                val expYmin = if ("top" in touchingSides) (actualRoiYmin - expY).coerceIn(
+                                    0.0,
+                                    1.0
+                                ) else actualRoiYmin
+                                val expXmax = if ("right" in touchingSides) (actualRoiXmax + expX).coerceIn(
+                                    0.0,
+                                    1.0
+                                ) else actualRoiXmax
+                                val expYmax = if ("bottom" in touchingSides) (actualRoiYmax + expY).coerceIn(
+                                    0.0,
+                                    1.0
+                                ) else actualRoiYmax
 
                                 val newPxX = (expXmin * imgW).toInt().coerceIn(0, imgW - 1)
                                 val newPxY = (expYmin * imgH).toInt().coerceIn(0, imgH - 1)
@@ -494,7 +532,8 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
                                 }
                             } else {
                                 // Fallback to bounding box contour if RF-DETR produced no local sub-segments
-                                val polygon = RfDetrPostprocessor.generateBoxPolygon(box.xmin, box.ymin, box.xmax, box.ymax)
+                                val polygon =
+                                    RfDetrPostprocessor.generateBoxPolygon(box.xmin, box.ymin, box.xmax, box.ymax)
                                 val area = (box.xmax - box.xmin) * (box.ymax - box.ymin)
                                 finalObjects.add(
                                     SegmentedObject(
@@ -630,13 +669,22 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
         segmentationScoreThreshold: Double = 0.25,
         @CapabilityParam(description = "IoU threshold", defaultValue = "0.45")
         iouThreshold: Double = 0.45,
-        @CapabilityParam(description = "Intersection over Smaller area (IOS) threshold for containment NMS suppression (0.0 to 1.0)", defaultValue = "0.65")
+        @CapabilityParam(
+            description = "Intersection over Smaller area (IOS) threshold for containment NMS suppression (0.0 to 1.0)",
+            defaultValue = "0.65"
+        )
         iosThreshold: Double = 0.65,
-        @CapabilityParam(description = "Detection tile resolution scale factor (e.g. 1.0 = 640px, 2.0 = 1280px downscaled)", defaultValue = "1.0")
+        @CapabilityParam(
+            description = "Detection tile resolution scale factor (e.g. 1.0 = 640px, 2.0 = 1280px downscaled)",
+            defaultValue = "1.0"
+        )
         detectScale: Double = 1.0,
         @CapabilityParam(description = "Detection sliding window overlap ratio (0.0 to 0.8)", defaultValue = "0.25")
         detectOverlap: Double = 0.25,
-        @CapabilityParam(description = "Segmentation tile/ROI resolution scale factor (e.g. 1.0 = 640px, 2.0 = 1280px)", defaultValue = "1.0")
+        @CapabilityParam(
+            description = "Segmentation tile/ROI resolution scale factor (e.g. 1.0 = 640px, 2.0 = 1280px)",
+            defaultValue = "1.0"
+        )
         segmentScale: Double = 1.0,
         @CapabilityParam(description = "Segmentation sliding window overlap ratio (0.0 to 0.8)", defaultValue = "0.25")
         segmentOverlap: Double = 0.25,
@@ -644,11 +692,21 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
         saveMasks: Boolean = false,
         @CapabilityParam(description = "Save visual debug images for each page", defaultValue = "false")
         saveDebugImages: Boolean = false,
-        @CapabilityParam(description = "Draw sliding window tile slice grids with alternating colors on the debug images", defaultValue = "false")
+        @CapabilityParam(
+            description = "Draw sliding window tile slice grids with alternating colors on the debug images",
+            defaultValue = "false"
+        )
         drawTileGrid: Boolean = false,
-        @CapabilityParam(description = "Draw Stage 2 Segmentation ROI crop boxes on the debug images", defaultValue = "false")
+        @CapabilityParam(
+            description = "Draw Stage 2 Segmentation ROI crop boxes on the debug images",
+            defaultValue = "false"
+        )
         drawSegmentationRois: Boolean = false,
-        @CapabilityOutput(description = "Output directory for masks/debug images", defaultValue = "", semanticTypes = ["path/folder"])
+        @CapabilityOutput(
+            description = "Output directory for masks/debug images",
+            defaultValue = "",
+            semanticTypes = ["path/folder"]
+        )
         outputDir: String = "",
         context: PluginContext,
         hostFs: HostFileSystem
@@ -719,17 +777,33 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
         scoreThreshold: Double = 0.25,
         @CapabilityParam(description = "IoU threshold", defaultValue = "0.45")
         iouThreshold: Double = 0.45,
-        @CapabilityParam(description = "Intersection over Smaller area (IOS) threshold for containment NMS suppression (0.0 to 1.0)", defaultValue = "0.65")
+        @CapabilityParam(
+            description = "Intersection over Smaller area (IOS) threshold for containment NMS suppression (0.0 to 1.0)",
+            defaultValue = "0.65"
+        )
         iosThreshold: Double = 0.65,
-        @CapabilityParam(description = "Detection tile resolution scale factor (e.g. 1.0 = 640px, 2.0 = 1280px downscaled)", defaultValue = "1.0")
+        @CapabilityParam(
+            description = "Detection tile resolution scale factor (e.g. 1.0 = 640px, 2.0 = 1280px downscaled)",
+            defaultValue = "1.0"
+        )
         detectScale: Double = 1.0,
         @CapabilityParam(description = "Detection sliding window overlap ratio (0.0 to 0.8)", defaultValue = "0.25")
         detectOverlap: Double = 0.25,
-        @CapabilityParam(description = "Save visual debug image showing all detected bounding boxes", defaultValue = "false")
+        @CapabilityParam(
+            description = "Save visual debug image showing all detected bounding boxes",
+            defaultValue = "false"
+        )
         saveDebugImage: Boolean = false,
-        @CapabilityParam(description = "Draw sliding window tile slice grids with alternating colors on the debug image", defaultValue = "false")
+        @CapabilityParam(
+            description = "Draw sliding window tile slice grids with alternating colors on the debug image",
+            defaultValue = "false"
+        )
         drawTileGrid: Boolean = false,
-        @CapabilityOutput(description = "Optional output directory to save debug image", defaultValue = "", semanticTypes = ["path/folder"])
+        @CapabilityOutput(
+            description = "Optional output directory to save debug image",
+            defaultValue = "",
+            semanticTypes = ["path/folder"]
+        )
         outputDir: String = "",
         context: PluginContext,
         hostFs: HostFileSystem
@@ -756,10 +830,16 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
                 classes = listOf("balloon", "text", "watermark")
             )
 
-        val session = ModelManager.Default.createInferenceSession(yoloModelId, context.fileSystem, ExecutionDevice.AUTO, context.logger)
+        val session = ModelManager.Default.createInferenceSession(
+            yoloModelId,
+            context.fileSystem,
+            ExecutionDevice.AUTO,
+            context.logger
+        )
             ?: throw IllegalStateException("Model '$yoloModelId' is not installed or could not be loaded.")
         return try {
-            val effectiveTilingPasses = if (settings.enableShiftedTiling) settings.detectionTilingPasses.coerceIn(1, 4) else 1
+            val effectiveTilingPasses =
+                if (settings.enableShiftedTiling) settings.detectionTilingPasses.coerceIn(1, 4) else 1
             val sahiConfig = SahiConfig(
                 sliceWidth = yoloSpec.inputWidth,
                 sliceHeight = yoloSpec.inputHeight,

@@ -1,51 +1,39 @@
 package com.wip.manhwaTranslatorAI
 
 import ai.koog.prompt.dsl.prompt
-import ai.koog.prompt.executor.clients.openai.OpenAILLMClient
-import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
 import ai.koog.prompt.executor.clients.google.GoogleLLMClient
-import ai.koog.prompt.dsl.Prompt
-import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
-import ai.koog.prompt.message.Message
-import ai.koog.prompt.message.LLMChoice
-import ai.koog.prompt.streaming.StreamFrame
-import kotlinx.coroutines.flow.Flow
-import com.wip.common.models.sortedNaturally
-import io.ktor.client.HttpClient
-import io.ktor.client.plugins.HttpTimeout
 import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.params.LLMParams
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.add
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 import com.wip.common.inference.lmstudio.LmStudioManager
-import org.wip.plugintoolkit.api.PluginContext
-import org.wip.plugintoolkit.api.PluginSignal
-import kotlinx.coroutines.delay
-import org.wip.plugintoolkit.api.HostFileSystem
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
-import java.util.concurrent.ConcurrentLinkedQueue
+import com.wip.common.models.sortedNaturally
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeout
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import java.io.File
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
+import org.wip.plugintoolkit.api.HostFileSystem
+import org.wip.plugintoolkit.api.PluginContext
+import org.wip.plugintoolkit.api.PluginSignal
 import java.awt.Graphics2D
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
-import javax.imageio.ImageIO
+import java.io.File
+import java.util.concurrent.ConcurrentLinkedQueue
 import javax.imageio.IIOImage
+import javax.imageio.ImageIO
 import javax.imageio.ImageWriteParam
 import javax.imageio.stream.FileImageOutputStream
 import kotlin.time.Duration.Companion.milliseconds
@@ -57,19 +45,22 @@ data class TranslationResponse(
 )
 
 
-
 /**
  * Kotlin-native Translator service using Koog + Google AI.
  * Translates a list of strings to Italian following dictionary guidelines.
  */
-class KoogAITranslatorService(private val context: PluginContext, private val settings: TranslatorAISettings, private val hostFs: HostFileSystem) {
+class KoogAITranslatorService(
+    private val context: PluginContext,
+    private val settings: TranslatorAISettings,
+    private val hostFs: HostFileSystem
+) {
     private val logger = context.logger
     private val progressReporter = context.progress
     private var isCancelled = false
 
     private fun getProvider(modelId: String): LLMProvider {
         return when (modelId) {
-            AIModel.GEMMA_26B.id, AIModel.GEMMA_31B.id, AIModel.GEMINI_3_5_FLASH.id,AIModel.GEMINI_3_6_FLASH.id, AIModel.GEMINI_3_7_FLASH.id, AIModel.GEMINI_3_1_FLASH_LITE.id -> LLMProvider.Google
+            AIModel.GEMMA_26B.id, AIModel.GEMMA_31B.id, AIModel.GEMINI_3_5_FLASH.id, AIModel.GEMINI_3_6_FLASH.id, AIModel.GEMINI_3_7_FLASH.id, AIModel.GEMINI_3_1_FLASH_LITE.id -> LLMProvider.Google
             AIModel.LM_STUDIO.id -> LLMProvider.OpenAI
             else -> LLMProvider.Google
         }
@@ -88,7 +79,9 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
     private fun getExecutor(modelId: String) = when (modelId) {
         AIModel.LM_STUDIO.id -> {
             val key = settings.lmStudioApiKey?.ifBlank { "lm-studio" } ?: "lm-studio"
-            val baseUrl = (settings.lmStudioUrl ?: "http://localhost:1234/v1").ifBlank { "http://localhost:1234/v1" }.trim().removeSuffix("/")
+            val baseUrl =
+                (settings.lmStudioUrl ?: "http://localhost:1234/v1").ifBlank { "http://localhost:1234/v1" }.trim()
+                    .removeSuffix("/")
             val wrapperClient = LmStudioManager.Default.createKoogClient(
                 baseUrl = baseUrl,
                 apiKey = key,
@@ -96,6 +89,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
             )
             MultiLLMPromptExecutor(wrapperClient)
         }
+
         else -> {
             val key = (settings.googleApiKey ?: "").ifBlank { System.getenv("API_KEY") ?: "" }
             if (key.isBlank()) throw IllegalArgumentException("Google API Key not found.")
@@ -197,12 +191,13 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
         // ── Chunking & Concurrency ──────────────────────────────────────
         val results = arrayOfNulls<String>(input.size)
 
-        val isContextModeValid = useContextImages && pageNames != null && inputFolder != null && pageNames.size == input.size
-        
+        val isContextModeValid =
+            useContextImages && pageNames != null && inputFolder != null && pageNames.size == input.size
+
         if (useContextImages && !isContextModeValid) {
             logger.warn("Context Images enabled but missing/invalid inputs (pageNames or inputFolder mismatch). Falling back to text-only mode.")
         }
-        
+
         var globalContext: String? = null
         if (generateChapterSummary && !inputFolder.isNullOrBlank()) {
             val imageExtensions = setOf("png", "jpg", "jpeg", "webp", "bmp")
@@ -253,21 +248,21 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
                 val entries = input.mapIndexed { index, text -> TextEntry(index, text, pageNames[index]) }
                 val groupedByPage = entries.groupBy { it.pageName }
                 val uniquePages = groupedByPage.keys.toList()
-                
+
                 val pageChunks = mutableListOf<List<TextEntry>>()
                 var currentChunk = mutableListOf<TextEntry>()
                 var currentImagesCount = 0
-                
+
                 for (page in uniquePages) {
                     val pageEntries = groupedByPage[page] ?: emptyList()
-                    
+
                     // Flush if adding this page would exceed 5 images OR 50 texts (and the chunk is already not empty)
                     if (currentChunk.isNotEmpty() && (currentImagesCount + 1 > 5 || currentChunk.size + pageEntries.size > 50)) {
                         pageChunks.add(currentChunk)
                         currentChunk = mutableListOf()
                         currentImagesCount = 0
                     }
-                    
+
                     currentChunk.addAll(pageEntries)
                     currentImagesCount++
                 }
@@ -284,9 +279,16 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
                             val chunkTexts = chunkEntries.map { it.text }
                             val uniqueChunkPages = chunkEntries.map { it.pageName }.distinct()
                             val images = uniqueChunkPages.map { File(inputFolder, it) }.filter { it.exists() }
-                            
+
                             val translations = translateChunkWithRetry(
-                                chunkTexts, images, dictionaryContent, effectiveApiKey, useStructuredOutput, modelId, index, globalContext
+                                chunkTexts,
+                                images,
+                                dictionaryContent,
+                                effectiveApiKey,
+                                useStructuredOutput,
+                                modelId,
+                                index,
+                                globalContext
                             )
 
                             // Place translations in correct original indices
@@ -301,13 +303,20 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
                 // Text-only mode (Classic)
                 val chunks = input.chunked(50)
                 logger.info("Text mode. Split ${input.size} texts into ${chunks.size} chunks of max 50 items.")
-                
+
                 val deferreds = chunks.mapIndexed { index, chunk ->
                     async {
                         concurrentSemaphore.withPermit {
                             acquireRateLimit()
                             val translations = translateChunkWithRetry(
-                                chunk, null, dictionaryContent, effectiveApiKey, useStructuredOutput, modelId, index, globalContext
+                                chunk,
+                                null,
+                                dictionaryContent,
+                                effectiveApiKey,
+                                useStructuredOutput,
+                                modelId,
+                                index,
+                                globalContext
                             )
                             val startIndex = index * 50
                             translations.forEachIndexed { i, translatedText ->
@@ -321,7 +330,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
                 deferreds.awaitAll()
             }
         }
-        
+
         val finalTranslations = results.map { it ?: "" }
 
         if (save) {
@@ -336,7 +345,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
                 logger.error("Failed to save translation result: ${e.message}")
             }
         }
-        
+
         return finalTranslations
     }
 
@@ -360,7 +369,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
                 logger = logger
             )
         } else modelId
-        
+
         val model = LLModel(
             provider = getProvider(modelId),
             id = finalModelId,
@@ -395,7 +404,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
         val imageContextRule = if (!images.isNullOrEmpty()) {
             "\nContext Images are provided. Use them to understand the scene, characters, and tone, but DO NOT transcribe them. Only translate the strings provided."
         } else ""
-        
+
         val globalContextRule = if (!chapterContext.isNullOrBlank()) {
             "\n\nGLOBAL CHAPTER CONTEXT:\n$chapterContext\n\nUse this context to maintain consistency in names, tone, and story events."
         } else ""
@@ -459,7 +468,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
 
             logger.info("Sending translation request for chunk $chunkIndex (${chunk.size} strings)...")
             val responses = executor.execute(translatePrompt, model)
-            
+
             var rawResponse = responses.joinToString("\n") { it.content }.trim()
 
             // Strip thinking blocks if present
@@ -529,7 +538,7 @@ class KoogAITranslatorService(private val context: PluginContext, private val se
 
                 val responses = executor.execute(summaryPrompt, model)
                 val summary = responses.joinToString("\n") { it.content }.trim()
-                
+
                 // Strip thinking blocks if present
                 val cleanedSummary = summary.replace(
                     Regex("<(thought|thinking)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), ""

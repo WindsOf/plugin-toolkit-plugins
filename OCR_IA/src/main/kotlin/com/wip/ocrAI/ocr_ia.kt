@@ -29,7 +29,6 @@ import org.wip.plugintoolkit.api.annotations.PluginLocks
 import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
-import java.io.File
 
 @PluginInfo(
     id = "com.wip.ocr_ia",
@@ -122,7 +121,8 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
             logger.info("[OCR_IA] • ${m.name.padEnd(20)} ($status)")
         }
         logger.info("[OCR_IA] ===========================================")
-        val installedCount = OcrDownloadModel.entries.count { locks[it.modelId] == true || locks["model:${it.modelId}"] == true }
+        val installedCount =
+            OcrDownloadModel.entries.count { locks[it.modelId] == true || locks["model:${it.modelId}"] == true }
         context.showToast("OCR Models: $installedCount / ${OcrDownloadModel.entries.size} installed")
     }
 
@@ -219,7 +219,8 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
         val logger = context.logger
         val url = settings.lmStudioUrl?.ifBlank { "http://localhost:1234/v1" } ?: "http://localhost:1234/v1"
         logger.info("[OCR_IA] Testing LM Studio connection at: $url")
-        val status = LmStudioManager.Default.checkStatus(baseUrl = url, apiKey = settings.lmStudioApiKey, logger = logger)
+        val status =
+            LmStudioManager.Default.checkStatus(baseUrl = url, apiKey = settings.lmStudioApiKey, logger = logger)
         if (status.connected) {
             val modelDesc = if (!status.activeModel.isNullOrBlank()) " (Active model: ${status.activeModel})" else ""
             val msg = "Connected to LM Studio at $url successfully!$modelDesc"
@@ -232,7 +233,7 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
             context.showToast(msg)
         }
     }
-    
+
     @Capability(
         name = "ocr",
         description = "Performs basic OCR on an image or a folder of images"
@@ -251,7 +252,10 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
             semanticTypes = ["path/folder"]
         )
         outputDir: String,
-        @CapabilityParam(description = "Whether to use native structured output (might not be supported by all models)", defaultValue = "false")
+        @CapabilityParam(
+            description = "Whether to use native structured output (might not be supported by all models)",
+            defaultValue = "false"
+        )
         useStructuredOutput: Boolean,
         @CapabilityParam(description = "Whether to save the thinking inside the json", defaultValue = "false")
         saveThinking: Boolean,
@@ -269,12 +273,36 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
         logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput | VisionAssisted: ${chapterVisionResult != null}")
 
         return try {
-            if (model in setOf(AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M)) {
+            if (model in setOf(
+                    AIModel.UNLIMITED_OCR_BF16,
+                    AIModel.UNLIMITED_OCR_Q8_0,
+                    AIModel.UNLIMITED_OCR_Q4_K_M,
+                    AIModel.UNLIMITED_OCR_IQ2_M
+                )
+            ) {
                 val runner = UnlimitedOcrRunner(context, hostFs, settings)
-                return runner.performOcr(input, save, outputDir, useStructuredOutput, saveThinking, targetModelId = model.id, chapterVisionResult = chapterVisionResult, cropPadding = cropPadding)
+                return runner.performOcr(
+                    input,
+                    save,
+                    outputDir,
+                    useStructuredOutput,
+                    saveThinking,
+                    targetModelId = model.id,
+                    chapterVisionResult = chapterVisionResult,
+                    cropPadding = cropPadding
+                )
             }
             val service = KoogOcrService(context, settings, hostFs)
-            val ocrResult = service.performOcr(input, save, outputDir, useStructuredOutput, saveThinking, model, chapterVisionResult = chapterVisionResult, cropPadding = cropPadding)
+            val ocrResult = service.performOcr(
+                input,
+                save,
+                outputDir,
+                useStructuredOutput,
+                saveThinking,
+                model,
+                chapterVisionResult = chapterVisionResult,
+                cropPadding = cropPadding
+            )
             OCRResult(ocrResult.texts, ocrResult.bb, ocrResult.pageNumbers, ocrResult.pageNames, ocrResult.failedFiles)
         } catch (e: Throwable) {
             val msg = "OCR failed: ${e::class.simpleName}: ${e.message}"
@@ -304,7 +332,10 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
             semanticTypes = ["path/folder"]
         )
         outputDir: String,
-        @CapabilityParam(description = "Whether to use native structured output (might not be supported by all models)", defaultValue = "false")
+        @CapabilityParam(
+            description = "Whether to use native structured output (might not be supported by all models)",
+            defaultValue = "false"
+        )
         useStructuredOutput: Boolean,
         @CapabilityParam(description = "Whether to save the thinking inside the json", defaultValue = "false")
         saveThinking: Boolean,
@@ -322,12 +353,36 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
         logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput | VisionAssisted: ${chapterVisionResult != null}")
 
         return try {
-            if (model in setOf(AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M)) {
+            if (model in setOf(
+                    AIModel.UNLIMITED_OCR_BF16,
+                    AIModel.UNLIMITED_OCR_Q8_0,
+                    AIModel.UNLIMITED_OCR_Q4_K_M,
+                    AIModel.UNLIMITED_OCR_IQ2_M
+                )
+            ) {
                 val runner = UnlimitedOcrRunner(context, hostFs, settings)
-                return runner.performAdvancedOcr(input, save, outputDir, useStructuredOutput, saveThinking, targetModelId = model.id, chapterVisionResult = chapterVisionResult, cropPadding = cropPadding)
+                return runner.performAdvancedOcr(
+                    input,
+                    save,
+                    outputDir,
+                    useStructuredOutput,
+                    saveThinking,
+                    targetModelId = model.id,
+                    chapterVisionResult = chapterVisionResult,
+                    cropPadding = cropPadding
+                )
             }
             val service = KoogOcrService(context, settings, hostFs)
-            val ocrResult = service.performAdvancedOcr(input, save, outputDir, useStructuredOutput, saveThinking, model, chapterVisionResult = chapterVisionResult, cropPadding = cropPadding)
+            val ocrResult = service.performAdvancedOcr(
+                input,
+                save,
+                outputDir,
+                useStructuredOutput,
+                saveThinking,
+                model,
+                chapterVisionResult = chapterVisionResult,
+                cropPadding = cropPadding
+            )
             AdvancedOCRResult(
                 texts = ocrResult.texts,
                 balloonBoxes = ocrResult.balloonBoxes,

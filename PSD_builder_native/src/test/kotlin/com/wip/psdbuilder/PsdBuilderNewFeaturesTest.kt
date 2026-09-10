@@ -5,7 +5,6 @@ import com.wip.common.models.PolygonPoint
 import com.wip.common.models.SegmentedObject
 import com.wip.common.models.VisionResult
 import com.wip.kpsd.KPsd
-import com.wip.kpsd.Layer
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.junit.Test

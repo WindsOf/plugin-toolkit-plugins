@@ -29,17 +29,17 @@ enum class InpaintingModel(val modelId: String, val displayName: String) {
             val clean = id.trim().lowercase()
             return entries.find {
                 it.modelId.equals(clean, ignoreCase = true) ||
-                (clean == "lama" && it == LAMA) ||
-                (clean == "manga" && it == MANGA) ||
-                (clean == "migan" && it == MIGAN) ||
-                (clean == "mat" && it == MAT) ||
-                (clean == "zits" && it == ZITS) ||
-                (clean == "diffusion" && it == DIFFUSION_OVERKILL) ||
-                (clean == "big-lama" && it == LAMA) ||
-                (clean == "anime-manga-big-lama" && it == MANGA) ||
-                (clean == "migan_traced" && it == MIGAN) ||
-                (clean == "places_512_fulldata_g" && it == MAT) ||
-                (clean == "zits-inpaint-0717" && it == ZITS)
+                        (clean == "lama" && it == LAMA) ||
+                        (clean == "manga" && it == MANGA) ||
+                        (clean == "migan" && it == MIGAN) ||
+                        (clean == "mat" && it == MAT) ||
+                        (clean == "zits" && it == ZITS) ||
+                        (clean == "diffusion" && it == DIFFUSION_OVERKILL) ||
+                        (clean == "big-lama" && it == LAMA) ||
+                        (clean == "anime-manga-big-lama" && it == MANGA) ||
+                        (clean == "migan_traced" && it == MIGAN) ||
+                        (clean == "places_512_fulldata_g" && it == MAT) ||
+                        (clean == "zits-inpaint-0717" && it == ZITS)
             }
         }
     }
@@ -61,17 +61,17 @@ enum class InpaintingDownloadModel(val modelId: String, val displayName: String)
             val clean = id.trim().lowercase()
             return entries.find {
                 it.modelId.equals(clean, ignoreCase = true) ||
-                (clean == "lama" && it == LAMA) ||
-                (clean == "manga" && it == MANGA) ||
-                (clean == "migan" && it == MIGAN) ||
-                (clean == "mat" && it == MAT) ||
-                (clean == "zits" && it == ZITS) ||
-                (clean == "diffusion" && it == DIFFUSION_OVERKILL) ||
-                (clean == "big-lama" && it == LAMA) ||
-                (clean == "anime-manga-big-lama" && it == MANGA) ||
-                (clean == "migan_traced" && it == MIGAN) ||
-                (clean == "places_512_fulldata_g" && it == MAT) ||
-                (clean == "zits-inpaint-0717" && it == ZITS)
+                        (clean == "lama" && it == LAMA) ||
+                        (clean == "manga" && it == MANGA) ||
+                        (clean == "migan" && it == MIGAN) ||
+                        (clean == "mat" && it == MAT) ||
+                        (clean == "zits" && it == ZITS) ||
+                        (clean == "diffusion" && it == DIFFUSION_OVERKILL) ||
+                        (clean == "big-lama" && it == LAMA) ||
+                        (clean == "anime-manga-big-lama" && it == MANGA) ||
+                        (clean == "migan_traced" && it == MIGAN) ||
+                        (clean == "places_512_fulldata_g" && it == MAT) ||
+                        (clean == "zits-inpaint-0717" && it == ZITS)
             }
         }
     }
@@ -90,10 +90,10 @@ enum class CleaningStrategy(val strategyId: String, val displayName: String) {
             val clean = id.trim().lowercase()
             return entries.find {
                 it.strategyId.equals(clean, ignoreCase = true) ||
-                (clean == "auto" && it == AUTO_HYBRID) ||
-                (clean == "hybrid" && it == AUTO_HYBRID) ||
-                (clean == "neural" && it == NEURAL_ONLY) ||
-                (clean == "deterministic" && it == DETERMINISTIC_ONLY)
+                        (clean == "auto" && it == AUTO_HYBRID) ||
+                        (clean == "hybrid" && it == AUTO_HYBRID) ||
+                        (clean == "neural" && it == NEURAL_ONLY) ||
+                        (clean == "deterministic" && it == DETERMINISTIC_ONLY)
             }
         }
     }

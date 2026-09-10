@@ -4,6 +4,9 @@ import com.wip.common.models.AdvancedOCRResult
 import com.wip.common.models.OCRResult
 import com.wip.kpsd.KPsd
 import io.mockk.mockk
+import kotlinx.coroutines.runBlocking
+import org.junit.Test
+import org.wip.plugintoolkit.api.PluginContext
 import java.awt.Color
 import java.awt.image.BufferedImage
 import java.io.File
@@ -11,9 +14,6 @@ import javax.imageio.ImageIO
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-import kotlinx.coroutines.runBlocking
-import org.junit.Test
-import org.wip.plugintoolkit.api.PluginContext
 
 class OcrDataTest {
 
@@ -75,7 +75,8 @@ class OcrDataTest {
         assertNotNull(cleanGroup, "Should contain 'clean' group folder")
         val translationGroup = psd.children.find { it.name == "translation" }
         assertNotNull(translationGroup, "Should contain 'translation' group folder")
-        assertTrue(translationGroup.children?.any { it.text != null } == true, "Translation group should contain text layers")
+        assertTrue(translationGroup.children?.any { it.text != null } == true,
+            "Translation group should contain text layers")
     }
 
     @Test

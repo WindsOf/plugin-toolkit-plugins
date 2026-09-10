@@ -4,7 +4,6 @@ import com.wip.kpsd.PsdBounds
 import java.awt.geom.Point2D
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 class PolygonTextBoundaryTest {
 

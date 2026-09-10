@@ -16,16 +16,32 @@ class SlicerTest {
 
     private class FakeLogger : PluginLogger {
         val messages = mutableListOf<String>()
-        override fun verbose(message: String) { messages.add("VERBOSE: $message") }
-        override fun debug(message: String) { messages.add("DEBUG: $message") }
-        override fun info(message: String) { messages.add("INFO: $message") }
-        override fun warn(message: String) { messages.add("WARN: $message") }
-        override fun error(message: String, throwable: Throwable?) { messages.add("ERROR: $message") }
+        override fun verbose(message: String) {
+            messages.add("VERBOSE: $message")
+        }
+
+        override fun debug(message: String) {
+            messages.add("DEBUG: $message")
+        }
+
+        override fun info(message: String) {
+            messages.add("INFO: $message")
+        }
+
+        override fun warn(message: String) {
+            messages.add("WARN: $message")
+        }
+
+        override fun error(message: String, throwable: Throwable?) {
+            messages.add("ERROR: $message")
+        }
     }
 
     private class FakeProgress : ProgressReporter {
         var lastProgress: Float = 0f
-        override fun report(progress: Float) { lastProgress = progress }
+        override fun report(progress: Float) {
+            lastProgress = progress
+        }
     }
 
     @Test

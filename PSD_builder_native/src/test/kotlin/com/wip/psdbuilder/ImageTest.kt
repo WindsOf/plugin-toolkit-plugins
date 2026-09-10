@@ -2,6 +2,8 @@ package com.wip.psdbuilder
 
 import com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi
 import io.mockk.mockk
+import kotlinx.coroutines.runBlocking
+import org.wip.plugintoolkit.api.PluginContext
 import java.awt.Color
 import java.awt.image.BufferedImage
 import java.io.File
@@ -9,8 +11,6 @@ import javax.imageio.ImageIO
 import javax.imageio.spi.IIORegistry
 import kotlin.test.Test
 import kotlin.test.assertTrue
-import kotlinx.coroutines.runBlocking
-import org.wip.plugintoolkit.api.PluginContext
 
 class ImageTest {
     @Test

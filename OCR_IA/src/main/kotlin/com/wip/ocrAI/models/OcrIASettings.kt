@@ -103,18 +103,25 @@ enum class AIModel(val id: String) {
     GEMINI_1_5_PRO("gemini-1.5-pro"),
     GEMINI_2_5_PRO("gemini-2.5-pro"),
     GEMINI_3_1_FLASH_LITE("gemini-3.1-flash-lite"),
+
     @RequiresSetting(["anthropicApiKey"])
     CLAUDE_3_5_SONNET("claude-3-5-sonnet-20241022"),
+
     @RequiresSetting(["openAIApiKey"])
     GPT_4O("gpt-4o"),
+
     @RequiresSetting(["lmStudioModelName", "lmStudioApiKey", "lmStudioUrl"])
     LM_STUDIO("lm-studio"),
+
     @RequiresLock(locks = ["model:Unlimited-OCR-BF16", "model:unlimited-ocr-bf16", "Unlimited-OCR-BF16", "unlimited-ocr-bf16"])
     UNLIMITED_OCR_BF16("Unlimited-OCR-BF16"),
+
     @RequiresLock(locks = ["model:Unlimited-OCR-Q8_0", "model:unlimited-ocr-q8_0", "Unlimited-OCR-Q8_0", "unlimited-ocr-q8_0"])
     UNLIMITED_OCR_Q8_0("Unlimited-OCR-Q8_0"),
+
     @RequiresLock(locks = ["model:Unlimited-OCR-Q4_K_M", "model:unlimited-ocr-q4_k_m", "Unlimited-OCR-Q4_K_M", "unlimited-ocr-q4_k_m"])
     UNLIMITED_OCR_Q4_K_M("Unlimited-OCR-Q4_K_M"),
+
     @RequiresLock(locks = ["model:Unlimited-OCR-IQ2_M", "model:unlimited-ocr-iq2_m", "Unlimited-OCR-IQ2_M", "unlimited-ocr-iq2_m"])
     UNLIMITED_OCR_IQ2_M("Unlimited-OCR-IQ2_M")
 }

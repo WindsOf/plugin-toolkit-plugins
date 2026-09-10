@@ -139,7 +139,10 @@ class VisionOcrMatcherTest {
         )
 
         assertEquals(1, matches.size)
-        assertNotNull(matches[0].matchedBalloon, "Should match cleaner balloon directly based on containment and center")
+        assertNotNull(
+            matches[0].matchedBalloon,
+            "Should match cleaner balloon directly based on containment and center"
+        )
         val bounds = matches[0].polygonBounds
         assertNotNull(bounds)
         assertEquals(100f, bounds.left, 1f)

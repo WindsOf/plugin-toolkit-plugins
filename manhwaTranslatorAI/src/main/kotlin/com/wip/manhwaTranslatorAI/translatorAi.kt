@@ -1,5 +1,6 @@
 package com.wip.manhwaTranslatorAI
 
+import com.wip.common.inference.lmstudio.LmStudioManager
 import com.wip.common.models.AdvancedOCRResult
 import com.wip.common.models.OCRResult
 import org.wip.plugintoolkit.api.HostFileSystem
@@ -10,7 +11,6 @@ import org.wip.plugintoolkit.api.annotations.Capability
 import org.wip.plugintoolkit.api.annotations.CapabilityInput
 import org.wip.plugintoolkit.api.annotations.CapabilityOutput
 import org.wip.plugintoolkit.api.annotations.CapabilityParam
-import com.wip.common.inference.lmstudio.LmStudioManager
 import org.wip.plugintoolkit.api.annotations.PluginAction
 import org.wip.plugintoolkit.api.annotations.PluginInfo
 import org.wip.plugintoolkit.api.annotations.PluginLoad
@@ -31,7 +31,7 @@ data class TranslatorAISettings(
     @PluginSetting(
         description = "Use structured output (JSON schema). Disable if the model does not support it.",
         defaultValue = "true",
-        required = true 
+        required = true
     )
     val useStructuredOutput: Boolean = true,
 
@@ -62,6 +62,7 @@ enum class AIModel(val id: String) {
     GEMINI_3_6_FLASH("gemini-3.6-flash"),
     GEMINI_3_7_FLASH("gemini-3.7-flash"),
     GEMINI_3_1_FLASH_LITE("gemini-3.1-flash-lite"),
+
     @RequiresSetting(["lmStudioModelName", "lmStudioApiKey", "lmStudioUrl"])
     LM_STUDIO("lm-studio")
 }
@@ -89,7 +90,8 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         val logger = context.logger
         val url = settings.lmStudioUrl?.ifBlank { "http://localhost:1234/v1" } ?: "http://localhost:1234/v1"
         logger.info("[TranslatorAI] Testing LM Studio connection at: $url")
-        val status = LmStudioManager.Default.checkStatus(baseUrl = url, apiKey = settings.lmStudioApiKey, logger = logger)
+        val status =
+            LmStudioManager.Default.checkStatus(baseUrl = url, apiKey = settings.lmStudioApiKey, logger = logger)
         if (status.connected) {
             val modelDesc = if (!status.activeModel.isNullOrBlank()) " (Active model: ${status.activeModel})" else ""
             val msg = "Connected to LM Studio at $url successfully!$modelDesc"
@@ -107,8 +109,14 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         if (rawText.isNullOrBlank()) return true
         val clean = rawText.trim()
             .replace(Regex("(?i)<\\|/?(?:ref|box|det|quad|grounding|image|text)[^>]*\\|>"), "")
-            .replace(Regex("(?i)\\b(?:image|figure|table|header|footer|background|watermark)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]"), "")
-            .replace(Regex("(?i)^\\s*(?:text|balloon|speech|dialogue|caption|title|paragraph|line)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]\\s*"), "")
+            .replace(
+                Regex("(?i)\\b(?:image|figure|table|header|footer|background|watermark)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]"),
+                ""
+            )
+            .replace(
+                Regex("(?i)^\\s*(?:text|balloon|speech|dialogue|caption|title|paragraph|line)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]\\s*"),
+                ""
+            )
             .trim()
         if (clean.isBlank()) return true
         if (!clean.any { it.isLetterOrDigit() }) return true
@@ -201,7 +209,12 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         val validIndices = inputOcr.texts.indices.filter { !isHallucination(inputOcr.texts[it]) }
         if (validIndices.isEmpty()) {
             logger.info("Basic OCR Translation: No valid texts to translate after filtering empty/hallucinations.")
-            return inputOcr.copy(texts = emptyList(), bb = emptyList(), pageNumbers = emptyList(), pageNames = emptyList())
+            return inputOcr.copy(
+                texts = emptyList(),
+                bb = emptyList(),
+                pageNumbers = emptyList(),
+                pageNames = emptyList()
+            )
         }
 
         val cleanOcr = OCRResult(
@@ -245,61 +258,62 @@ class TranslatorAI(val settings: TranslatorAISettings) {
 
     @Capability(
         name = "translate",
-        description = "Translates a list of strings into Italian using Google AI")
+        description = "Translates a list of strings into Italian using Google AI"
+    )
     suspend fun translate(
-            @CapabilityParam(
-                description = "List of text strings to translate"
-            )
-            input: List<String>,
-            @CapabilityParam(
-                description = "Dictionary of words/actions to keep the translation coherent",
-                defaultValue = ""
-            )
-            dictionary: String? = "",
-            @CapabilityParam(
-                description = "The Gemini Model ID to use",
-                defaultValue = "GEMMA_31B"
-            )
-            model: AIModel,
-            @CapabilityParam(
-                description = "List of page names matching the input texts (from OCR)",
-                defaultValue = "[]"
-            )
-            pageNames: List<String>? = emptyList(),
-            @CapabilityInput(
-                description = "Path to the folder containing the images",
-                semanticTypes = ["path/folder"]
-            )
+        @CapabilityParam(
+            description = "List of text strings to translate"
+        )
+        input: List<String>,
+        @CapabilityParam(
+            description = "Dictionary of words/actions to keep the translation coherent",
+            defaultValue = ""
+        )
+        dictionary: String? = "",
+        @CapabilityParam(
+            description = "The Gemini Model ID to use",
+            defaultValue = "GEMMA_31B"
+        )
+        model: AIModel,
+        @CapabilityParam(
+            description = "List of page names matching the input texts (from OCR)",
+            defaultValue = "[]"
+        )
+        pageNames: List<String>? = emptyList(),
+        @CapabilityInput(
+            description = "Path to the folder containing the images",
+            semanticTypes = ["path/folder"]
+        )
         inputFolder: String,
-            @CapabilityOutput(
-                description = "Directory to save translation result",
-                autogeneratedPattern = "{model}/translation",
-                semanticTypes = ["path/folder"]
-            )
+        @CapabilityOutput(
+            description = "Directory to save translation result",
+            autogeneratedPattern = "{model}/translation",
+            semanticTypes = ["path/folder"]
+        )
         outputDir: String,
-            @CapabilityOutput(
-                description = "Temporary directory for summary images",
-                autogeneratedPattern = "{model}/temp_summary",
-                semanticTypes = ["path/folder"]
-            )
+        @CapabilityOutput(
+            description = "Temporary directory for summary images",
+            autogeneratedPattern = "{model}/temp_summary",
+            semanticTypes = ["path/folder"]
+        )
         tempSummaryDir: String,
-            @CapabilityParam(
-                description = "Send images to AI for visual context (Requires Gemini 1.5/Gemma)",
-                defaultValue = "false"
-            )
-            useContextImages: Boolean? = false,
-            @CapabilityParam(
-                description = "Generate a global summary context from all chapter images using Gemini 3.1 Flash Lite",
-                defaultValue = "true"
-            )
-            generateChapterSummary: Boolean? = true,
-            @CapabilityParam(
-                description = "Save the translation result in a json",
-                defaultValue = "true"
-            )
-            save: Boolean? = true,
-            context: PluginContext,
-            hostFs: HostFileSystem
+        @CapabilityParam(
+            description = "Send images to AI for visual context (Requires Gemini 1.5/Gemma)",
+            defaultValue = "false"
+        )
+        useContextImages: Boolean? = false,
+        @CapabilityParam(
+            description = "Generate a global summary context from all chapter images using Gemini 3.1 Flash Lite",
+            defaultValue = "true"
+        )
+        generateChapterSummary: Boolean? = true,
+        @CapabilityParam(
+            description = "Save the translation result in a json",
+            defaultValue = "true"
+        )
+        save: Boolean? = true,
+        context: PluginContext,
+        hostFs: HostFileSystem
     ): List<String> {
         val logger = context.logger
         val effectiveDict = dictionary ?: ""
@@ -310,7 +324,20 @@ class TranslatorAI(val settings: TranslatorAISettings) {
 
         return try {
             val service = KoogAITranslatorService(context, settings, hostFs)
-            val result = service.performTranslation(input, effectiveDict, settings.googleApiKey, settings.useStructuredOutput, model.id, pageNames, inputFolder, outputDir, tempSummaryDir, effectiveContextImages, effectiveSummary, save ?: true)
+            val result = service.performTranslation(
+                input,
+                effectiveDict,
+                settings.googleApiKey,
+                settings.useStructuredOutput,
+                model.id,
+                pageNames,
+                inputFolder,
+                outputDir,
+                tempSummaryDir,
+                effectiveContextImages,
+                effectiveSummary,
+                save ?: true
+            )
             logger.info("Translation completed.")
             result
         } catch (e: Throwable) {
@@ -328,54 +355,54 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         description = "Translates an AdvancedOCRResult into Italian using Google AI"
     )
     suspend fun translateAdvancedOcr(
-            @CapabilityParam(
-                description = "The Advanced OCR Result to translate"
-            )
-            inputOcr: AdvancedOCRResult,
-            @CapabilityParam(
-                description = "Dictionary of words/actions to keep the translation coherent",
-                defaultValue = ""
-            )
-            dictionary: String? = "",
-            @CapabilityParam(
-                description = "The AI Model to use",
-                defaultValue = "GEMMA_31B"
-            )
-            model: AIModel,
-            @CapabilityInput(
-                description = "Path to the folder containing the images",
-                semanticTypes = ["path/folder"]
-            )
+        @CapabilityParam(
+            description = "The Advanced OCR Result to translate"
+        )
+        inputOcr: AdvancedOCRResult,
+        @CapabilityParam(
+            description = "Dictionary of words/actions to keep the translation coherent",
+            defaultValue = ""
+        )
+        dictionary: String? = "",
+        @CapabilityParam(
+            description = "The AI Model to use",
+            defaultValue = "GEMMA_31B"
+        )
+        model: AIModel,
+        @CapabilityInput(
+            description = "Path to the folder containing the images",
+            semanticTypes = ["path/folder"]
+        )
         inputFolder: String? = "",
-            @CapabilityOutput(
-                description = "Directory to save translation result",
-                autogeneratedPattern = "{model}/translation",
-                semanticTypes = ["path/folder"]
-            )
+        @CapabilityOutput(
+            description = "Directory to save translation result",
+            autogeneratedPattern = "{model}/translation",
+            semanticTypes = ["path/folder"]
+        )
         outputDir: String,
-            @CapabilityOutput(
-                description = "Temporary directory for summary images",
-                autogeneratedPattern = "{model}/temp_summary",
-                semanticTypes = ["path/folder"]
-            )
+        @CapabilityOutput(
+            description = "Temporary directory for summary images",
+            autogeneratedPattern = "{model}/temp_summary",
+            semanticTypes = ["path/folder"]
+        )
         tempSummaryDir: String,
-            @CapabilityParam(
-                description = "Send images to AI for visual context (Requires Gemini 1.5/Gemma)",
-                defaultValue = "false"
-            )
-            useContextImages: Boolean? = false,
-            @CapabilityParam(
-                description = "Generate a global summary context from all chapter images using Gemini 3.1 Flash Lite",
-                defaultValue = "true"
-            )
-            generateChapterSummary: Boolean? = true,
-            @CapabilityParam(
-                description = "Save the translation result in a json",
-                defaultValue = "true"
-            )
-            save: Boolean? = true,
-            context: PluginContext,
-            hostFs: HostFileSystem
+        @CapabilityParam(
+            description = "Send images to AI for visual context (Requires Gemini 1.5/Gemma)",
+            defaultValue = "false"
+        )
+        useContextImages: Boolean? = false,
+        @CapabilityParam(
+            description = "Generate a global summary context from all chapter images using Gemini 3.1 Flash Lite",
+            defaultValue = "true"
+        )
+        generateChapterSummary: Boolean? = true,
+        @CapabilityParam(
+            description = "Save the translation result in a json",
+            defaultValue = "true"
+        )
+        save: Boolean? = true,
+        context: PluginContext,
+        hostFs: HostFileSystem
     ): AdvancedOCRResult {
         val logger = context.logger
         val effectiveDict = dictionary ?: ""

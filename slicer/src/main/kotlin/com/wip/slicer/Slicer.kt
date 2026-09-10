@@ -6,18 +6,9 @@ import com.wip.common.models.ExecutionDevice
 import com.wip.common.models.ModelCatalog
 import com.wip.common.models.ModelManager
 import com.wip.common.models.ModelSpec
-import com.wip.common.models.NaturalOrderComparator
-import com.wip.common.models.OnnxInferenceEngine
 import com.wip.common.models.SahiConfig
 import com.wip.common.models.SahiInferenceRunner
 import com.wip.common.models.sortedNaturally
-import java.awt.image.BufferedImage
-import java.io.File
-import javax.imageio.ImageIO
-import javax.imageio.spi.IIORegistry
-import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
 import kotlinx.io.asOutputStream
 import kotlinx.io.buffered
 import kotlinx.io.files.Path
@@ -26,7 +17,6 @@ import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.OS
 import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.PluginLogger
-import org.wip.plugintoolkit.api.ProgressReporter
 import org.wip.plugintoolkit.api.annotations.Capability
 import org.wip.plugintoolkit.api.annotations.CapabilityInput
 import org.wip.plugintoolkit.api.annotations.CapabilityOutput
@@ -39,6 +29,12 @@ import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
 import org.wip.plugintoolkit.api.annotations.RequiresLock
+import java.awt.image.BufferedImage
+import javax.imageio.ImageIO
+import javax.imageio.spi.IIORegistry
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 @PluginInfo(
     id = "com.wip.slicer",
@@ -168,8 +164,14 @@ class Slicer {
         @CapabilityParam(description = "Maximum Height", defaultValue = "10000") maxHeight: Int,
         @CapabilityParam(description = "Prioritize smaller", defaultValue = "true") prioritizeSmallerImages: Boolean,
         @CapabilityParam(description = "Cut tolerance", defaultValue = "5") cutTolerance: Int,
-        @CapabilityParam(description = "Safety margin in pixels around detected objects where cuts are forbidden", defaultValue = "15") detectionMargin: Int,
-        @CapabilityParam(description = "Confidence threshold for object detections", defaultValue = "0.25") scoreThreshold: Double,
+        @CapabilityParam(
+            description = "Safety margin in pixels around detected objects where cuts are forbidden",
+            defaultValue = "15"
+        ) detectionMargin: Int,
+        @CapabilityParam(
+            description = "Confidence threshold for object detections",
+            defaultValue = "0.25"
+        ) scoreThreshold: Double,
         context: PluginContext,
         hostFs: HostFileSystem
     ) {
@@ -195,7 +197,8 @@ class Slicer {
         val imageSources = mutableListOf<ImageSliceSource>()
 
         // 1. Analyze base row pixel variances (without retaining full bitmaps in memory)
-        val usefulRowVarianceList = analyzeRowVariances(sortedImages, cutTolerance, imageSources, context.progress).toMutableList()
+        val usefulRowVarianceList =
+            analyzeRowVariances(sortedImages, cutTolerance, imageSources, context.progress).toMutableList()
         val totalHeight = usefulRowVarianceList.size
         val width = imageSources.firstOrNull()?.width ?: 0
         progressReporter.report(0.35f)
@@ -213,7 +216,12 @@ class Slicer {
                 classes = listOf("balloon", "text", "watermark")
             )
 
-        val session = ModelManager.Default.createInferenceSession(ModelCatalog.YOLO_DET_X_ID, context.fileSystem, ExecutionDevice.AUTO, logger)
+        val session = ModelManager.Default.createInferenceSession(
+            ModelCatalog.YOLO_DET_X_ID,
+            context.fileSystem,
+            ExecutionDevice.AUTO,
+            logger
+        )
             ?: throw IllegalStateException("Detection model '${ModelCatalog.YOLO_DET_X_ID}' is not installed. Please run the download action.")
         try {
             val sahiConfig = SahiConfig(
@@ -256,7 +264,15 @@ class Slicer {
         progressReporter.report(0.60f)
 
         // 3. Find optimal cuts using accelerated candidate-based DP respecting variance and detection zones
-        val (finalCuts, totalError) = findOptimalCuts(totalHeight, usefulRowVarianceList, minHeight, desiredHeight, maxHeight, prioritizeSmallerImages, context.progress)
+        val (finalCuts, totalError) = findOptimalCuts(
+            totalHeight,
+            usefulRowVarianceList,
+            minHeight,
+            desiredHeight,
+            maxHeight,
+            prioritizeSmallerImages,
+            context.progress
+        )
 
         if (finalCuts.isEmpty()) throw IllegalArgumentException("No valid cuts found. Please adjust the parameters.")
 
@@ -298,10 +314,10 @@ class Slicer {
 
         logger.log("Starting slicer for folder: $folderPath")
         progressReporter.report(0.1f)
-        
+
         val folder = Path(folderPath)
         val files = SystemFileSystem.list(folder).toList()
-        
+
         if (files.isEmpty()) throw IllegalArgumentException("No files found in the specified folder.")
         val images = files.filter { path ->
             val metadata = SystemFileSystem.metadataOrNull(path)
@@ -318,7 +334,15 @@ class Slicer {
         val width = imageSources.firstOrNull()?.width ?: 0
         progressReporter.report(0.4f)
 
-        val (finalCuts, totalError) = findOptimalCuts(totalHeight, usefulRowVarianceList, minHeight, desiredHeight, maxHeight, prioritizeSmallerImages, context.progress)
+        val (finalCuts, totalError) = findOptimalCuts(
+            totalHeight,
+            usefulRowVarianceList,
+            minHeight,
+            desiredHeight,
+            maxHeight,
+            prioritizeSmallerImages,
+            context.progress
+        )
 
         if (finalCuts.isEmpty()) throw IllegalArgumentException("No valid cuts found. Please adjust the parameters.")
 
@@ -367,7 +391,7 @@ class Slicer {
             for (i in 0 until img.height) {
                 validRows.add(if (analyzeSingleRowVariance(img, i, rowBuffer) <= cutTolerance) 1 else 0)
             }
-            progressReporter.report(progressIncrement*(index+1))
+            progressReporter.report(progressIncrement * (index + 1))
         }
 
         var max_distance = 0
@@ -376,7 +400,7 @@ class Slicer {
         val notifyInterval = (validRows.size / 10).coerceAtLeast(1)
         validRows.forEachIndexed { index, it ->
             if (index % notifyInterval == 0) {
-                progressReporter.report(0.9f+(index/notifyInterval)*0.01f)
+                progressReporter.report(0.9f + (index / notifyInterval) * 0.01f)
             }
             if (it == 0) {
                 if (local_distance > max_distance)
@@ -390,7 +414,7 @@ class Slicer {
         return max_distance
     }
 
-    private fun ensureFastImage(image: BufferedImage): BufferedImage {        
+    private fun ensureFastImage(image: BufferedImage): BufferedImage {
         if (image.type == BufferedImage.TYPE_INT_RGB || image.type == BufferedImage.TYPE_INT_ARGB) {
             return image
         }
@@ -405,7 +429,7 @@ class Slicer {
         val width = bufferedImage.width
         if (width <= 1) return 0
         bufferedImage.getRGB(0, y, width, 1, rowBuffer, 0, width)
-        
+
         var maxDiff = 0
         for (x in 0 until width - 1) {
             val pixel1 = rowBuffer[x]

@@ -14,26 +14,23 @@ import com.wip.common.models.ModelManager
 import com.wip.common.models.OCRResult
 import com.wip.common.models.sortedNaturally
 import com.wip.ocrAI.models.OcrIASettings
-import java.awt.image.BufferedImage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import org.wip.plugintoolkit.api.HostFileSystem
+import org.wip.plugintoolkit.api.PluginContext
+import org.wip.plugintoolkit.api.PluginLogger
+import org.wip.plugintoolkit.api.PluginSignal
 import java.io.File
 import java.nio.file.Files
 import java.util.regex.Pattern
 import javax.imageio.ImageIO
 import kotlin.math.max
 import kotlin.math.min
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.add
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
-import org.wip.plugintoolkit.api.HostFileSystem
-import org.wip.plugintoolkit.api.PluginContext
-import org.wip.plugintoolkit.api.PluginLogger
-import org.wip.plugintoolkit.api.PluginSignal
 
 class UnlimitedOcrRunner(
     private val context: PluginContext,
@@ -72,12 +69,14 @@ class UnlimitedOcrRunner(
                     logger.error("File '${f.name}' is not a supported image format ($imageExtensions).")
                 }
             }
+
             Files.isDirectory(inputPath) -> {
                 inputPath.toFile()
                     .listFiles { f -> f.extension.lowercase() in imageExtensions }
                     ?.sortedNaturally()
                     ?.let { files.addAll(it) }
             }
+
             else -> {
                 logger.error("Path '$input' does not exist.")
             }
@@ -97,7 +96,7 @@ class UnlimitedOcrRunner(
 
         val installedId = candidateGgufIds.firstOrNull {
             ModelManager.Default.isModelInstalled(it, context.fileSystem, logger) ||
-                ModelManager.Default.findLmStudioModelFile(it)?.exists() == true
+                    ModelManager.Default.findLmStudioModelFile(it)?.exists() == true
         }
 
         if (installedId == null) {
@@ -194,8 +193,14 @@ class UnlimitedOcrRunner(
     fun cleanExtractedText(raw: String): String {
         return raw
             .replace(Regex("(?i)<\\|/?(?:ref|box|det|quad|grounding|image|text)[^>]*\\|>"), "")
-            .replace(Regex("(?i)\\b(?:image|figure|table|header|footer|background|watermark)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]"), "")
-            .replace(Regex("(?i)^\\s*(?:text|balloon|speech|dialogue|caption|title|paragraph|line)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]\\s*"), "")
+            .replace(
+                Regex("(?i)\\b(?:image|figure|table|header|footer|background|watermark)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]"),
+                ""
+            )
+            .replace(
+                Regex("(?i)^\\s*(?:text|balloon|speech|dialogue|caption|title|paragraph|line)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]\\s*"),
+                ""
+            )
             .trim()
     }
 
@@ -203,7 +208,10 @@ class UnlimitedOcrRunner(
         val regions = mutableListOf<ExtractedTextRegion>()
 
         // 1. Try structured JSON parsing if present
-        val jsonPattern = Pattern.compile("```(?:json)?\\s*([\\s\\S]*?)\\s*```|(\\{[\\s\\S]*\"balloons\"[\\s\\S]*\\})", Pattern.CASE_INSENSITIVE)
+        val jsonPattern = Pattern.compile(
+            "```(?:json)?\\s*([\\s\\S]*?)\\s*```|(\\{[\\s\\S]*\"balloons\"[\\s\\S]*\\})",
+            Pattern.CASE_INSENSITIVE
+        )
         val jsonMatcher = jsonPattern.matcher(rawOutput)
         if (jsonMatcher.find()) {
             val jsonText = (jsonMatcher.group(1) ?: jsonMatcher.group(2) ?: "").trim()
@@ -373,7 +381,13 @@ class UnlimitedOcrRunner(
         )
     }
 
-    private fun saveJsonResult(save: Boolean, outputDir: String, file: File, regions: List<ExtractedTextRegion>, rawOutput: String) {
+    private fun saveJsonResult(
+        save: Boolean,
+        outputDir: String,
+        file: File,
+        regions: List<ExtractedTextRegion>,
+        rawOutput: String
+    ) {
         if (!save) return
         val outDir = File(outputDir)
         if (!outDir.exists()) outDir.mkdirs()
@@ -447,7 +461,12 @@ class UnlimitedOcrRunner(
 
                     val pageVisionResult = VisionCutoutHelper.findMatchingVisionResult(file, chapterVisionResult)
                     val cropRegions = if (pageVisionResult != null && pageVisionResult.objects.isNotEmpty()) {
-                        VisionCutoutHelper.computeCropRegions(pageVisionResult.objects, image.width, image.height, paddingPx = cropPadding)
+                        VisionCutoutHelper.computeCropRegions(
+                            pageVisionResult.objects,
+                            image.width,
+                            image.height,
+                            paddingPx = cropPadding
+                        )
                     } else emptyList()
 
                     if (cropRegions.isNotEmpty()) {
@@ -537,7 +556,10 @@ class UnlimitedOcrRunner(
                         val outDir = File(outputDir)
                         if (!outDir.exists()) outDir.mkdirs()
                         val errorFile = File(outDir, "${file.name}_ERROR.txt")
-                        errorFile.writeText("Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}", Charsets.UTF_8)
+                        errorFile.writeText(
+                            "Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}",
+                            Charsets.UTF_8
+                        )
                     }
                 }
 
@@ -608,7 +630,12 @@ class UnlimitedOcrRunner(
 
                     val pageVisionResult = VisionCutoutHelper.findMatchingVisionResult(file, chapterVisionResult)
                     val cropRegions = if (pageVisionResult != null && pageVisionResult.objects.isNotEmpty()) {
-                        VisionCutoutHelper.computeCropRegions(pageVisionResult.objects, image.width, image.height, paddingPx = cropPadding)
+                        VisionCutoutHelper.computeCropRegions(
+                            pageVisionResult.objects,
+                            image.width,
+                            image.height,
+                            paddingPx = cropPadding
+                        )
                     } else emptyList()
 
                     if (cropRegions.isNotEmpty()) {
@@ -718,7 +745,10 @@ class UnlimitedOcrRunner(
                         val outDir = File(outputDir)
                         if (!outDir.exists()) outDir.mkdirs()
                         val errorFile = File(outDir, "${file.name}_ERROR.txt")
-                        errorFile.writeText("Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}", Charsets.UTF_8)
+                        errorFile.writeText(
+                            "Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}",
+                            Charsets.UTF_8
+                        )
                     }
                 }
 

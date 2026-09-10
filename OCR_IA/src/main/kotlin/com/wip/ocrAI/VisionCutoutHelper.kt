@@ -66,11 +66,11 @@ object VisionCutoutHelper {
             val rNum = cleanRName.filter { it.isDigit() }.toIntOrNull()
 
             r.pageName.equals(fileName, ignoreCase = true) ||
-            cleanRName.equals(baseName, ignoreCase = true) ||
-            cleanRName.equals(fileName, ignoreCase = true) ||
-            r.pageName.equals(baseName, ignoreCase = true) ||
-            (fileNum != null && rNum != null && fileNum == rNum) ||
-            cleanRName.trimStart('0').equals(baseName.trimStart('0'), ignoreCase = true)
+                    cleanRName.equals(baseName, ignoreCase = true) ||
+                    cleanRName.equals(fileName, ignoreCase = true) ||
+                    r.pageName.equals(baseName, ignoreCase = true) ||
+                    (fileNum != null && rNum != null && fileNum == rNum) ||
+                    cleanRName.trimStart('0').equals(baseName.trimStart('0'), ignoreCase = true)
         }
     }
 
@@ -156,7 +156,12 @@ object VisionCutoutHelper {
      * Remaps a local bounding box [ymin, xmin, ymax, xmax] relative to a crop region
      * back to absolute pixel coordinates on the full image.
      */
-    fun remapBoxToGlobal(localBox: List<Double>, crop: CropRegion, fullWidth: Double, fullHeight: Double): List<Double> {
+    fun remapBoxToGlobal(
+        localBox: List<Double>,
+        crop: CropRegion,
+        fullWidth: Double,
+        fullHeight: Double
+    ): List<Double> {
         if (localBox.size < 4) return localBox
 
         val ymin = (crop.ymin + localBox[0]).coerceIn(0.0, fullHeight)

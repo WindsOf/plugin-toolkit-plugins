@@ -9,20 +9,10 @@ import com.wip.common.models.InpaintingUtils
 import com.wip.common.models.ModelCatalog
 import com.wip.common.models.ModelManager
 import com.wip.common.models.ModelSpec
-import com.wip.common.models.OnnxInferenceEngine
 import com.wip.common.models.OnnxInferenceSession
 import com.wip.common.models.VisionResult
 import com.wip.common.models.sortedNaturally
-import java.awt.image.BufferedImage
-import java.io.File
-import javax.imageio.ImageIO
-import javax.imageio.spi.IIORegistry
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.OS
@@ -40,6 +30,9 @@ import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
 import org.wip.plugintoolkit.api.annotations.RequiresLock
+import java.io.File
+import javax.imageio.ImageIO
+import javax.imageio.spi.IIORegistry
 
 @PluginInfo(
     id = "com.wip.cleaner",
@@ -91,18 +84,21 @@ class CleanerPlugin {
                     locks["model:big-lama"] = installed
                     locks["big-lama"] = installed
                 }
+
                 InpaintingModel.MANGA -> {
                     locks["model:manga"] = installed
                     locks["manga"] = installed
                     locks["model:anime-manga-big-lama"] = installed
                     locks["anime-manga-big-lama"] = installed
                 }
+
                 InpaintingModel.MIGAN -> {
                     locks["model:migan"] = installed
                     locks["migan"] = installed
                     locks["model:migan_traced"] = installed
                     locks["migan_traced"] = installed
                 }
+
                 InpaintingModel.MAT -> {
                     locks["model:mat"] = installed
                     locks["mat"] = installed
@@ -111,12 +107,14 @@ class CleanerPlugin {
                     locks["model:places_512_fulldata_g"] = installed
                     locks["places_512_fulldata_g"] = installed
                 }
+
                 InpaintingModel.ZITS -> {
                     locks["model:zits"] = installed
                     locks["zits"] = installed
                     locks["model:zits-inpaint-0717"] = installed
                     locks["zits-inpaint-0717"] = installed
                 }
+
                 InpaintingModel.DIFFUSION_OVERKILL -> {
                     locks["model:diffusion"] = installed
                     locks["diffusion"] = installed
@@ -206,7 +204,8 @@ class CleanerPlugin {
         }
 
         if (!anyInstalled) {
-            val msg = "No inpainting models installed (LaMa, Manga, MIGAN, MAT, ZITS, Diffusion). Please download a model first."
+            val msg =
+                "No inpainting models installed (LaMa, Manga, MIGAN, MAT, ZITS, Diffusion). Please download a model first."
             logger.warn("[Cleaner] validate: Validation failed: $msg")
             return Result.failure(IllegalStateException(msg))
         }
@@ -455,15 +454,24 @@ class CleanerPlugin {
             semanticTypes = ["path/folder"]
         )
         outputDir: String,
-        @CapabilityParam(description = "Inpainting model to use for background reconstruction", defaultValue = "\"LAMA\"")
+        @CapabilityParam(
+            description = "Inpainting model to use for background reconstruction",
+            defaultValue = "\"LAMA\""
+        )
         model: InpaintingModel = InpaintingModel.LAMA,
         @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
         targetClasses: List<String> = listOf("text"),
         @CapabilityParam(description = "Mask dilation radius in pixels for contour coverage", defaultValue = "3")
         dilationRadius: Int = 3,
-        @CapabilityParam(description = "Save the generated binary mask file alongside the cleaned image", defaultValue = "false")
+        @CapabilityParam(
+            description = "Save the generated binary mask file alongside the cleaned image",
+            defaultValue = "false"
+        )
         saveMask: Boolean = false,
-        @CapabilityParam(description = "Output only the isolated inpainted regions with transparency (PNG)", defaultValue = "false")
+        @CapabilityParam(
+            description = "Output only the isolated inpainted regions with transparency (PNG)",
+            defaultValue = "false"
+        )
         isolatedRegionsOnly: Boolean = false,
         context: PluginContext,
         hostFs: HostFileSystem
@@ -513,17 +521,27 @@ class CleanerPlugin {
         targetClasses: List<String> = listOf("text"),
         @CapabilityParam(description = "Mask dilation radius in pixels for contour coverage", defaultValue = "3")
         dilationRadius: Int = 3,
-        @CapabilityParam(description = "Enable adaptive 2.5x context expansion for neural redraws", defaultValue = "true")
+        @CapabilityParam(
+            description = "Enable adaptive 2.5x context expansion for neural redraws",
+            defaultValue = "true"
+        )
         adaptivePadding: Boolean = true,
-        @CapabilityParam(description = "Save the generated binary mask file alongside the cleaned image", defaultValue = "false")
+        @CapabilityParam(
+            description = "Save the generated binary mask file alongside the cleaned image",
+            defaultValue = "false"
+        )
         saveMask: Boolean = false,
-        @CapabilityParam(description = "Output only the isolated inpainted regions with transparency (PNG)", defaultValue = "false")
+        @CapabilityParam(
+            description = "Output only the isolated inpainted regions with transparency (PNG)",
+            defaultValue = "false"
+        )
         isolatedRegionsOnly: Boolean = false,
         context: PluginContext,
         hostFs: HostFileSystem
     ): CleanerResult {
         context.logger.info("Starting Hybrid Cleaner on image: $imagePath with model: ${model.displayName} [${strategy.displayName}]. Targeting classes: $targetClasses, adaptivePadding: $adaptivePadding")
-        val sessionPair = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else getInpaintingSession(model, context)
+        val sessionPair =
+            if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else getInpaintingSession(model, context)
         return try {
             cleanImageInternalHybrid(
                 imagePath = imagePath,
@@ -561,7 +579,10 @@ class CleanerPlugin {
             semanticTypes = ["path/folder"]
         )
         outputDir: String,
-        @CapabilityParam(description = "Inpainting model to use for background reconstruction", defaultValue = "\"LAMA\"")
+        @CapabilityParam(
+            description = "Inpainting model to use for background reconstruction",
+            defaultValue = "\"LAMA\""
+        )
         model: InpaintingModel = InpaintingModel.LAMA,
         @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
         targetClasses: List<String> = listOf("text"),
@@ -608,7 +629,10 @@ class CleanerPlugin {
         targetClasses: List<String> = listOf("text"),
         @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
         dilationRadius: Int = 3,
-        @CapabilityParam(description = "Enable adaptive 2.5x context expansion for neural redraws", defaultValue = "true")
+        @CapabilityParam(
+            description = "Enable adaptive 2.5x context expansion for neural redraws",
+            defaultValue = "true"
+        )
         adaptivePadding: Boolean = true,
         context: PluginContext,
         hostFs: HostFileSystem
@@ -635,7 +659,10 @@ class CleanerPlugin {
     )
     @RequiresLock(locks = ["model:lama"])
     suspend fun cleanChapter(
-        @CapabilityInput(description = "Path to folder containing original chapter images", semanticTypes = ["path/folder"])
+        @CapabilityInput(
+            description = "Path to folder containing original chapter images",
+            semanticTypes = ["path/folder"]
+        )
         inputFolder: String,
         @CapabilityParam(description = "Chapter vision result containing segmentations for each page")
         chapterVisionResult: ChapterVisionResult,
@@ -653,7 +680,10 @@ class CleanerPlugin {
         dilationRadius: Int = 3,
         @CapabilityParam(description = "Save generated binary masks", defaultValue = "false")
         saveMasks: Boolean = false,
-        @CapabilityParam(description = "Output only the isolated inpainted regions with transparency (PNG)", defaultValue = "false")
+        @CapabilityParam(
+            description = "Output only the isolated inpainted regions with transparency (PNG)",
+            defaultValue = "false"
+        )
         isolatedRegionsOnly: Boolean = false,
         context: PluginContext,
         hostFs: HostFileSystem
@@ -731,7 +761,10 @@ class CleanerPlugin {
     )
     @RequiresLock(locks = ["model:lama"])
     suspend fun cleanChapterHybrid(
-        @CapabilityInput(description = "Path to folder containing original chapter images", semanticTypes = ["path/folder"])
+        @CapabilityInput(
+            description = "Path to folder containing original chapter images",
+            semanticTypes = ["path/folder"]
+        )
         inputFolder: String,
         @CapabilityParam(description = "Chapter vision result containing segmentations for each page")
         chapterVisionResult: ChapterVisionResult,
@@ -749,11 +782,17 @@ class CleanerPlugin {
         targetClasses: List<String> = listOf("text"),
         @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
         dilationRadius: Int = 3,
-        @CapabilityParam(description = "Enable adaptive 2.5x context expansion for neural redraws", defaultValue = "true")
+        @CapabilityParam(
+            description = "Enable adaptive 2.5x context expansion for neural redraws",
+            defaultValue = "true"
+        )
         adaptivePadding: Boolean = true,
         @CapabilityParam(description = "Save generated binary masks", defaultValue = "false")
         saveMasks: Boolean = false,
-        @CapabilityParam(description = "Output only the isolated inpainted regions with transparency (PNG)", defaultValue = "false")
+        @CapabilityParam(
+            description = "Output only the isolated inpainted regions with transparency (PNG)",
+            defaultValue = "false"
+        )
         isolatedRegionsOnly: Boolean = false,
         context: PluginContext,
         hostFs: HostFileSystem
@@ -783,7 +822,8 @@ class CleanerPlugin {
         val totalImages = imageFiles.size
         val results = mutableListOf<CleanerResult>()
 
-        val sessionPair = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else getInpaintingSession(model, context)
+        val sessionPair =
+            if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else getInpaintingSession(model, context)
         try {
             for ((index, file) in imageFiles.withIndex()) {
                 val vResult = visionMap[file.name] ?: VisionResult(
@@ -833,7 +873,10 @@ class CleanerPlugin {
     )
     @RequiresLock(locks = ["model:lama"])
     suspend fun cleanChapterPatchesOnly(
-        @CapabilityInput(description = "Path to folder containing original chapter images", semanticTypes = ["path/folder"])
+        @CapabilityInput(
+            description = "Path to folder containing original chapter images",
+            semanticTypes = ["path/folder"]
+        )
         inputFolder: String,
         @CapabilityParam(description = "Chapter vision result containing segmentations for each page")
         chapterVisionResult: ChapterVisionResult,
@@ -872,7 +915,10 @@ class CleanerPlugin {
     )
     @RequiresLock(locks = ["model:lama"])
     suspend fun cleanChapterPatchesOnlyHybrid(
-        @CapabilityInput(description = "Path to folder containing original chapter images", semanticTypes = ["path/folder"])
+        @CapabilityInput(
+            description = "Path to folder containing original chapter images",
+            semanticTypes = ["path/folder"]
+        )
         inputFolder: String,
         @CapabilityParam(description = "Chapter vision result containing segmentations for each page")
         chapterVisionResult: ChapterVisionResult,
@@ -890,7 +936,10 @@ class CleanerPlugin {
         targetClasses: List<String> = listOf("text"),
         @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
         dilationRadius: Int = 3,
-        @CapabilityParam(description = "Enable adaptive 2.5x context expansion for neural redraws", defaultValue = "true")
+        @CapabilityParam(
+            description = "Enable adaptive 2.5x context expansion for neural redraws",
+            defaultValue = "true"
+        )
         adaptivePadding: Boolean = true,
         context: PluginContext,
         hostFs: HostFileSystem

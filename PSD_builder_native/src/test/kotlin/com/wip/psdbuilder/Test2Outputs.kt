@@ -1,9 +1,13 @@
 package com.wip.psdbuilder
 
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.double
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Test
 import java.io.File
-import kotlinx.serialization.json.*
-import kotlinx.coroutines.runBlocking
 
 class Test2Outputs {
     @Test
@@ -49,14 +53,14 @@ class Test2Outputs {
             for (b in balloons) {
                 val bObj = b.jsonObject
                 texts.add(bObj["text"]?.jsonPrimitive?.content ?: "")
-                
+
                 val tBoxArrVal = bObj["text_box_2d"]?.jsonArray
                 if (tBoxArrVal != null) {
                     var ymin = tBoxArrVal[0].jsonPrimitive.double / 1000.0 * imgHeight
                     var xmin = tBoxArrVal[1].jsonPrimitive.double / 1000.0 * imgWidth
                     var ymax = tBoxArrVal[2].jsonPrimitive.double / 1000.0 * imgHeight
                     var xmax = tBoxArrVal[3].jsonPrimitive.double / 1000.0 * imgWidth
-                    
+
                     // Hack to prevent PSDBuilderPlugin.toAbs from misinterpreting absolute pixels near 0 as normalized coordinates
                     if (ymin in 0.0..1.0) ymin = 2.0
                     if (xmin in 0.0..1.0) xmin = 2.0
@@ -67,14 +71,14 @@ class Test2Outputs {
                 } else {
                     textBoxes.add(emptyList())
                 }
-                
+
                 val bBoxArrVal = bObj["balloon_box_2d"]?.jsonArray
                 if (bBoxArrVal != null) {
                     var ymin = bBoxArrVal[0].jsonPrimitive.double / 1000.0 * imgHeight
                     var xmin = bBoxArrVal[1].jsonPrimitive.double / 1000.0 * imgWidth
                     var ymax = bBoxArrVal[2].jsonPrimitive.double / 1000.0 * imgHeight
                     var xmax = bBoxArrVal[3].jsonPrimitive.double / 1000.0 * imgWidth
-                    
+
                     // Hack to prevent PSDBuilderPlugin.toAbs from misinterpreting absolute pixels near 0 as normalized coordinates
                     if (ymin in 0.0..1.0) ymin = 2.0
                     if (xmin in 0.0..1.0) xmin = 2.0

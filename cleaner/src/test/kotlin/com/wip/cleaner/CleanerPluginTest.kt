@@ -8,10 +8,6 @@ import com.wip.common.models.VisionResult
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
-import java.awt.Color
-import java.awt.image.BufferedImage
-import java.io.File
-import javax.imageio.ImageIO
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.wip.plugintoolkit.api.HostFileSystem
@@ -19,6 +15,10 @@ import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.PluginFileSystem
 import org.wip.plugintoolkit.api.PluginLogger
 import org.wip.plugintoolkit.api.ProgressReporter
+import java.awt.Color
+import java.awt.image.BufferedImage
+import java.io.File
+import javax.imageio.ImageIO
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -26,16 +26,32 @@ class CleanerPluginTest {
 
     private class FakeLogger : PluginLogger {
         val messages = mutableListOf<String>()
-        override fun verbose(message: String) { messages.add("VERBOSE: $message") }
-        override fun debug(message: String) { messages.add("DEBUG: $message") }
-        override fun info(message: String) { messages.add("INFO: $message") }
-        override fun warn(message: String) { messages.add("WARN: $message") }
-        override fun error(message: String, throwable: Throwable?) { messages.add("ERROR: $message") }
+        override fun verbose(message: String) {
+            messages.add("VERBOSE: $message")
+        }
+
+        override fun debug(message: String) {
+            messages.add("DEBUG: $message")
+        }
+
+        override fun info(message: String) {
+            messages.add("INFO: $message")
+        }
+
+        override fun warn(message: String) {
+            messages.add("WARN: $message")
+        }
+
+        override fun error(message: String, throwable: Throwable?) {
+            messages.add("ERROR: $message")
+        }
     }
 
     private class FakeProgress : ProgressReporter {
         var lastProgress: Float = 0f
-        override fun report(progress: Float) { lastProgress = progress }
+        override fun report(progress: Float) {
+            lastProgress = progress
+        }
     }
 
     @Test
@@ -202,7 +218,12 @@ class CleanerPluginTest {
                     label = "text",
                     confidence = 0.95,
                     box = DetectionBox("text", 0.95, 0.2, 0.2, 0.4, 0.4),
-                    polygon = listOf(PolygonPoint(0.2, 0.2), PolygonPoint(0.4, 0.2), PolygonPoint(0.4, 0.4), PolygonPoint(0.2, 0.4))
+                    polygon = listOf(
+                        PolygonPoint(0.2, 0.2),
+                        PolygonPoint(0.4, 0.2),
+                        PolygonPoint(0.4, 0.4),
+                        PolygonPoint(0.2, 0.4)
+                    )
                 )
             ),
             imageWidth = 100,
@@ -215,7 +236,12 @@ class CleanerPluginTest {
                     label = "text",
                     confidence = 0.95,
                     box = DetectionBox("text", 0.95, 0.2, 0.2, 0.4, 0.4),
-                    polygon = listOf(PolygonPoint(0.2, 0.2), PolygonPoint(0.4, 0.2), PolygonPoint(0.4, 0.4), PolygonPoint(0.2, 0.4))
+                    polygon = listOf(
+                        PolygonPoint(0.2, 0.2),
+                        PolygonPoint(0.4, 0.2),
+                        PolygonPoint(0.4, 0.4),
+                        PolygonPoint(0.2, 0.4)
+                    )
                 )
             ),
             imageWidth = 100,
@@ -445,7 +471,12 @@ class CleanerPluginTest {
                     label = "text",
                     confidence = 0.95,
                     box = DetectionBox("text", 0.95, 0.2, 0.2, 0.4, 0.4),
-                    polygon = listOf(PolygonPoint(0.2, 0.2), PolygonPoint(0.4, 0.2), PolygonPoint(0.4, 0.4), PolygonPoint(0.2, 0.4))
+                    polygon = listOf(
+                        PolygonPoint(0.2, 0.2),
+                        PolygonPoint(0.4, 0.2),
+                        PolygonPoint(0.4, 0.4),
+                        PolygonPoint(0.2, 0.4)
+                    )
                 )
             ),
             imageWidth = 100,
@@ -458,7 +489,12 @@ class CleanerPluginTest {
                     label = "text",
                     confidence = 0.95,
                     box = DetectionBox("text", 0.95, 0.2, 0.2, 0.4, 0.4),
-                    polygon = listOf(PolygonPoint(0.2, 0.2), PolygonPoint(0.4, 0.2), PolygonPoint(0.4, 0.4), PolygonPoint(0.2, 0.4))
+                    polygon = listOf(
+                        PolygonPoint(0.2, 0.2),
+                        PolygonPoint(0.4, 0.2),
+                        PolygonPoint(0.4, 0.4),
+                        PolygonPoint(0.2, 0.4)
+                    )
                 )
             ),
             imageWidth = 100,
