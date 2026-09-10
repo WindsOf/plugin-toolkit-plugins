@@ -1,0 +1,179 @@
+package com.wip.manhwaTranslatorAI
+
+import com.wip.common.models.AdvancedOCRResult
+import com.wip.common.models.OCRResult
+import ai.koog.prompt.executor.clients.google.GoogleLLMClient
+import io.ktor.client.HttpClient
+import java.io.File
+import java.util.zip.ZipFile
+import org.junit.Test
+import org.wip.plugintoolkit.api.PluginContext
+import org.wip.plugintoolkit.api.PluginLogger
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
+
+class TranslatorAITest {
+
+    private class FakeLogger : PluginLogger {
+        val messages = mutableListOf<String>()
+        override fun verbose(message: String) {
+            messages.add("VERBOSE: $message")
+        }
+
+        override fun debug(message: String) {
+            messages.add("DEBUG: $message")
+        }
+
+        override fun info(message: String) {
+            messages.add("INFO: $message")
+        }
+
+        override fun warn(message: String) {
+            messages.add("WARN: $message")
+        }
+
+        override fun error(message: String, throwable: Throwable?) {
+            messages.add("ERROR: $message")
+        }
+    }
+
+    @Test
+    fun testTranslatorAISettingsDefaults() {
+        val settings = TranslatorAISettings(googleApiKey = "test-key-456")
+        assertEquals("test-key-456", settings.googleApiKey)
+        assertEquals(true, settings.useStructuredOutput)
+        assertEquals("http://localhost:1234/v1", settings.lmStudioUrl)
+        assertEquals("lm-studio", settings.lmStudioApiKey)
+    }
+
+    @Test
+    fun testAIModelIdentifiers() {
+        assertEquals("gemma-4-26b-a4b-it", AIModel.GEMMA_26B.id)
+        assertEquals("gemma-4-31b-it", AIModel.GEMMA_31B.id)
+        assertEquals("gemini-3.5-flash", AIModel.GEMINI_3_5_FLASH.id)
+        assertEquals("gemini-3.1-flash-lite", AIModel.GEMINI_3_1_FLASH_LITE.id)
+        assertEquals("lm-studio", AIModel.LM_STUDIO.id)
+    }
+
+    @Test
+    fun testLifecycleHooks() {
+        val plugin = TranslatorAI(TranslatorAISettings(googleApiKey = "key123"))
+        val logger = FakeLogger()
+
+        val loadResult = plugin.onLoad(logger)
+        assertTrue(loadResult.isSuccess)
+
+        val context = io.mockk.mockk<PluginContext>(relaxed = true)
+        kotlinx.coroutines.runBlocking {
+            val setupResult = plugin.setup(context)
+            assertTrue(setupResult.isSuccess)
+
+            val updateResult = plugin.update(context)
+            assertTrue(updateResult.isSuccess)
+
+            val validateResult = plugin.validate(context)
+            assertTrue(validateResult.isSuccess)
+        }
+    }
+
+    @Test
+    fun testOCRResultCopyPreservation() {
+        val initialOcr = OCRResult(
+            texts = listOf("Korean text 1", "Korean text 2"),
+            bb = listOf(listOf(0.1, 0.1, 0.3, 0.3), listOf(0.4, 0.4, 0.6, 0.6)),
+            pageNumbers = listOf(1, 1),
+            pageNames = listOf("01.png", "01.png"),
+            failedFiles = emptyList()
+        )
+
+        val translatedTexts = listOf("Testo italiano 1", "Testo italiano 2")
+        val translatedOcr = initialOcr.copy(texts = translatedTexts)
+
+        assertEquals(translatedTexts, translatedOcr.texts)
+        assertEquals(initialOcr.bb, translatedOcr.bb)
+        assertEquals(initialOcr.pageNames, translatedOcr.pageNames)
+    }
+
+    @Test
+    fun testAdvancedOCRResultCopyPreservation() {
+        val initialOcr = AdvancedOCRResult(
+            texts = listOf("Korean text"),
+            balloonBoxes = listOf(listOf(0.1, 0.1, 0.5, 0.5)),
+            textBoxes = listOf(listOf(0.15, 0.15, 0.45, 0.45)),
+            shapes = listOf("oval"),
+            fontStyles = listOf("bold"),
+            fontFamilies = listOf("sans-serif"),
+            textAngles = listOf(0.0),
+            isSparse = listOf(false),
+            textColors = listOf("#000000"),
+            hasBorder = listOf(true),
+            borderColors = listOf("#FFFFFF"),
+            pageNumbers = listOf(1),
+            pageNames = listOf("01.png"),
+            failedFiles = emptyList()
+        )
+
+        val translatedTexts = listOf("Testo tradotto")
+        val translatedOcr = initialOcr.copy(texts = translatedTexts)
+
+        assertEquals(translatedTexts, translatedOcr.texts)
+        assertEquals(initialOcr.balloonBoxes, translatedOcr.balloonBoxes)
+        assertEquals(initialOcr.shapes, translatedOcr.shapes)
+        assertEquals(initialOcr.borderColors, translatedOcr.borderColors)
+    }
+
+    @Test
+    fun testIsHallucinationFiltering() {
+        val plugin = TranslatorAI(TranslatorAISettings(googleApiKey = "key123"))
+
+        assertTrue(plugin.isHallucination("(no text)"))
+        assertTrue(plugin.isHallucination("no text"))
+        assertTrue(plugin.isHallucination("(nessun testo)"))
+        assertTrue(plugin.isHallucination("nessun testo"))
+        assertTrue(plugin.isHallucination(""))
+        assertTrue(plugin.isHallucination("   "))
+        assertTrue(plugin.isHallucination("The image contains no text. The OCR result \"1\" is a hallucination"))
+        assertTrue(plugin.isHallucination("text [0, 0, 999, 999](no text)"))
+
+        kotlin.test.assertFalse(plugin.isHallucination("Hello, how are you?"))
+        kotlin.test.assertFalse(plugin.isHallucination("Questo è un testo valido."))
+    }
+
+    @Test
+    fun testTestLmStudioConnectionActionShowsToast() = kotlinx.coroutines.runBlocking {
+        val plugin = TranslatorAI(TranslatorAISettings(lmStudioUrl = "http://127.0.0.1:59999/v1"))
+        val toasts = mutableListOf<String>()
+        val context = io.mockk.mockk<PluginContext>(relaxed = true)
+        io.mockk.every { context.showToast(any()) } answers {
+            toasts.add(firstArg())
+        }
+        plugin.testLmStudioConnection(context)
+        assertTrue(toasts.isNotEmpty())
+        assertTrue(toasts.first().contains("LM Studio"))
+    }
+
+    @Test
+    fun testKoogHttpClientKtClassAvailable() {
+        val clazz = Class.forName("ai.koog.http.client.ktor.KtorKoogHttpClientKt")
+        assertNotNull(clazz)
+    }
+
+    @Test
+    fun testGoogleLLMClientInitializationWithHttpClient() {
+        val client = HttpClient()
+        val googleClient = GoogleLLMClient(apiKey = "dummy-api-key", baseClient = client)
+        assertNotNull(googleClient)
+    }
+
+    @Test
+    fun testBuiltJarContainsKoogHttpClientKtorIfPresent() {
+        val jarFile = File("build/libs/manhwaTranslatorAI.jar")
+        if (jarFile.exists()) {
+            ZipFile(jarFile).use { zip ->
+                val entry = zip.getEntry("ai/koog/http/client/ktor/KtorKoogHttpClientKt.class")
+                assertNotNull(entry, "KtorKoogHttpClientKt.class must be packaged in manhwaTranslatorAI.jar")
+            }
+        }
+    }
+}
