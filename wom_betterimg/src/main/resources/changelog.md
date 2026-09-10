@@ -1,10 +1,16 @@
+Version: 2.6.0
+Date: 2026-09-10
+Added:
+  - Enhanced post-processing filterchain with secondary fine_dehalo and hq_dering after CAS.
+  - Isolated grain generation to luma plane only (strength=(grain, 0) / strength=(grain * 1.5, 0)) preventing chroma noise.
+  - Fixed possibly unbound 'deband' variable and optimized warmup dummy clip dimensions (256x256).
+-------------------------------------------------------------------------------------------------
 Version: 2.5.1
 Date: 2026-09-10
 Changes:
   - Added advanced parameters tag to some capabilities properties
   - Renamed plugin from `BetterIMG` to `WOM BetterIMG`
 -------------------------------------------------------------------------------------------------
-Version: 2.4.0
 Version: 2.5.0
 Date: 2026-09-07
 Added:

@@ -172,7 +172,7 @@ import threading
 _gpu_lock = threading.Lock()
 _backend_cache = None
 
-TILE_SIZE = (128, 128)
+TILE_SIZE = (256, 256)
 OVERLAP = (8, 8)
 
 
@@ -190,13 +190,13 @@ def warmup_engine(backend):
     before any multi-threaded processing begins, eliminating file write collisions.
     """
     try:
-        dummy = core.std.BlankClip(format=vs.RGBS, width=128, height=128, length=1)
+        dummy = core.std.BlankClip(format=vs.RGBS, width=256, height=256, length=1)
         scaled = ArtCNN.R8F64_JPEG444(
             kernel=Bicubic(b=0, c=0),
             tilesize=TILE_SIZE,
             overlap=OVERLAP,
             backend=backend,
-        ).scale(dummy, width=256, height=256)
+        ).scale(dummy, width=512, height=512)
         scaled.get_frame(0)
         del dummy, scaled
     except Exception as e:
@@ -293,6 +293,7 @@ def process_image(
             clips=dehaloed, planes=[0, 0, 0], colorfamily=vs.RGB
         ).resize.Point(format=vs.YUV444PS, matrix_s="709", range_s="full")
 
+        deband = None
         is_manga = str(img_type).lower() == "manga"
 
         if is_manga:
@@ -301,7 +302,7 @@ def process_image(
             cas= hq_dering(cas, planes=[0])
             grained = Grainer.GAUSS(
                 cas,
-                strength=(grain, grain),
+                strength=(grain, 0),
                 static=False,
                 luma_scaling=1,
                 scale=2,
@@ -324,7 +325,7 @@ def process_image(
             cas= hq_dering(cas, planes=[0])
             grained = Grainer.PERLIN(
                 cas,
-                strength=(grain * 2, 1),
+                strength=(grain * 1.5, 0),
                 static=False,
                 luma_scaling=1,
                 scale=1,
@@ -341,10 +342,9 @@ def process_image(
         b = np.asarray(frame[2]).copy()
 
         del frame, clip_out, grained, cas, dehalo, dehaloed, ai_scaled_clip, clip
-        if not is_manga:
+        if deband is not None:
             del deband
 
-    # CPU image conversion and compression (runs in parallel across threads)
     rgb_10 = np.dstack((r, g, b))
     rgb_8 = (rgb_10 >> 2).astype(np.uint8)
     img = Image.fromarray(rgb_8)
