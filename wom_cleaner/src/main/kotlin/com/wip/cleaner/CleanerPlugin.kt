@@ -5,6 +5,7 @@ import com.wip.common.models.ChapterCleanerResult
 import com.wip.common.models.ChapterVisionResult
 import com.wip.common.models.CleanerResult
 import com.wip.common.models.ExecutionDevice
+import com.wip.common.models.InpaintingOptions
 import com.wip.common.models.InpaintingUtils
 import com.wip.common.models.ModelCatalog
 import com.wip.common.models.ModelManager
@@ -14,6 +15,7 @@ import com.wip.common.models.VisionResult
 import com.wip.common.models.sortedNaturally
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.wip.plugintoolkit.api.ConditionOperator
 import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.OS
 import org.wip.plugintoolkit.api.PluginContext
@@ -22,6 +24,7 @@ import org.wip.plugintoolkit.api.annotations.Capability
 import org.wip.plugintoolkit.api.annotations.CapabilityInput
 import org.wip.plugintoolkit.api.annotations.CapabilityOutput
 import org.wip.plugintoolkit.api.annotations.CapabilityParam
+import org.wip.plugintoolkit.api.annotations.DependsOn
 import org.wip.plugintoolkit.api.annotations.PluginAction
 import org.wip.plugintoolkit.api.annotations.PluginInfo
 import org.wip.plugintoolkit.api.annotations.PluginLoad
@@ -37,7 +40,7 @@ import javax.imageio.spi.IIORegistry
 @PluginInfo(
     id = "com.wip.cleaner",
     name = "WOM Cleaner",
-    version = "1.1.2",
+    version = "1.2.0",
     description = "Inpaints and erases segmented text and artifacts from images using segmentation maps.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
@@ -99,15 +102,6 @@ class CleanerPlugin {
                     locks["migan_traced"] = installed
                 }
 
-                InpaintingModel.MAT -> {
-                    locks["model:mat"] = installed
-                    locks["mat"] = installed
-                    locks["model:Places_512_FullData_G"] = installed
-                    locks["Places_512_FullData_G"] = installed
-                    locks["model:places_512_fulldata_g"] = installed
-                    locks["places_512_fulldata_g"] = installed
-                }
-
                 InpaintingModel.ZITS -> {
                     locks["model:zits"] = installed
                     locks["zits"] = installed
@@ -115,11 +109,13 @@ class CleanerPlugin {
                     locks["zits-inpaint-0717"] = installed
                 }
 
-                InpaintingModel.DIFFUSION_OVERKILL -> {
-                    locks["model:diffusion"] = installed
-                    locks["diffusion"] = installed
-                    locks["model:ldm"] = installed
-                    locks["ldm"] = installed
+                InpaintingModel.ZITSPP -> {
+                    locks["model:zitspp"] = installed
+                    locks["zitspp"] = installed
+                    locks["model:zits++"] = installed
+                    locks["zits++"] = installed
+                    locks["model:zits_plusplus"] = installed
+                    locks["zits_plusplus"] = installed
                 }
             }
         }
@@ -205,7 +201,7 @@ class CleanerPlugin {
 
         if (!anyInstalled) {
             val msg =
-                "No inpainting models installed (LaMa, Manga, MIGAN, MAT, ZITS, Diffusion). Please download a model first."
+                "No inpainting models installed (LaMa, Manga, MIGAN, ZITS, ZITS++). Please download a model first."
             logger.warn("[Cleaner] validate: Validation failed: $msg")
             return Result.failure(IllegalStateException(msg))
         }
@@ -220,11 +216,22 @@ class CleanerPlugin {
         return Result.success(Unit)
     }
 
+    data class InpaintingSessionBundle(
+        val session: OnnxInferenceSession?,
+        val spec: ModelSpec,
+        val multiSessions: Map<String, OnnxInferenceSession> = emptyMap()
+    ) : AutoCloseable {
+        override fun close() {
+            session?.close()
+            multiSessions.values.forEach { it.close() }
+        }
+    }
+
     private suspend fun getInpaintingSession(
         model: InpaintingModel,
         context: PluginContext
-    ): Pair<OnnxInferenceSession, ModelSpec>? {
-        val spec = ModelManager.Default.getModelSpec(model.modelId, context.fileSystem)
+    ): InpaintingSessionBundle? {
+        val spec = ModelManager.Default.getModelSpec(model.modelId, context.fileSystem, context.logger)
             ?: ModelSpec(
                 modelTypeRaw = model.modelId,
                 name = model.displayName,
@@ -232,15 +239,26 @@ class CleanerPlugin {
                 inputHeight = 512
             )
 
-        val session = ModelManager.Default.createInferenceSession(
+        val multiSessions = if (spec.components.isNotEmpty()) {
+            ModelManager.Default.createInferenceSessions(
+                modelId = model.modelId,
+                fileSystem = context.fileSystem,
+                preferredDevice = ExecutionDevice.AUTO,
+                logger = context.logger
+            )
+        } else {
+            emptyMap()
+        }
+
+        val primarySession = multiSessions["generator"] ?: ModelManager.Default.createInferenceSession(
             modelId = model.modelId,
             fileSystem = context.fileSystem,
             preferredDevice = ExecutionDevice.AUTO,
             logger = context.logger
         )
 
-        return if (session != null) {
-            Pair(session, spec)
+        return if (primarySession != null || multiSessions.isNotEmpty()) {
+            InpaintingSessionBundle(primarySession, spec, multiSessions)
         } else {
             context.logger.warn("ONNX model session could not be created for ${model.displayName} (${model.modelId}). Falling back to baseline pure inpainter.")
             null
@@ -252,11 +270,12 @@ class CleanerPlugin {
         segmentationData: VisionResult,
         outputDir: String,
         model: InpaintingModel,
-        sessionPair: Pair<OnnxInferenceSession, ModelSpec>?,
+        sessionBundle: InpaintingSessionBundle?,
         targetClasses: List<String>,
         dilationRadius: Int,
         saveMask: Boolean,
         isolatedRegionsOnly: Boolean,
+        options: InpaintingOptions = InpaintingOptions(),
         context: PluginContext,
         hostFs: HostFileSystem
     ): CleanerResult {
@@ -297,20 +316,24 @@ class CleanerPlugin {
             InpaintingUtils.inpaintImageIsolated(
                 sourceImage = baseImage,
                 mask = mask,
-                session = sessionPair?.first,
-                spec = sessionPair?.second,
+                session = sessionBundle?.session,
+                spec = sessionBundle?.spec,
                 roiPaddingPx = 24,
-                featherRadiusPx = 2
+                featherRadiusPx = options.featherRadius,
+                options = options,
+                multiSessions = sessionBundle?.multiSessions ?: emptyMap()
             )
         } else {
             // Run neural ONNX inpainting with fallback to pure Kotlin inpainting
-            if (sessionPair != null) {
+            if (sessionBundle != null && sessionBundle.session != null) {
                 InpaintingUtils.inpaintWithOnnx(
                     sourceImage = baseImage,
                     mask = mask,
-                    session = sessionPair.first,
-                    spec = sessionPair.second,
-                    roiPaddingPx = 24
+                    session = sessionBundle.session,
+                    spec = sessionBundle.spec,
+                    roiPaddingPx = 24,
+                    options = options,
+                    multiSessions = sessionBundle.multiSessions
                 )
             } else {
                 InpaintingUtils.inpaintImage(baseImage, mask, roiPaddingPx = 24)
@@ -346,12 +369,13 @@ class CleanerPlugin {
         outputDir: String,
         model: InpaintingModel,
         strategy: CleaningStrategy,
-        sessionPair: Pair<OnnxInferenceSession, ModelSpec>?,
+        sessionBundle: InpaintingSessionBundle?,
         targetClasses: List<String>,
         dilationRadius: Int,
         adaptivePadding: Boolean,
         saveMask: Boolean,
         isolatedRegionsOnly: Boolean,
+        options: InpaintingOptions = InpaintingOptions(),
         context: PluginContext,
         hostFs: HostFileSystem
     ): CleanerResult {
@@ -389,8 +413,9 @@ class CleanerPlugin {
         }
 
         val deterministicFill = strategy != CleaningStrategy.NEURAL_ONLY
-        val activeSession = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else sessionPair?.first
-        val activeSpec = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else sessionPair?.second
+        val activeSession = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else sessionBundle?.session
+        val activeSpec = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else sessionBundle?.spec
+        val activeMultiSessions = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) emptyMap() else (sessionBundle?.multiSessions ?: emptyMap())
 
         val cleanedImage = if (isolatedRegionsOnly) {
             InpaintingUtils.inpaintProductionHybridIsolated(
@@ -401,7 +426,9 @@ class CleanerPlugin {
                 adaptivePadding = adaptivePadding,
                 deterministicFill = deterministicFill,
                 minContextSize = 256,
-                featherRadiusPx = 2
+                featherRadiusPx = options.featherRadius,
+                options = options,
+                multiSessions = activeMultiSessions
             )
         } else {
             InpaintingUtils.inpaintProductionHybrid(
@@ -411,7 +438,9 @@ class CleanerPlugin {
                 spec = activeSpec,
                 adaptivePadding = adaptivePadding,
                 deterministicFill = deterministicFill,
-                minContextSize = 256
+                minContextSize = 256,
+                options = options,
+                multiSessions = activeMultiSessions
             )
         }
 
@@ -473,27 +502,107 @@ class CleanerPlugin {
             defaultValue = "false"
         )
         isolatedRegionsOnly: Boolean = false,
+        @CapabilityParam(
+            description = "Boundary feathering radius (px) for smooth alpha blending",
+            defaultValue = "2",
+            isAdvanced = true
+        )
+        featherRadius: Int = 2,
+        @CapabilityParam(
+            description = "Apply Poisson gradient blending along hole boundaries",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        usePoisson: Boolean = false,
+        @CapabilityParam(
+            description = "Context expansion margin (px) around mask bounding box",
+            defaultValue = "32",
+            isAdvanced = true
+        )
+        cropMargin: Int = 32,
+        @CapabilityParam(
+            description = "Autoregressive TSR sampling iterations",
+            defaultValue = "5",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        iterations: Int = 5,
+        @CapabilityParam(
+            description = "Additive color offset correction [-1.0, 1.0]",
+            defaultValue = "0.0",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        addV: Double = 0.0,
+        @CapabilityParam(
+            description = "Multiplicative contrast scaling [0.0, 2.0]",
+            defaultValue = "1.0",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        mulV: Double = 1.0,
+        @CapabilityParam(
+            description = "Gaussian smoothing sigma for edge detection",
+            defaultValue = "1.5",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        sigma256: Double = 1.5,
+        @CapabilityParam(
+            description = "Wireframe proposal acceptance threshold",
+            defaultValue = "0.85",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        maskTh: Double = 0.85,
+        @CapabilityParam(
+            description = "Suppress line hallucination inside hole to remove object cleanly",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        objRemoval: Boolean = false,
+        @CapabilityParam(
+            description = "Edge-NMS binarization threshold [0, 255] (lower = more edges, higher = fewer edges)",
+            defaultValue = "50",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", value = "ZITSPP")
+        binaryThreshold: Int = 50,
         context: PluginContext,
         hostFs: HostFileSystem
     ): CleanerResult {
+        val options = InpaintingOptions(
+            featherRadius = featherRadius,
+            usePoisson = usePoisson,
+            cropMargin = cropMargin,
+            iterations = iterations,
+            addV = addV,
+            mulV = mulV,
+            sigma256 = sigma256,
+            maskTh = maskTh,
+            objRemoval = objRemoval,
+            binaryThreshold = binaryThreshold
+        )
         context.logger.info("Starting Cleaner on image: $imagePath with model: ${model.displayName}. Targeting classes: $targetClasses, isolatedRegionsOnly: $isolatedRegionsOnly")
-        val sessionPair = getInpaintingSession(model, context)
+        val sessionBundle = getInpaintingSession(model, context)
         return try {
             cleanImageInternal(
                 imagePath = imagePath,
                 segmentationData = segmentationData,
                 outputDir = outputDir,
                 model = model,
-                sessionPair = sessionPair,
+                sessionBundle = sessionBundle,
                 targetClasses = targetClasses,
                 dilationRadius = dilationRadius,
                 saveMask = saveMask,
                 isolatedRegionsOnly = isolatedRegionsOnly,
+                options = options,
                 context = context,
                 hostFs = hostFs
             )
         } finally {
-            sessionPair?.first?.close()
+            sessionBundle?.close()
         }
     }
 
@@ -536,11 +645,90 @@ class CleanerPlugin {
             defaultValue = "false"
         )
         isolatedRegionsOnly: Boolean = false,
+        @CapabilityParam(
+            description = "Boundary feathering radius (px) for smooth alpha blending",
+            defaultValue = "2",
+            isAdvanced = true
+        )
+        featherRadius: Int = 2,
+        @CapabilityParam(
+            description = "Apply Poisson gradient blending along hole boundaries",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        usePoisson: Boolean = false,
+        @CapabilityParam(
+            description = "Context expansion margin (px) around mask bounding box",
+            defaultValue = "32",
+            isAdvanced = true
+        )
+        cropMargin: Int = 32,
+        @CapabilityParam(
+            description = "Autoregressive TSR sampling iterations",
+            defaultValue = "5",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        iterations: Int = 5,
+        @CapabilityParam(
+            description = "Additive color offset correction [-1.0, 1.0]",
+            defaultValue = "0.0",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        addV: Double = 0.0,
+        @CapabilityParam(
+            description = "Multiplicative contrast scaling [0.0, 2.0]",
+            defaultValue = "1.0",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        mulV: Double = 1.0,
+        @CapabilityParam(
+            description = "Gaussian smoothing sigma for edge detection",
+            defaultValue = "1.5",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        sigma256: Double = 1.5,
+        @CapabilityParam(
+            description = "Wireframe proposal acceptance threshold",
+            defaultValue = "0.85",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        maskTh: Double = 0.85,
+        @CapabilityParam(
+            description = "Suppress line hallucination inside hole to remove object cleanly",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        objRemoval: Boolean = false,
+        @CapabilityParam(
+            description = "Edge-NMS binarization threshold [0, 255] (lower = more edges, higher = fewer edges)",
+            defaultValue = "50",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", value = "ZITSPP")
+        binaryThreshold: Int = 50,
         context: PluginContext,
         hostFs: HostFileSystem
     ): CleanerResult {
+        val options = InpaintingOptions(
+            featherRadius = featherRadius,
+            usePoisson = usePoisson,
+            cropMargin = cropMargin,
+            iterations = iterations,
+            addV = addV,
+            mulV = mulV,
+            sigma256 = sigma256,
+            maskTh = maskTh,
+            objRemoval = objRemoval,
+            binaryThreshold = binaryThreshold
+        )
         context.logger.info("Starting Hybrid Cleaner on image: $imagePath with model: ${model.displayName} [${strategy.displayName}]. Targeting classes: $targetClasses, adaptivePadding: $adaptivePadding")
-        val sessionPair =
+        val sessionBundle =
             if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else getInpaintingSession(model, context)
         return try {
             cleanImageInternalHybrid(
@@ -549,17 +737,18 @@ class CleanerPlugin {
                 outputDir = outputDir,
                 model = model,
                 strategy = strategy,
-                sessionPair = sessionPair,
+                sessionBundle = sessionBundle,
                 targetClasses = targetClasses,
                 dilationRadius = dilationRadius,
                 adaptivePadding = adaptivePadding,
                 saveMask = saveMask,
                 isolatedRegionsOnly = isolatedRegionsOnly,
+                options = options,
                 context = context,
                 hostFs = hostFs
             )
         } finally {
-            sessionPair?.first?.close()
+            sessionBundle?.close()
         }
     }
 
@@ -588,6 +777,73 @@ class CleanerPlugin {
         targetClasses: List<String> = listOf("text"),
         @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
         dilationRadius: Int = 3,
+        @CapabilityParam(
+            description = "Boundary feathering radius (px) for smooth alpha blending",
+            defaultValue = "2",
+            isAdvanced = true
+        )
+        featherRadius: Int = 2,
+        @CapabilityParam(
+            description = "Apply Poisson gradient blending along hole boundaries",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        usePoisson: Boolean = false,
+        @CapabilityParam(
+            description = "Context expansion margin (px) around mask bounding box",
+            defaultValue = "32",
+            isAdvanced = true
+        )
+        cropMargin: Int = 32,
+        @CapabilityParam(
+            description = "Autoregressive TSR sampling iterations",
+            defaultValue = "5",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        iterations: Int = 5,
+        @CapabilityParam(
+            description = "Additive color offset correction [-1.0, 1.0]",
+            defaultValue = "0.0",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        addV: Double = 0.0,
+        @CapabilityParam(
+            description = "Multiplicative contrast scaling [0.0, 2.0]",
+            defaultValue = "1.0",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        mulV: Double = 1.0,
+        @CapabilityParam(
+            description = "Gaussian smoothing sigma for edge detection",
+            defaultValue = "1.5",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        sigma256: Double = 1.5,
+        @CapabilityParam(
+            description = "Wireframe proposal acceptance threshold",
+            defaultValue = "0.85",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        maskTh: Double = 0.85,
+        @CapabilityParam(
+            description = "Suppress line hallucination inside hole to remove object cleanly",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        objRemoval: Boolean = false,
+        @CapabilityParam(
+            description = "Edge-NMS binarization threshold [0, 255] (lower = more edges, higher = fewer edges)",
+            defaultValue = "50",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", value = "ZITSPP")
+        binaryThreshold: Int = 50,
         context: PluginContext,
         hostFs: HostFileSystem
     ): CleanerResult {
@@ -600,6 +856,16 @@ class CleanerPlugin {
             dilationRadius = dilationRadius,
             saveMask = false,
             isolatedRegionsOnly = true,
+            featherRadius = featherRadius,
+            usePoisson = usePoisson,
+            cropMargin = cropMargin,
+            iterations = iterations,
+            addV = addV,
+            mulV = mulV,
+            sigma256 = sigma256,
+            maskTh = maskTh,
+            objRemoval = objRemoval,
+            binaryThreshold = binaryThreshold,
             context = context,
             hostFs = hostFs
         )
@@ -634,6 +900,73 @@ class CleanerPlugin {
             defaultValue = "true"
         )
         adaptivePadding: Boolean = true,
+        @CapabilityParam(
+            description = "Boundary feathering radius (px) for smooth alpha blending",
+            defaultValue = "2",
+            isAdvanced = true
+        )
+        featherRadius: Int = 2,
+        @CapabilityParam(
+            description = "Apply Poisson gradient blending along hole boundaries",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        usePoisson: Boolean = false,
+        @CapabilityParam(
+            description = "Context expansion margin (px) around mask bounding box",
+            defaultValue = "32",
+            isAdvanced = true
+        )
+        cropMargin: Int = 32,
+        @CapabilityParam(
+            description = "Autoregressive TSR sampling iterations",
+            defaultValue = "5",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        iterations: Int = 5,
+        @CapabilityParam(
+            description = "Additive color offset correction [-1.0, 1.0]",
+            defaultValue = "0.0",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        addV: Double = 0.0,
+        @CapabilityParam(
+            description = "Multiplicative contrast scaling [0.0, 2.0]",
+            defaultValue = "1.0",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        mulV: Double = 1.0,
+        @CapabilityParam(
+            description = "Gaussian smoothing sigma for edge detection",
+            defaultValue = "1.5",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        sigma256: Double = 1.5,
+        @CapabilityParam(
+            description = "Wireframe proposal acceptance threshold",
+            defaultValue = "0.85",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        maskTh: Double = 0.85,
+        @CapabilityParam(
+            description = "Suppress line hallucination inside hole to remove object cleanly",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        objRemoval: Boolean = false,
+        @CapabilityParam(
+            description = "Edge-NMS binarization threshold [0, 255] (lower = more edges, higher = fewer edges)",
+            defaultValue = "50",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", value = "ZITSPP")
+        binaryThreshold: Int = 50,
         context: PluginContext,
         hostFs: HostFileSystem
     ): CleanerResult {
@@ -648,6 +981,16 @@ class CleanerPlugin {
             adaptivePadding = adaptivePadding,
             saveMask = false,
             isolatedRegionsOnly = true,
+            featherRadius = featherRadius,
+            usePoisson = usePoisson,
+            cropMargin = cropMargin,
+            iterations = iterations,
+            addV = addV,
+            mulV = mulV,
+            sigma256 = sigma256,
+            maskTh = maskTh,
+            objRemoval = objRemoval,
+            binaryThreshold = binaryThreshold,
             context = context,
             hostFs = hostFs
         )
@@ -685,6 +1028,73 @@ class CleanerPlugin {
             defaultValue = "false"
         )
         isolatedRegionsOnly: Boolean = false,
+        @CapabilityParam(
+            description = "Boundary feathering radius (px) for smooth alpha blending",
+            defaultValue = "2",
+            isAdvanced = true
+        )
+        featherRadius: Int = 2,
+        @CapabilityParam(
+            description = "Apply Poisson gradient blending along hole boundaries",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        usePoisson: Boolean = false,
+        @CapabilityParam(
+            description = "Context expansion margin (px) around mask bounding box",
+            defaultValue = "32",
+            isAdvanced = true
+        )
+        cropMargin: Int = 32,
+        @CapabilityParam(
+            description = "Autoregressive TSR sampling iterations",
+            defaultValue = "5",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        iterations: Int = 5,
+        @CapabilityParam(
+            description = "Additive color offset correction [-1.0, 1.0]",
+            defaultValue = "0.0",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        addV: Double = 0.0,
+        @CapabilityParam(
+            description = "Multiplicative contrast scaling [0.0, 2.0]",
+            defaultValue = "1.0",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        mulV: Double = 1.0,
+        @CapabilityParam(
+            description = "Gaussian smoothing sigma for edge detection",
+            defaultValue = "1.5",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        sigma256: Double = 1.5,
+        @CapabilityParam(
+            description = "Wireframe proposal acceptance threshold",
+            defaultValue = "0.85",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        maskTh: Double = 0.85,
+        @CapabilityParam(
+            description = "Suppress line hallucination inside hole to remove object cleanly",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        objRemoval: Boolean = false,
+        @CapabilityParam(
+            description = "Edge-NMS binarization threshold [0, 255] (lower = more edges, higher = fewer edges)",
+            defaultValue = "50",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", value = "ZITSPP")
+        binaryThreshold: Int = 50,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterCleanerResult {
@@ -708,12 +1118,25 @@ class CleanerPlugin {
             throw IllegalArgumentException("No images found in folder: $inputFolder")
         }
 
+        val options = InpaintingOptions(
+            featherRadius = featherRadius,
+            usePoisson = usePoisson,
+            cropMargin = cropMargin,
+            iterations = iterations,
+            addV = addV,
+            mulV = mulV,
+            sigma256 = sigma256,
+            maskTh = maskTh,
+            objRemoval = objRemoval,
+            binaryThreshold = binaryThreshold
+        )
+
         logger.info("Starting Chapter Cleaner for ${imageFiles.size} images with model ${model.displayName} (isolatedRegionsOnly=$isolatedRegionsOnly).")
 
         val totalImages = imageFiles.size
         val results = mutableListOf<CleanerResult>()
 
-        val sessionPair = getInpaintingSession(model, context)
+        val sessionBundle = getInpaintingSession(model, context)
         try {
             for ((index, file) in imageFiles.withIndex()) {
                 val vResult = visionMap[file.name] ?: VisionResult(
@@ -728,11 +1151,12 @@ class CleanerPlugin {
                     segmentationData = vResult,
                     outputDir = outDir.absolutePath,
                     model = model,
-                    sessionPair = sessionPair,
+                    sessionBundle = sessionBundle,
                     targetClasses = targetClasses,
                     dilationRadius = dilationRadius,
                     saveMask = saveMasks,
                     isolatedRegionsOnly = isolatedRegionsOnly,
+                    options = options,
                     context = context,
                     hostFs = hostFs
                 )
@@ -740,7 +1164,7 @@ class CleanerPlugin {
                 progressReporter.report((index + 1).toFloat() / totalImages.toFloat())
             }
         } finally {
-            sessionPair?.first?.close()
+            sessionBundle?.close()
         }
 
         val cleanedPaths = results.map { it.cleanedImagePath }
@@ -794,6 +1218,73 @@ class CleanerPlugin {
             defaultValue = "false"
         )
         isolatedRegionsOnly: Boolean = false,
+        @CapabilityParam(
+            description = "Boundary feathering radius (px) for smooth alpha blending",
+            defaultValue = "2",
+            isAdvanced = true
+        )
+        featherRadius: Int = 2,
+        @CapabilityParam(
+            description = "Apply Poisson gradient blending along hole boundaries",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        usePoisson: Boolean = false,
+        @CapabilityParam(
+            description = "Context expansion margin (px) around mask bounding box",
+            defaultValue = "32",
+            isAdvanced = true
+        )
+        cropMargin: Int = 32,
+        @CapabilityParam(
+            description = "Autoregressive TSR sampling iterations",
+            defaultValue = "5",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        iterations: Int = 5,
+        @CapabilityParam(
+            description = "Additive color offset correction [-1.0, 1.0]",
+            defaultValue = "0.0",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        addV: Double = 0.0,
+        @CapabilityParam(
+            description = "Multiplicative contrast scaling [0.0, 2.0]",
+            defaultValue = "1.0",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        mulV: Double = 1.0,
+        @CapabilityParam(
+            description = "Gaussian smoothing sigma for edge detection",
+            defaultValue = "1.5",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        sigma256: Double = 1.5,
+        @CapabilityParam(
+            description = "Wireframe proposal acceptance threshold",
+            defaultValue = "0.85",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        maskTh: Double = 0.85,
+        @CapabilityParam(
+            description = "Suppress line hallucination inside hole to remove object cleanly",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        objRemoval: Boolean = false,
+        @CapabilityParam(
+            description = "Edge-NMS binarization threshold [0, 255] (lower = more edges, higher = fewer edges)",
+            defaultValue = "50",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", value = "ZITSPP")
+        binaryThreshold: Int = 50,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterCleanerResult {
@@ -817,12 +1308,25 @@ class CleanerPlugin {
             throw IllegalArgumentException("No images found in folder: $inputFolder")
         }
 
+        val options = InpaintingOptions(
+            featherRadius = featherRadius,
+            usePoisson = usePoisson,
+            cropMargin = cropMargin,
+            iterations = iterations,
+            addV = addV,
+            mulV = mulV,
+            sigma256 = sigma256,
+            maskTh = maskTh,
+            objRemoval = objRemoval,
+            binaryThreshold = binaryThreshold
+        )
+
         logger.info("Starting Chapter Hybrid Cleaner for ${imageFiles.size} images with model ${model.displayName} [${strategy.displayName}] (isolatedRegionsOnly=$isolatedRegionsOnly).")
 
         val totalImages = imageFiles.size
         val results = mutableListOf<CleanerResult>()
 
-        val sessionPair =
+        val sessionBundle =
             if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else getInpaintingSession(model, context)
         try {
             for ((index, file) in imageFiles.withIndex()) {
@@ -839,12 +1343,13 @@ class CleanerPlugin {
                     outputDir = outDir.absolutePath,
                     model = model,
                     strategy = strategy,
-                    sessionPair = sessionPair,
+                    sessionBundle = sessionBundle,
                     targetClasses = targetClasses,
                     dilationRadius = dilationRadius,
                     adaptivePadding = adaptivePadding,
                     saveMask = saveMasks,
                     isolatedRegionsOnly = isolatedRegionsOnly,
+                    options = options,
                     context = context,
                     hostFs = hostFs
                 )
@@ -852,7 +1357,7 @@ class CleanerPlugin {
                 progressReporter.report((index + 1).toFloat() / totalImages.toFloat())
             }
         } finally {
-            sessionPair?.first?.close()
+            sessionBundle?.close()
         }
 
         val cleanedPaths = results.map { it.cleanedImagePath }
@@ -892,6 +1397,73 @@ class CleanerPlugin {
         targetClasses: List<String> = listOf("text"),
         @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
         dilationRadius: Int = 3,
+        @CapabilityParam(
+            description = "Boundary feathering radius (px) for smooth alpha blending",
+            defaultValue = "2",
+            isAdvanced = true
+        )
+        featherRadius: Int = 2,
+        @CapabilityParam(
+            description = "Apply Poisson gradient blending along hole boundaries",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        usePoisson: Boolean = false,
+        @CapabilityParam(
+            description = "Context expansion margin (px) around mask bounding box",
+            defaultValue = "32",
+            isAdvanced = true
+        )
+        cropMargin: Int = 32,
+        @CapabilityParam(
+            description = "Autoregressive TSR sampling iterations",
+            defaultValue = "5",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        iterations: Int = 5,
+        @CapabilityParam(
+            description = "Additive color offset correction [-1.0, 1.0]",
+            defaultValue = "0.0",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        addV: Double = 0.0,
+        @CapabilityParam(
+            description = "Multiplicative contrast scaling [0.0, 2.0]",
+            defaultValue = "1.0",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        mulV: Double = 1.0,
+        @CapabilityParam(
+            description = "Gaussian smoothing sigma for edge detection",
+            defaultValue = "1.5",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        sigma256: Double = 1.5,
+        @CapabilityParam(
+            description = "Wireframe proposal acceptance threshold",
+            defaultValue = "0.85",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        maskTh: Double = 0.85,
+        @CapabilityParam(
+            description = "Suppress line hallucination inside hole to remove object cleanly",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        objRemoval: Boolean = false,
+        @CapabilityParam(
+            description = "Edge-NMS binarization threshold [0, 255] (lower = more edges, higher = fewer edges)",
+            defaultValue = "50",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", value = "ZITSPP")
+        binaryThreshold: Int = 50,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterCleanerResult {
@@ -904,6 +1476,16 @@ class CleanerPlugin {
             dilationRadius = dilationRadius,
             saveMasks = false,
             isolatedRegionsOnly = true,
+            featherRadius = featherRadius,
+            usePoisson = usePoisson,
+            cropMargin = cropMargin,
+            iterations = iterations,
+            addV = addV,
+            mulV = mulV,
+            sigma256 = sigma256,
+            maskTh = maskTh,
+            objRemoval = objRemoval,
+            binaryThreshold = binaryThreshold,
             context = context,
             hostFs = hostFs
         )
@@ -941,6 +1523,73 @@ class CleanerPlugin {
             defaultValue = "true"
         )
         adaptivePadding: Boolean = true,
+        @CapabilityParam(
+            description = "Boundary feathering radius (px) for smooth alpha blending",
+            defaultValue = "2",
+            isAdvanced = true
+        )
+        featherRadius: Int = 2,
+        @CapabilityParam(
+            description = "Apply Poisson gradient blending along hole boundaries",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        usePoisson: Boolean = false,
+        @CapabilityParam(
+            description = "Context expansion margin (px) around mask bounding box",
+            defaultValue = "32",
+            isAdvanced = true
+        )
+        cropMargin: Int = 32,
+        @CapabilityParam(
+            description = "Autoregressive TSR sampling iterations",
+            defaultValue = "5",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        iterations: Int = 5,
+        @CapabilityParam(
+            description = "Additive color offset correction [-1.0, 1.0]",
+            defaultValue = "0.0",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        addV: Double = 0.0,
+        @CapabilityParam(
+            description = "Multiplicative contrast scaling [0.0, 2.0]",
+            defaultValue = "1.0",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        mulV: Double = 1.0,
+        @CapabilityParam(
+            description = "Gaussian smoothing sigma for edge detection",
+            defaultValue = "1.5",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        sigma256: Double = 1.5,
+        @CapabilityParam(
+            description = "Wireframe proposal acceptance threshold",
+            defaultValue = "0.85",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        maskTh: Double = 0.85,
+        @CapabilityParam(
+            description = "Suppress line hallucination inside hole to remove object cleanly",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
+        objRemoval: Boolean = false,
+        @CapabilityParam(
+            description = "Edge-NMS binarization threshold [0, 255] (lower = more edges, higher = fewer edges)",
+            defaultValue = "50",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", value = "ZITSPP")
+        binaryThreshold: Int = 50,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterCleanerResult {
@@ -955,6 +1604,16 @@ class CleanerPlugin {
             adaptivePadding = adaptivePadding,
             saveMasks = false,
             isolatedRegionsOnly = true,
+            featherRadius = featherRadius,
+            usePoisson = usePoisson,
+            cropMargin = cropMargin,
+            iterations = iterations,
+            addV = addV,
+            mulV = mulV,
+            sigma256 = sigma256,
+            maskTh = maskTh,
+            objRemoval = objRemoval,
+            binaryThreshold = binaryThreshold,
             context = context,
             hostFs = hostFs
         )

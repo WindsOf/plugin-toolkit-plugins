@@ -15,31 +15,26 @@ enum class InpaintingModel(val modelId: String, val displayName: String) {
     @RequiresLock(locks = ["model:migan_traced", "model:migan"])
     MIGAN("migan_traced", "MIGAN"),
 
-    @RequiresLock(locks = ["model:Places_512_FullData_G", "model:mat"])
-    MAT("Places_512_FullData_G", "MAT (Mask-Aware Transformer)"),
+    @RequiresLock(locks = ["model:zits"])
+    ZITS("zits", "ZITS (Structure-Guided)"),
 
-    @RequiresLock(locks = ["model:zits-inpaint-0717", "model:zits"])
-    ZITS("zits-inpaint-0717", "ZITS (Structure-Guided)"),
-
-    @RequiresLock(locks = ["model:diffusion", "model:ldm"])
-    DIFFUSION_OVERKILL("diffusion", "Overkill Latent Diffusion");
+    @RequiresLock(locks = ["model:zitspp", "model:zits++", "model:zits_plusplus"])
+    ZITSPP("zitspp", "ZITS++ (SOTA Multi-Scale Inpainting)");
 
     companion object {
         fun fromModelId(id: String): InpaintingModel? {
             val clean = id.trim().lowercase()
-            return entries.find {
-                it.modelId.equals(clean, ignoreCase = true) ||
-                        (clean == "lama" && it == LAMA) ||
-                        (clean == "manga" && it == MANGA) ||
-                        (clean == "migan" && it == MIGAN) ||
-                        (clean == "mat" && it == MAT) ||
-                        (clean == "zits" && it == ZITS) ||
-                        (clean == "diffusion" && it == DIFFUSION_OVERKILL) ||
-                        (clean == "big-lama" && it == LAMA) ||
-                        (clean == "anime-manga-big-lama" && it == MANGA) ||
-                        (clean == "migan_traced" && it == MIGAN) ||
-                        (clean == "places_512_fulldata_g" && it == MAT) ||
-                        (clean == "zits-inpaint-0717" && it == ZITS)
+            return when {
+                clean == "lama" || clean == "big-lama" -> LAMA
+                clean == "manga" || clean == "anime-manga-big-lama" -> MANGA
+                clean == "migan" || clean == "migan_traced" -> MIGAN
+                clean == "zits" -> ZITS
+                clean == "zits-inpaint-0717" -> ZITS // old zits-inpaint-0717 deprecated, routes to ZITS
+                clean == "zitspp" || clean == "zits++" || clean == "zits_plusplus" -> ZITSPP
+                // Deprecated model fallbacks to LAMA
+                clean == "mat" || clean == "places_512_fulldata_g" -> LAMA
+                clean == "diffusion" || clean == "ldm" || clean == "diffusion_overkill" -> LAMA
+                else -> entries.find { it.modelId.equals(clean, ignoreCase = true) || it.name.equals(clean, ignoreCase = true) }
             }
         }
     }
@@ -52,26 +47,23 @@ enum class InpaintingDownloadModel(val modelId: String, val displayName: String)
     LAMA("big-lama", "LaMa"),
     MANGA("anime-manga-big-lama", "Manga (Anime LaMa)"),
     MIGAN("migan_traced", "MIGAN"),
-    MAT("Places_512_FullData_G", "MAT (Mask-Aware Transformer)"),
-    ZITS("zits-inpaint-0717", "ZITS (Structure-Guided)"),
-    DIFFUSION_OVERKILL("diffusion", "Overkill Latent Diffusion");
+    ZITS("zits", "ZITS (Structure-Guided)"),
+    ZITSPP("zitspp", "ZITS++ (SOTA Multi-Scale Inpainting)");
 
     companion object {
         fun fromModelId(id: String): InpaintingDownloadModel? {
             val clean = id.trim().lowercase()
-            return entries.find {
-                it.modelId.equals(clean, ignoreCase = true) ||
-                        (clean == "lama" && it == LAMA) ||
-                        (clean == "manga" && it == MANGA) ||
-                        (clean == "migan" && it == MIGAN) ||
-                        (clean == "mat" && it == MAT) ||
-                        (clean == "zits" && it == ZITS) ||
-                        (clean == "diffusion" && it == DIFFUSION_OVERKILL) ||
-                        (clean == "big-lama" && it == LAMA) ||
-                        (clean == "anime-manga-big-lama" && it == MANGA) ||
-                        (clean == "migan_traced" && it == MIGAN) ||
-                        (clean == "places_512_fulldata_g" && it == MAT) ||
-                        (clean == "zits-inpaint-0717" && it == ZITS)
+            return when {
+                clean == "lama" || clean == "big-lama" -> LAMA
+                clean == "manga" || clean == "anime-manga-big-lama" -> MANGA
+                clean == "migan" || clean == "migan_traced" -> MIGAN
+                clean == "zits" -> ZITS
+                clean == "zits-inpaint-0717" -> ZITS // old zits-inpaint-0717 deprecated, routes to ZITS
+                clean == "zitspp" || clean == "zits++" || clean == "zits_plusplus" -> ZITSPP
+                // Deprecated model fallbacks to LAMA
+                clean == "mat" || clean == "places_512_fulldata_g" -> LAMA
+                clean == "diffusion" || clean == "ldm" || clean == "diffusion_overkill" -> LAMA
+                else -> entries.find { it.modelId.equals(clean, ignoreCase = true) || it.name.equals(clean, ignoreCase = true) }
             }
         }
     }

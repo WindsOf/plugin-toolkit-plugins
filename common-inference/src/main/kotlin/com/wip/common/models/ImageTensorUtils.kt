@@ -230,4 +230,93 @@ object ImageTensorUtils {
         img.setRGB(0, 0, w, h, pixels, 0, w)
         return img
     }
+
+    /**
+     * Creates a 4-channel [OnnxTensor] [1, 4, targetHeight, targetWidth] for MI-GAN (MIGAN).
+     * Channels: [masked_image (3 channels BGR in [-1.0, 1.0]), known_mask (1 channel in [0.0, 1.0])].
+     * known_mask: 1.0 at known background, 0.0 at hole.
+     * masked_image: image * known_mask.
+     */
+    fun createMigan4ChannelTensor(
+        env: OrtEnvironment,
+        image: BufferedImage,
+        mask: BufferedImage,
+        targetWidth: Int = 512,
+        targetHeight: Int = 512
+    ): OnnxTensor {
+        val resizedImg = resizeImage(image, targetWidth, targetHeight)
+        val resizedMask = resizeImage(mask, targetWidth, targetHeight)
+
+        val buffer = allocateDirectFloatBuffer(1 * 4 * targetHeight * targetWidth)
+        val channelSize = targetWidth * targetHeight
+        val bOffset = 0
+        val gOffset = channelSize
+        val rOffset = 2 * channelSize
+        val maskOffset = 3 * channelSize
+
+        val imgPixels = IntArray(channelSize)
+        resizedImg.getRGB(0, 0, targetWidth, targetHeight, imgPixels, 0, targetWidth)
+
+        val maskRaster = resizedMask.raster
+        val maskPixels = IntArray(channelSize)
+        maskRaster.getSamples(0, 0, targetWidth, targetHeight, 0, maskPixels)
+
+        for (i in 0 until channelSize) {
+            val rgb = imgPixels[i]
+            val rByte = (rgb shr 16) and 0xFF
+            val gByte = (rgb shr 8) and 0xFF
+            val bByte = rgb and 0xFF
+
+            val isHole = maskPixels[i] > 128
+            val knownVal = if (isHole) 0.0f else 1.0f
+
+            // BGR in [-1.0, 1.0] masked by knownVal
+            val bVal = (((bByte / 127.5f) - 1.0f) * knownVal)
+            val gVal = (((gByte / 127.5f) - 1.0f) * knownVal)
+            val rVal = (((rByte / 127.5f) - 1.0f) * knownVal)
+
+            buffer.put(bOffset + i, bVal)
+            buffer.put(gOffset + i, gVal)
+            buffer.put(rOffset + i, rVal)
+            buffer.put(maskOffset + i, knownVal)
+        }
+
+        buffer.rewind()
+        val shape = longArrayOf(1L, 4L, targetHeight.toLong(), targetWidth.toLong())
+        return OnnxTensor.createTensor(env, buffer, shape)
+    }
+
+    /**
+     * Decodes MI-GAN output tensor [1, 3, H, W] in BGR [-1.0, 1.0] to a RGB [BufferedImage].
+     */
+    fun miganTensorToBufferedImage(tensor: OnnxTensor): BufferedImage {
+        val shape = tensor.info.shape
+        val buffer = tensor.floatBuffer
+
+        val h = (if (shape.size == 4) shape[2] else shape[1]).toInt()
+        val w = (if (shape.size == 4) shape[3] else shape[2]).toInt()
+        val channelSize = h * w
+
+        val bOffset = 0
+        val gOffset = channelSize
+        val rOffset = 2 * channelSize
+
+        val img = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+        val pixels = IntArray(w * h)
+
+        for (i in 0 until channelSize) {
+            val rawB = buffer.get(bOffset + i)
+            val rawG = buffer.get(gOffset + i)
+            val rawR = buffer.get(rOffset + i)
+
+            val b = ((rawB + 1.0f) * 127.5f).toInt().coerceIn(0, 255)
+            val g = ((rawG + 1.0f) * 127.5f).toInt().coerceIn(0, 255)
+            val r = ((rawR + 1.0f) * 127.5f).toInt().coerceIn(0, 255)
+
+            pixels[i] = (r shl 16) or (g shl 8) or b
+        }
+
+        img.setRGB(0, 0, w, h, pixels, 0, w)
+        return img
+    }
 }

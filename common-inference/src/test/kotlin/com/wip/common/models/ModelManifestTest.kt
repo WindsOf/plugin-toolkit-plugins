@@ -99,7 +99,24 @@ class ModelManifestTest {
 
         val zits = ModelCatalog.findById("zits")
         assertNotNull(zits)
-        assertEquals("model:zits-inpaint-0717", zits.lockKey)
+        assertEquals("model:zits", zits.lockKey)
+        assertEquals("https://www.windsofresub.cloud/models/zits/zits.yaml", zits.yamlUrl)
+        assertEquals("https://www.windsofresub.cloud/models/zits/generator.onnx", zits.onnxUrl)
+        assertTrue(zits.extraFileUrls.containsKey("structure_upsample.onnx"))
+
+        val zitsOld = ModelCatalog.findById("zits-inpaint-0717")
+        assertNotNull(zitsOld)
+        assertEquals(ModelCatalog.ZITS_ID, zitsOld.id)
+        assertEquals(zits.yamlUrl, zitsOld.yamlUrl)
+
+        val zitspp = ModelCatalog.findById("zitspp")
+        assertNotNull(zitspp)
+        assertEquals("model:zitspp", zitspp.lockKey)
+        assertEquals(ModelType.INPAINTING, zitspp.type)
+        assertEquals("https://www.windsofresub.cloud/models/zitspp/zitspp.yaml", zitspp.yamlUrl)
+        assertEquals("https://www.windsofresub.cloud/models/zitspp/generator.onnx", zitspp.onnxUrl)
+        assertTrue(zitspp.extraFileUrls.containsKey("tsr.onnx"))
+        assertTrue(zitspp.extraFileUrls.containsKey("structure_upsample.onnx"))
 
         val diffusion = ModelCatalog.findById("ldm")
         assertNotNull(diffusion)

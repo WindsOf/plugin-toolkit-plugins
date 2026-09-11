@@ -1,3 +1,18 @@
+Version: 1.2.0
+Date: 2026-09-11
+Added:
+  - Added official support for ZITS++ (zitspp) multi-stage inpainting pipeline (TSR, Edge-NMS, SSU, MPE, and Generator) retrieved from remote.
+  - Restored and maintained ZITS (zits) multi-component model with dedicated subfolder storage (models/zits/) retrieved from remote (https://www.windsofresub.cloud/models/zits/zits.yaml).
+  - Implemented dynamic and advanced capability parameters via Plugin API 2.1.0 (@DependsOn, ConditionOperator, isAdvanced).
+  - Added model-specific fine-tuning controls (iterations, addV, mulV, sigma256, maskTh, objRemoval) for ZITS and ZITS++, plus Edge-NMS binaryThreshold for ZITS++.
+  - Added boundary alpha feathering (featherRadius) and Poisson blending (usePoisson) controls across all inpainting capabilities.
+  - Added dedicated subfolder model storage for multi-component models (e.g. models/zits/ and models/zitspp/) to prevent file name collisions.
+Changed:
+  - Deprecated legacy monolithic zits-inpaint-0717 model; mapped legacy requests for "zits-inpaint-0717" to ZITS (zits).
+  - Deprecated MAT and Overkill Diffusion models; mapped them to automatic, graceful fallback to LaMa.
+  - Maintained 5 core remote inpainting models: LaMa, Manga (Anime LaMa), MIGAN, ZITS, and ZITS++.
+  - Updated MIGAN tensor pipeline to 4-channel NCHW format with BGR [-1, 1] normalization and inverted hole mask.
+-------------------------------------------------------------------------------------------------
 Version: 1.1.2
 Date: 2026-09-10
 Changes:

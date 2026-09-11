@@ -78,6 +78,10 @@ class CleanerPluginTest {
             assertTrue(locks.containsKey("model:manga"))
             assertTrue(locks.containsKey("model:migan_traced"))
             assertTrue(locks.containsKey("model:migan"))
+            assertTrue(locks.containsKey("model:zits"))
+            assertTrue(locks.containsKey("model:zits-inpaint-0717"))
+            assertTrue(locks.containsKey("model:zitspp"))
+            assertTrue(locks.containsKey("model:zits++"))
         }
 
         val missingFs = mockk<PluginFileSystem>(relaxed = true) {
@@ -572,6 +576,114 @@ class CleanerPluginTest {
 
             cleaner.downloadAllModels(context)
             assertTrue(toastMessages.any { it.contains("All inpainting models downloaded successfully") })
+        }
+    }
+
+    @Test
+    fun testInpaintingModelResolutionAndFallbacks() {
+        // Maintained models
+        assertEquals(InpaintingModel.LAMA, InpaintingModel.fromModelId("lama"))
+        assertEquals(InpaintingModel.LAMA, InpaintingModel.fromModelId("big-lama"))
+        assertEquals(InpaintingModel.MANGA, InpaintingModel.fromModelId("manga"))
+        assertEquals(InpaintingModel.MANGA, InpaintingModel.fromModelId("anime-manga-big-lama"))
+        assertEquals(InpaintingModel.MIGAN, InpaintingModel.fromModelId("migan"))
+        assertEquals(InpaintingModel.MIGAN, InpaintingModel.fromModelId("migan_traced"))
+        assertEquals(InpaintingModel.ZITS, InpaintingModel.fromModelId("zits"))
+        assertEquals(InpaintingModel.ZITS, InpaintingModel.fromModelId("zits-inpaint-0717"))
+        assertEquals(InpaintingModel.ZITSPP, InpaintingModel.fromModelId("zitspp"))
+        assertEquals(InpaintingModel.ZITSPP, InpaintingModel.fromModelId("zits++"))
+        assertEquals(InpaintingModel.ZITSPP, InpaintingModel.fromModelId("zits_plusplus"))
+
+        // Deprecated models fallback gracefully to LAMA without error
+        assertEquals(InpaintingModel.LAMA, InpaintingModel.fromModelId("mat"))
+        assertEquals(InpaintingModel.LAMA, InpaintingModel.fromModelId("places_512_fulldata_g"))
+        assertEquals(InpaintingModel.LAMA, InpaintingModel.fromModelId("diffusion"))
+        assertEquals(InpaintingModel.LAMA, InpaintingModel.fromModelId("ldm"))
+        assertEquals(InpaintingModel.LAMA, InpaintingModel.fromModelId("diffusion_overkill"))
+
+        // Download models
+        assertEquals(InpaintingDownloadModel.ZITS, InpaintingDownloadModel.fromModelId("zits"))
+        assertEquals(InpaintingDownloadModel.ZITS, InpaintingDownloadModel.fromModelId("zits-inpaint-0717"))
+        assertEquals(InpaintingDownloadModel.ZITSPP, InpaintingDownloadModel.fromModelId("zitspp"))
+        assertEquals(InpaintingDownloadModel.LAMA, InpaintingDownloadModel.fromModelId("mat"))
+        assertEquals(InpaintingDownloadModel.LAMA, InpaintingDownloadModel.fromModelId("diffusion"))
+    }
+
+    @Test
+    fun testCleanImageWithAdvancedParameters() {
+        val cleaner = CleanerPlugin()
+        val tempDir = File("build/tmp/test_cleaner_advanced").apply {
+            if (exists()) deleteRecursively()
+            mkdirs()
+        }
+        val imgFile = File(tempDir, "page_adv.png")
+        val bi = BufferedImage(100, 100, BufferedImage.TYPE_INT_RGB)
+        val g = bi.createGraphics()
+        g.color = Color.WHITE
+        g.fillRect(0, 0, 100, 100)
+        g.color = Color.BLACK
+        g.fillRect(20, 20, 30, 30) // Text block
+        g.dispose()
+        ImageIO.write(bi, "png", imgFile)
+
+        val outDir = File(tempDir, "out")
+        val visResult = VisionResult(
+            objects = listOf(
+                SegmentedObject(
+                    label = "text",
+                    confidence = 0.99,
+                    box = DetectionBox("text", 0.99, 0.2, 0.2, 0.5, 0.5),
+                    polygon = listOf(
+                        PolygonPoint(0.2, 0.2),
+                        PolygonPoint(0.5, 0.2),
+                        PolygonPoint(0.5, 0.5),
+                        PolygonPoint(0.2, 0.5)
+                    )
+                )
+            ),
+            imageWidth = 100,
+            imageHeight = 100,
+            pageName = "page_adv.png"
+        )
+
+        val logger = FakeLogger()
+        val pluginFs = mockk<PluginFileSystem>(relaxed = true) {
+            coEvery { readFile(any()) } returns null
+            coEvery { exists(any()) } returns false
+        }
+        val hostFs = mockk<HostFileSystem>(relaxed = true)
+        val context = mockk<PluginContext>(relaxed = true) {
+            every { this@mockk.logger } returns logger
+            every { this@mockk.fileSystem } returns pluginFs
+        }
+
+        runBlocking {
+            val result = cleaner.cleanImage(
+                imagePath = imgFile.absolutePath,
+                segmentationData = visResult,
+                outputDir = outDir.absolutePath,
+                model = InpaintingModel.ZITSPP,
+                targetClasses = listOf("text"),
+                dilationRadius = 2,
+                saveMask = true,
+                isolatedRegionsOnly = false,
+                featherRadius = 3,
+                usePoisson = false,
+                cropMargin = 16,
+                iterations = 5,
+                addV = 0.05,
+                mulV = 1.02,
+                sigma256 = 1.8,
+                maskTh = 0.88,
+                objRemoval = true,
+                binaryThreshold = 45,
+                context = context,
+                hostFs = hostFs
+            )
+
+            assertEquals(1, result.cleanedObjectsCount)
+            assertTrue(File(result.cleanedImagePath).exists())
+            assertTrue(result.maskPath != null && File(result.maskPath!!).exists())
         }
     }
 }

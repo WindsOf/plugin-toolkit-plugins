@@ -1,8 +1,53 @@
 # Cleaner Plugin Migration Guide
 
+## Upgrading to Inpainting Engine 1.2.0 (Version 1.2.0)
+
+Version 1.2.0 overhauls neural inpainting model support and introduces dynamic, model-aware advanced parameter controls using **Plugin API 2.1.0**.
+
+---
+
+### Maintained Inpainting Models
+
+We officially support and optimize 5 neural inpainting models retrieved from remote storage:
+
+1. **`LAMA`** (`big-lama`): Fast, versatile Large Mask Inpainting via Fast Fourier Convolutions.
+2. **`MANGA`** (`anime-manga-big-lama`): Specialized LaMa fine-tuned for screentones, halftones, and anime/manga artwork.
+3. **`MIGAN`** (`migan_traced`): Manga Inpainting GAN utilizing an end-to-end 4-channel NCHW tensor architecture `[masked_image (BGR [-1, 1]), known_mask ([0, 1])]`.
+4. **`ZITS`** (`zits`): Structure-guided inpainting with MPE, Canny edge detection, Structure-Upsample, and Fourier generator synthesis. Stored in dedicated subfolder (`models/zits/`) from `https://www.windsofresub.cloud/models/zits/zits.yaml`.
+5. **`ZITSPP`** (`zitspp` - **NEW SOTA**): State-of-the-art multi-stage transformer pipeline orchestrating EdgeLine TSR (256x256), Edge-NMS filtering, SSU (Structure-Upsample), MPE wavefront dilation, and Generator synthesis. Stored in dedicated subfolder (`models/zitspp/`) from `https://www.windsofresub.cloud/models/zitspp/zitspp.yaml`.
+
+---
+
+### Deprecated Models & Migration Plan
+
+* **`zits-inpaint-0717`**: Legacy monolithic ZITS export is deprecated and replaced by multi-component **`ZITS`** (`https://www.windsofresub.cloud/models/zits/zits.yaml`). Existing automations or presets requesting `"zits-inpaint-0717"` are automatically routed to `ZITS`.
+* **`MAT` (`Places_512_FullData_G`)** and **`DIFFUSION_OVERKILL` (`diffusion`)**: Deprecated and removed from active selection to streamline memory footprints and execution reliability. Existing presets automatically fall back to `LAMA`.
+* **Subfolder Storage Strategy:** Multi-component models (`ZITS` and `ZITSPP`) are downloaded into isolated subfolders (`models/zits/` and `models/zitspp/`) to prevent file collisions (e.g. `generator.onnx`, `structure_upsample.onnx`) and ensure reliable model management.
+
+---
+
+### Dynamic & Advanced Parameter Controls
+
+Using **Plugin API 2.1.0**, capabilities dynamically update which advanced configuration parameters are displayed in the host application UI based on the selected `model`:
+
+| Parameter | Type | Default | Availability / Condition | Purpose |
+| :--- | :--- | :--- | :--- | :--- |
+| `featherRadius` | Int | `2` | All Models (`isAdvanced = true`) | Boundary alpha blending radius in pixels |
+| `usePoisson` | Boolean | `false` | All Models (`isAdvanced = true`) | Poisson gradient reconstruction |
+| `cropMargin` | Int | `32` | All Models (`isAdvanced = true`) | Context expansion margin (px) around mask |
+| `iterations` | Int | `5` | `model in [ZITS, ZITSPP]` | TSR sampling iterations |
+| `addV` | Double | `0.0` | `model in [ZITS, ZITSPP]` | Additive color offset correction `[-1.0, 1.0]` |
+| `mulV` | Double | `1.0` | `model in [ZITS, ZITSPP]` | Multiplicative contrast scaling `[0.0, 2.0]` |
+| `sigma256` | Double | `1.5` | `model in [ZITS, ZITSPP]` | Gaussian smoothing sigma for edge detection |
+| `maskTh` | Double | `0.85` | `model in [ZITS, ZITSPP]` | Wireframe proposal acceptance threshold |
+| `objRemoval` | Boolean | `false` | `model in [ZITS, ZITSPP]` | Suppress line hallucination inside hole to clean objects |
+| `binaryThreshold`| Int | `50` | `model == ZITSPP` | Edge-NMS binarization threshold `[0, 255]` |
+
+---
+
 ## Upgrading to Production Hybrid Cleaning (Version 1.1.0)
 
-Version 1.1.0 introduces the **Production Hybrid Cleaning Pipeline**, adding deterministic background filling for solid/gradient speech balloons, context-aware adaptive ROI expansion for complex neural redraws, and support for expanded neural architectures (`MAT`, `ZITS`, `Overkill Diffusion`).
+Version 1.1.0 introduced the **Production Hybrid Cleaning Pipeline**, adding deterministic background filling for solid/gradient speech balloons, context-aware adaptive ROI expansion for complex neural redraws, and support for expanded neural architectures.
 
 ---
 

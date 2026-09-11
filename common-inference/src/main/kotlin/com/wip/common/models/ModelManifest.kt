@@ -132,6 +132,8 @@ data class ModelSpec(
     val normMode: String = "",
     @SerialName("mask_mode")
     val maskMode: String = "",
+    @SerialName("concat_order")
+    val concatOrder: String = "",
     @SerialName("input_names")
     val inputNames: List<String> = emptyList(),
     @SerialName("output_names")
@@ -173,6 +175,8 @@ data class ModelSpec(
         val list = mutableListOf<String>()
         if (files.isNotEmpty()) {
             list.addAll(files.values)
+        } else if (components.isNotEmpty()) {
+            list.addAll(components.values.map { it.file }.filter { it.isNotBlank() })
         } else {
             if (onnxFile.isNotBlank()) list.add(onnxFile)
             if (dataFile.isNotBlank()) list.add(dataFile)
@@ -237,7 +241,9 @@ object ModelCatalog {
     const val MAT_ID = "Places_512_FullData_G"
     const val MANGA_ID = "anime-manga-big-lama"
     const val LDM_ID = "diffusion"
-    const val ZITS_ID = "zits-inpaint-0717"
+    const val ZITS_ID = "zits"
+    const val OLD_ZITS_ID = "zits-inpaint-0717"
+    const val ZITSPP_ID = "zitspp"
     const val FCF_ID = "places_512_G"
     const val MIGAN_ID = "migan_traced"
     const val UNLIMITED_OCR_ID = "Unlimited-OCR"
@@ -308,12 +314,29 @@ object ModelCatalog {
 
     val ZITS = ModelCatalogEntry(
         id = ZITS_ID,
-        displayName = "ZITS (0717)",
-        yamlUrl = "https://www.windsofresub.cloud/models/zits-inpaint-0717.yaml",
-        onnxUrl = "https://www.windsofresub.cloud/models/zits-inpaint-0717.onnx",
+        displayName = "ZITS (Structure-Guided)",
+        yamlUrl = "https://www.windsofresub.cloud/models/zits/zits.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/zits/generator.onnx",
         lockKey = "model:$ZITS_ID",
-        description = "Incremental Transformer Structure inpainting ONNX model",
-        type = ModelType.INPAINTING
+        description = "Incremental Transformer Structure inpainting ONNX model with Fourier and wireframe priors",
+        type = ModelType.INPAINTING,
+        extraFileUrls = mapOf(
+            "structure_upsample.onnx" to "https://www.windsofresub.cloud/models/zits/structure_upsample.onnx"
+        )
+    )
+
+    val ZITSPP = ModelCatalogEntry(
+        id = ZITSPP_ID,
+        displayName = "ZITS++ (State-of-the-Art Structure-Guided)",
+        yamlUrl = "https://www.windsofresub.cloud/models/zitspp/zitspp.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/zitspp/generator.onnx",
+        lockKey = "model:$ZITSPP_ID",
+        description = "ZITS++ Non-autoregressive EdgeLine Transformer and EMA Fourier Restorer",
+        type = ModelType.INPAINTING,
+        extraFileUrls = mapOf(
+            "tsr.onnx" to "https://www.windsofresub.cloud/models/zitspp/tsr.onnx",
+            "structure_upsample.onnx" to "https://www.windsofresub.cloud/models/zitspp/structure_upsample.onnx"
+        )
     )
 
     val FCF = ModelCatalogEntry(
@@ -414,6 +437,7 @@ object ModelCatalog {
         MANGA,
         LDM,
         ZITS,
+        ZITSPP,
         FCF,
         MIGAN,
         UNLIMITED_OCR,
@@ -438,6 +462,9 @@ object ModelCatalog {
             (clean == "places_512_g" && it.id == FCF_ID) ||
             (clean == "zits" && it.id == ZITS_ID) ||
             (clean == "zits-inpaint-0717" && it.id == ZITS_ID) ||
+            (clean == "zitspp" && it.id == ZITSPP_ID) ||
+            (clean == "zits++" && it.id == ZITSPP_ID) ||
+            (clean == "zits_plusplus" && it.id == ZITSPP_ID) ||
             (clean == "big-lama" && it.id == LAMA_ID) ||
             (clean == "anime-manga-big-lama" && it.id == MANGA_ID) ||
             (clean == "migan_traced" && it.id == MIGAN_ID) ||
@@ -463,7 +490,13 @@ enum class InpaintingModel(val modelId: String, val displayName: String) {
     MANGA("manga", "Manga"),
 
     @RequiresLock(locks = ["model:migan"])
-    MIGAN("migan", "MIGAN")
+    MIGAN("migan", "MIGAN"),
+
+    @RequiresLock(locks = ["model:zits"])
+    ZITS("zits", "ZITS (Structure-Guided)"),
+
+    @RequiresLock(locks = ["model:zitspp", "model:zits++", "model:zits_plusplus"])
+    ZITSPP("zitspp", "ZITS++ (SOTA Multi-Scale Inpainting)")
 }
 
 /**

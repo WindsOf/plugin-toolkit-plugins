@@ -21,6 +21,35 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
+ * Configuration options for neural and deterministic inpainting pipelines.
+ *
+ * @param featherRadius Feathering radius in pixels for blending boundary alpha contours.
+ * @param usePoisson Whether to apply Poisson image editing / gradient reconstruction.
+ * @param cropMargin Context expansion margin in pixels when cropping patches around mask clusters.
+ * @param iterations Autoregressive sampling steps (e.g. TSR transformer sampling iterations).
+ * @param addV Additive color offset correction.
+ * @param mulV Multiplicative contrast scaling.
+ * @param sigma256 Gaussian kernel sigma for edge detection in ZITS.
+ * @param maskTh Threshold for wireframe / line proposal acceptance in ZITS.
+ * @param objRemoval In ZITS/ZITS++, if true, suppress line tokens in the hole to clean objects instead of hallucinating lines.
+ * @param binaryThreshold Threshold for Edge-NMS binarization in ZITS++.
+ * @param padMod Multiple to snap patch dimensions to (e.g. 16 or 32).
+ */
+data class InpaintingOptions(
+    val featherRadius: Int = 0,
+    val usePoisson: Boolean = false,
+    val cropMargin: Int = 32,
+    val iterations: Int = 5,
+    val addV: Double = 0.0,
+    val mulV: Double = 1.0,
+    val sigma256: Double = 1.5,
+    val maskTh: Double = 0.85,
+    val objRemoval: Boolean = false,
+    val binaryThreshold: Int = 50,
+    val padMod: Int = 16
+)
+
+/**
  * Pure Kotlin utilities for mask rendering, morphological dilation, ROI patch inpainting,
  * and seamless alpha compositing on images of arbitrary dimensions.
  */
@@ -453,14 +482,16 @@ object InpaintingUtils {
     /**
      * Inpaints an image using an active neural inpainting [OnnxInferenceSession] and [ModelSpec].
      * Patches surrounding mask clusters are dynamically extracted, preprocessed with model normalization,
-     * inpainted via neural inference (single-pass or diffusion pipeline), and seamlessly composited back.
+     * inpainted via neural inference (single-pass, MIGAN, ZITS/ZITS++, or diffusion pipeline), and seamlessly composited back.
      */
     fun inpaintWithOnnx(
         sourceImage: BufferedImage,
         mask: BufferedImage,
         session: OnnxInferenceSession,
         spec: ModelSpec,
-        roiPaddingPx: Int = 24
+        roiPaddingPx: Int = 24,
+        options: InpaintingOptions = InpaintingOptions(),
+        multiSessions: Map<String, OnnxInferenceSession> = emptyMap()
     ): BufferedImage {
         val width = sourceImage.width
         val height = sourceImage.height
@@ -480,12 +511,6 @@ object InpaintingUtils {
             spec.effectiveType.equals("ldm", ignoreCase = true) ||
             spec.effectiveType.equals("diffusion", ignoreCase = true)
 
-        val targetW = if (spec.effectiveWidth > 0) spec.effectiveWidth else 512
-        val targetH = if (spec.effectiveHeight > 0) spec.effectiveHeight else 512
-
-        val imgInputName = if (spec.inputNames.isNotEmpty()) spec.inputNames[0] else "image"
-        val maskInputName = if (spec.inputNames.size > 1) spec.inputNames[1] else "mask"
-
         for (region in maskRegions) {
             val rx = region.x
             val ry = region.y
@@ -496,60 +521,33 @@ object InpaintingUtils {
             val patchMask = mask.getSubimage(rx, ry, rw, rh)
 
             try {
-                if (isDiffusion) {
-                    val cleanedPatch = inpaintDiffusionPatch(
+                val cleanedPatch = if (isDiffusion) {
+                    inpaintDiffusionPatch(
                         session = session,
                         patchImg = patchImg,
                         patchMask = patchMask,
                         spec = spec
                     )
-                    val gPatch = outputImage.createGraphics()
-                    gPatch.drawImage(cleanedPatch, rx, ry, null)
-                    gPatch.dispose()
                 } else {
-                    val inW = if (spec.dynamicShape) ((rw + 15) / 16 * 16).coerceAtLeast(64) else targetW
-                    val inH = if (spec.dynamicShape) ((rh + 15) / 16 * 16).coerceAtLeast(64) else targetH
-
-                    val imgTensor = ImageTensorUtils.createInpaintingImageTensor(
-                        session.environment,
-                        patchImg,
-                        inW,
-                        inH,
-                        spec.normMode
+                    inpaintPatchWithOnnx(
+                        session = session,
+                        spec = spec,
+                        patchImg = patchImg,
+                        patchMask = patchMask,
+                        options = options,
+                        multiSessions = multiSessions
                     )
-                    val maskTensor = ImageTensorUtils.createInpaintingMaskTensor(
-                        session.environment,
-                        patchMask,
-                        inW,
-                        inH,
-                        spec.maskMode
-                    )
-
-                    var results: OrtSession.Result? = null
-                    try {
-                        results = session.session.run(mapOf(imgInputName to imgTensor, maskInputName to maskTensor))
-                        val outputTensor = results.get(0) as? OnnxTensor
-                            ?: results.firstOrNull { it.value is OnnxTensor }?.value as? OnnxTensor
-
-                        if (outputTensor != null) {
-                            val rawCleaned = ImageTensorUtils.tensorToBufferedImage(outputTensor, spec.normMode)
-                            val cleanedPatch = ImageTensorUtils.resizeImage(rawCleaned, rw, rh)
-
-                            val gPatch = outputImage.createGraphics()
-                            gPatch.drawImage(cleanedPatch, rx, ry, null)
-                            gPatch.dispose()
-                        } else {
-                            val cleanedPatch = inpaintPatchPureKotlin(patchImg, patchMask)
-                            val gPatch = outputImage.createGraphics()
-                            gPatch.drawImage(cleanedPatch, rx, ry, null)
-                            gPatch.dispose()
-                        }
-                    } finally {
-                        results?.close()
-                        imgTensor.close()
-                        maskTensor.close()
-                    }
                 }
+
+                val finalPatch = if (options.featherRadius > 0) {
+                    applyAlphaFeather(cleanedPatch, patchImg, patchMask, options.featherRadius)
+                } else {
+                    cleanedPatch
+                }
+
+                val gPatch = outputImage.createGraphics()
+                gPatch.drawImage(finalPatch, rx, ry, null)
+                gPatch.dispose()
             } catch (e: Exception) {
                 val cleanedPatch = inpaintPatchPureKotlin(patchImg, patchMask)
                 val gPatch = outputImage.createGraphics()
@@ -559,6 +557,203 @@ object InpaintingUtils {
         }
 
         return outputImage
+    }
+
+    /**
+     * Runs ONNX inference on an individual image patch based on the architecture specification.
+     */
+    fun inpaintPatchWithOnnx(
+        session: OnnxInferenceSession,
+        spec: ModelSpec,
+        patchImg: BufferedImage,
+        patchMask: BufferedImage,
+        options: InpaintingOptions = InpaintingOptions(),
+        multiSessions: Map<String, OnnxInferenceSession> = emptyMap()
+    ): BufferedImage {
+        val modelType = spec.modelTypeRaw.lowercase()
+        val isMigan = modelType == "migan" || modelType == "migan_traced" || spec.concatOrder.equals("image_mask", ignoreCase = true)
+        val isZitspp = modelType == "zitspp" || modelType == "zits++" || modelType == "zits_plusplus"
+        val isZits = modelType == "zits" || modelType == "zits-inpaint-0717"
+
+        return when {
+            isMigan -> {
+                val tensor = ImageTensorUtils.createMigan4ChannelTensor(session.environment, patchImg, patchMask, 512, 512)
+                var results: OrtSession.Result? = null
+                try {
+                    val inputName = session.session.inputNames.iterator().next()
+                    results = session.run(mapOf(inputName to tensor))
+                    val outTensor = results.get(0) as OnnxTensor
+                    val rawCleaned = ImageTensorUtils.miganTensorToBufferedImage(outTensor)
+                    ImageTensorUtils.resizeImage(rawCleaned, patchImg.width, patchImg.height)
+                } finally {
+                    results?.close()
+                    tensor.close()
+                }
+            }
+
+            isZitspp -> {
+                val padW = ImageTensorUtils.snapToMultiple(patchImg.width, 16).coerceAtLeast(256)
+                val padH = ImageTensorUtils.snapToMultiple(patchImg.height, 16).coerceAtLeast(256)
+                val paddedImg = ImageTensorUtils.resizeImage(patchImg, padW, padH)
+                val paddedMask = ImageTensorUtils.resizeImage(patchMask, padW, padH)
+
+                val (relPos, direct) = ZitsInpaintingPipeline.computeMpe(paddedMask, 256, 128)
+
+                val tsrSess = multiSessions["tsr"]
+                val (edge256, line256) = if (tsrSess != null) {
+                    val img256 = ImageTensorUtils.resizeImage(paddedImg, 256, 256)
+                    val mask256 = ImageTensorUtils.resizeImage(paddedMask, 256, 256)
+                    ZitsInpaintingPipeline.runTsr(tsrSess, img256, mask256, suppressLines = options.objRemoval)
+                } else {
+                    Pair(FloatArray(256 * 256), FloatArray(256 * 256))
+                }
+
+                val filteredEdges = ZitsInpaintingPipeline.applyEdgeNms(edge256, options.binaryThreshold)
+
+                val ssuSess = multiSessions["structure_upsample"]
+                val edgeFull = if (ssuSess != null) {
+                    ZitsInpaintingPipeline.runSsuUpsample(ssuSess, filteredEdges, 256, 256, padW, padH)
+                } else {
+                    FloatArray(padW * padH)
+                }
+                val lineFull = if (ssuSess != null) {
+                    ZitsInpaintingPipeline.runSsuUpsample(ssuSess, line256, 256, 256, padW, padH)
+                } else {
+                    FloatArray(padW * padH)
+                }
+
+                val genSess = multiSessions["generator"] ?: session
+                val rawOut = ZitsInpaintingPipeline.runGenerator(
+                    genSess,
+                    paddedImg,
+                    paddedMask,
+                    edgeFull,
+                    lineFull,
+                    relPos,
+                    direct,
+                    isZitspp = true
+                )
+                ImageTensorUtils.resizeImage(rawOut, patchImg.width, patchImg.height)
+            }
+
+            isZits -> {
+                val padW = ImageTensorUtils.snapToMultiple(patchImg.width, 16).coerceAtLeast(256)
+                val padH = ImageTensorUtils.snapToMultiple(patchImg.height, 16).coerceAtLeast(256)
+                val paddedImg = ImageTensorUtils.resizeImage(patchImg, padW, padH)
+                val paddedMask = ImageTensorUtils.resizeImage(patchMask, padW, padH)
+
+                val (relPos, direct) = ZitsInpaintingPipeline.computeMpe(paddedMask, 256, 128)
+                val edgesFull = ZitsInpaintingPipeline.extractCannyEdges(paddedImg, options.sigma256)
+                val linesFull = FloatArray(padW * padH)
+
+                val genSess = multiSessions["generator"] ?: session
+                val rawOut = ZitsInpaintingPipeline.runGenerator(
+                    genSess,
+                    paddedImg,
+                    paddedMask,
+                    edgesFull,
+                    linesFull,
+                    relPos,
+                    direct,
+                    isZitspp = false
+                )
+                ImageTensorUtils.resizeImage(rawOut, patchImg.width, patchImg.height)
+            }
+
+            else -> {
+                // Standard LaMa / Manga single-pass FFC
+                val targetW = if (spec.effectiveWidth > 0) spec.effectiveWidth else 512
+                val targetH = if (spec.effectiveHeight > 0) spec.effectiveHeight else 512
+                val padMod = if (options.padMod in listOf(8, 16, 32)) options.padMod else 16
+                val inW = if (spec.dynamicShape) ImageTensorUtils.snapToMultiple(patchImg.width, padMod).coerceAtLeast(64) else targetW
+                val inH = if (spec.dynamicShape) ImageTensorUtils.snapToMultiple(patchImg.height, padMod).coerceAtLeast(64) else targetH
+
+                val imgInputName = if (spec.inputNames.isNotEmpty()) spec.inputNames[0] else "image"
+                val maskInputName = if (spec.inputNames.size > 1) spec.inputNames[1] else "mask"
+
+                val imgTensor = ImageTensorUtils.createInpaintingImageTensor(session.environment, patchImg, inW, inH, spec.normMode)
+                val maskTensor = ImageTensorUtils.createInpaintingMaskTensor(session.environment, patchMask, inW, inH, spec.maskMode)
+
+                var results: OrtSession.Result? = null
+                try {
+                    results = session.session.run(mapOf(imgInputName to imgTensor, maskInputName to maskTensor))
+                    val outputTensor = results.get(0) as? OnnxTensor
+                        ?: results.firstOrNull { it.value is OnnxTensor }?.value as? OnnxTensor
+
+                    if (outputTensor != null) {
+                        val rawCleaned = ImageTensorUtils.tensorToBufferedImage(outputTensor, spec.normMode)
+                        ImageTensorUtils.resizeImage(rawCleaned, patchImg.width, patchImg.height)
+                    } else {
+                        inpaintPatchPureKotlin(patchImg, patchMask)
+                    }
+                } finally {
+                    results?.close()
+                    imgTensor.close()
+                    maskTensor.close()
+                }
+            }
+        }
+    }
+
+    /**
+     * Soft alpha feathering blending along the mask contour boundaries.
+     */
+    fun applyAlphaFeather(
+        cleanedImg: BufferedImage,
+        origImg: BufferedImage,
+        mask: BufferedImage,
+        featherRadiusPx: Int = 2
+    ): BufferedImage {
+        if (featherRadiusPx <= 0) return cleanedImg
+        val w = cleanedImg.width
+        val h = cleanedImg.height
+        val out = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+        val g = out.createGraphics()
+        g.drawImage(cleanedImg, 0, 0, null)
+        g.dispose()
+
+        val maskRaster = mask.raster
+        val maskPixels = IntArray(w * h)
+        maskRaster.getSamples(0, 0, w, h, 0, maskPixels)
+
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val idx = y * w + x
+                val m = maskPixels[idx]
+                if (m > 127) {
+                    var minDist = Double.MAX_VALUE
+                    val r = featherRadiusPx
+                    for (dy in -r..r) {
+                        val ny = y + dy
+                        if (ny !in 0 until h) continue
+                        for (dx in -r..r) {
+                            val nx = x + dx
+                            if (nx !in 0 until w) continue
+                            if (maskPixels[ny * w + nx] <= 127) {
+                                val d = sqrt((dx * dx + dy * dy).toDouble())
+                                if (d < minDist) minDist = d
+                            }
+                        }
+                    }
+                    if (minDist <= featherRadiusPx) {
+                        val alpha = (minDist / featherRadiusPx.toDouble()).toFloat().coerceIn(0.0f, 1.0f)
+                        val cRgb = cleanedImg.getRGB(x, y)
+                        val oRgb = origImg.getRGB(x, y)
+                        val cr = (cRgb shr 16) and 0xFF
+                        val cg = (cRgb shr 8) and 0xFF
+                        val cb = cRgb and 0xFF
+                        val or = (oRgb shr 16) and 0xFF
+                        val og = (oRgb shr 8) and 0xFF
+                        val ob = oRgb and 0xFF
+                        val blendR = ((1.0f - alpha) * or + alpha * cr).toInt().coerceIn(0, 255)
+                        val blendG = ((1.0f - alpha) * og + alpha * cg).toInt().coerceIn(0, 255)
+                        val blendB = ((1.0f - alpha) * ob + alpha * cb).toInt().coerceIn(0, 255)
+                        out.setRGB(x, y, (blendR shl 16) or (blendG shl 8) or blendB)
+                    }
+                }
+            }
+        }
+        return out
     }
 
     /**
@@ -614,7 +809,9 @@ object InpaintingUtils {
         session: OnnxInferenceSession? = null,
         spec: ModelSpec? = null,
         roiPaddingPx: Int = 24,
-        featherRadiusPx: Int = 2
+        featherRadiusPx: Int = 2,
+        options: InpaintingOptions = InpaintingOptions(),
+        multiSessions: Map<String, OnnxInferenceSession> = emptyMap()
     ): BufferedImage {
         val width = sourceImage.width
         val height = sourceImage.height
@@ -625,7 +822,9 @@ object InpaintingUtils {
                 mask = mask,
                 session = session,
                 spec = spec,
-                roiPaddingPx = roiPaddingPx
+                roiPaddingPx = roiPaddingPx,
+                options = options,
+                multiSessions = multiSessions
             )
         } else {
             inpaintImage(
@@ -1298,7 +1497,9 @@ object InpaintingUtils {
         adaptivePadding: Boolean = true,
         deterministicFill: Boolean = true,
         minContextSize: Int = 256,
-        roiPaddingPx: Int = 16
+        roiPaddingPx: Int = 16,
+        options: InpaintingOptions = InpaintingOptions(),
+        multiSessions: Map<String, OnnxInferenceSession> = emptyMap()
     ): BufferedImage {
         val width = sourceImage.width
         val height = sourceImage.height
@@ -1353,32 +1554,14 @@ object InpaintingUtils {
                     if (isDiffusion) {
                         inpaintDiffusionPatch(session, contextImg, contextMask, spec)
                     } else {
-                        val inW = if (spec.dynamicShape) ImageTensorUtils.snapToMultiple(cropW, 32) else if (spec.effectiveWidth > 0) spec.effectiveWidth else 512
-                        val inH = if (spec.dynamicShape) ImageTensorUtils.snapToMultiple(cropH, 32) else if (spec.effectiveHeight > 0) spec.effectiveHeight else 512
-
-                        val imgInputName = if (spec.inputNames.isNotEmpty()) spec.inputNames[0] else "image"
-                        val maskInputName = if (spec.inputNames.size > 1) spec.inputNames[1] else "mask"
-
-                        val imgTensor = ImageTensorUtils.createInpaintingImageTensor(session.environment, contextImg, inW, inH, spec.normMode)
-                        val maskTensor = ImageTensorUtils.createInpaintingMaskTensor(session.environment, contextMask, inW, inH, spec.maskMode)
-
-                        var results: OrtSession.Result? = null
-                        try {
-                            results = session.session.run(mapOf(imgInputName to imgTensor, maskInputName to maskTensor))
-                            val outputTensor = results.get(0) as? OnnxTensor
-                                ?: results.firstOrNull { it.value is OnnxTensor }?.value as? OnnxTensor
-
-                            if (outputTensor != null) {
-                                val rawCleaned = ImageTensorUtils.tensorToBufferedImage(outputTensor, spec.normMode)
-                                ImageTensorUtils.resizeImage(rawCleaned, cropW, cropH)
-                            } else {
-                                inpaintPatchPureKotlin(contextImg, contextMask)
-                            }
-                        } finally {
-                            results?.close()
-                            imgTensor.close()
-                            maskTensor.close()
-                        }
+                        inpaintPatchWithOnnx(
+                            session = session,
+                            spec = spec,
+                            patchImg = contextImg,
+                            patchMask = contextMask,
+                            options = options,
+                            multiSessions = multiSessions
+                        )
                     }
                 } catch (e: Exception) {
                     inpaintPatchPureKotlin(contextImg, contextMask)
@@ -1387,13 +1570,19 @@ object InpaintingUtils {
                 inpaintPatchPureKotlin(contextImg, contextMask)
             }
 
+            val finalPatch = if (options.featherRadius > 0) {
+                applyAlphaFeather(cleanedPatch, contextImg, contextMask, options.featherRadius)
+            } else {
+                cleanedPatch
+            }
+
             // Seamlessly paste ONLY the masked pixels from the cleaned context back onto the output image
             val maskRaster = contextMask.raster
             val patchMaskPixels = IntArray(cropW * cropH)
             maskRaster.getSamples(0, 0, cropW, cropH, 0, patchMaskPixels)
 
             val cleanedPatchPixels = IntArray(cropW * cropH)
-            cleanedPatch.getRGB(0, 0, cropW, cropH, cleanedPatchPixels, 0, cropW)
+            finalPatch.getRGB(0, 0, cropW, cropH, cleanedPatchPixels, 0, cropW)
 
             val currentCanvasPixels = IntArray(cropW * cropH)
             outputImage.getRGB(cropX, cropY, cropW, cropH, currentCanvasPixels, 0, cropW)
@@ -1422,7 +1611,9 @@ object InpaintingUtils {
         deterministicFill: Boolean = true,
         minContextSize: Int = 256,
         roiPaddingPx: Int = 16,
-        featherRadiusPx: Int = 2
+        featherRadiusPx: Int = 2,
+        options: InpaintingOptions = InpaintingOptions(),
+        multiSessions: Map<String, OnnxInferenceSession> = emptyMap()
     ): BufferedImage {
         val fullyCleaned = inpaintProductionHybrid(
             sourceImage = sourceImage,
@@ -1432,7 +1623,9 @@ object InpaintingUtils {
             adaptivePadding = adaptivePadding,
             deterministicFill = deterministicFill,
             minContextSize = minContextSize,
-            roiPaddingPx = roiPaddingPx
+            roiPaddingPx = roiPaddingPx,
+            options = options,
+            multiSessions = multiSessions
         )
 
         val width = sourceImage.width

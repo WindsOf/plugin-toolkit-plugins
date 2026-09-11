@@ -71,6 +71,7 @@ class ModelManager(
     suspend fun isModelInstalled(modelId: String, fileSystem: PluginFileSystem, logger: PluginLogger? = null): Boolean {
         logger?.info("[ModelManager] Checking installation status for model '$modelId'...")
         val modelSpec = getModelSpec(modelId, fileSystem, logger)
+        val clean = modelId.trim().lowercase()
         if (modelSpec != null) {
             val requiredFiles = modelSpec.getRequiredFileNames(modelId)
             if (requiredFiles.isEmpty()) {
@@ -78,9 +79,16 @@ class ModelManager(
                 return false
             }
             val allPresent = requiredFiles.all { fileName ->
+                val simpleName = fileName.substringAfterLast('/')
                 val relPath = "$MODELS_DIR/$fileName".toRelativePath().getOrNull()
                 val lowerRelPath = "$MODELS_DIR/${fileName.lowercase()}".toRelativePath().getOrNull()
-                val exists = (relPath != null && fileSystem.exists(relPath)) || (lowerRelPath != null && fileSystem.exists(lowerRelPath))
+                val folderRelPath = "$MODELS_DIR/$clean/$simpleName".toRelativePath().getOrNull()
+                val lowerFolderRelPath = "$MODELS_DIR/$clean/${simpleName.lowercase()}".toRelativePath().getOrNull()
+
+                val exists = (relPath != null && fileSystem.exists(relPath)) ||
+                        (lowerRelPath != null && fileSystem.exists(lowerRelPath)) ||
+                        (folderRelPath != null && fileSystem.exists(folderRelPath)) ||
+                        (lowerFolderRelPath != null && fileSystem.exists(lowerFolderRelPath))
                 logger?.info("[ModelManager] Model '$modelId': file '$fileName' exists = $exists")
                 exists
             }
@@ -90,15 +98,18 @@ class ModelManager(
 
         val yamlRelPath = getModelYamlRelativePath(modelId)
         val onnxRelPath = getModelOnnxRelativePath(modelId)
-        val yamlExists = fileSystem.exists(yamlRelPath)
-        val onnxExists = fileSystem.exists(onnxRelPath)
+        val yamlExists = fileSystem.exists(yamlRelPath) ||
+                ("$MODELS_DIR/$clean/$clean.yaml".toRelativePath().getOrNull()?.let { fileSystem.exists(it) } ?: false)
+        val onnxExists = fileSystem.exists(onnxRelPath) ||
+                ("$MODELS_DIR/$clean/generator.onnx".toRelativePath().getOrNull()?.let { fileSystem.exists(it) } ?: false) ||
+                ("$MODELS_DIR/$clean/$clean.onnx".toRelativePath().getOrNull()?.let { fileSystem.exists(it) } ?: false)
         logger?.info("[ModelManager] Model '$modelId' fallback check: exact yamlExists=$yamlExists, onnxExists=$onnxExists")
         if (yamlExists && onnxExists) {
             return true
         }
-        val lowerYaml = "$MODELS_DIR/${modelId.trim().lowercase()}.yaml".toRelativePath().getOrNull()
-        val lowerOnnx = "$MODELS_DIR/${modelId.trim().lowercase()}.onnx".toRelativePath().getOrNull()
-        val lowerGguf = "$MODELS_DIR/${modelId.trim().lowercase()}.gguf".toRelativePath().getOrNull()
+        val lowerYaml = "$MODELS_DIR/$clean.yaml".toRelativePath().getOrNull()
+        val lowerOnnx = "$MODELS_DIR/$clean.onnx".toRelativePath().getOrNull()
+        val lowerGguf = "$MODELS_DIR/$clean.gguf".toRelativePath().getOrNull()
         val lowerYamlExists = lowerYaml != null && fileSystem.exists(lowerYaml)
         val lowerOnnxExists = lowerOnnx != null && fileSystem.exists(lowerOnnx)
         val lowerGgufExists = lowerGguf != null && fileSystem.exists(lowerGguf)
@@ -161,21 +172,47 @@ class ModelManager(
      * Reads and parses the ModelSpec for a locally installed model.
      */
     suspend fun getModelSpec(modelId: String, fileSystem: PluginFileSystem, logger: PluginLogger? = null): ModelSpec? {
-        val yamlRelPath = getModelYamlRelativePath(modelId)
-        var yamlText = try {
-            fileSystem.readTextFile(yamlRelPath)
-        } catch (e: Exception) {
-            logger?.warn("[ModelManager] Failed reading text file at $yamlRelPath: ${e.message}")
-            null
-        }
-        if (yamlText == null) {
-            val lowerYaml = "$MODELS_DIR/${modelId.trim().lowercase()}.yaml".toRelativePath().getOrNull()
-            if (lowerYaml != null) {
+        val clean = modelId.trim().lowercase()
+        val catalogEntry = ModelCatalog.findById(modelId)
+        val catalogId = catalogEntry?.id?.lowercase() ?: clean
+
+        val candidatePaths = listOfNotNull(
+            getModelYamlRelativePath(modelId),
+            "$MODELS_DIR/$clean/$clean.yaml".toRelativePath().getOrNull(),
+            "$MODELS_DIR/$clean.yaml".toRelativePath().getOrNull(),
+            "$MODELS_DIR/$catalogId/$catalogId.yaml".toRelativePath().getOrNull(),
+            "$MODELS_DIR/$catalogId.yaml".toRelativePath().getOrNull()
+        )
+        var yamlText: String? = null
+        for (candidate in candidatePaths) {
+            if (fileSystem.exists(candidate)) {
                 yamlText = try {
-                    fileSystem.readTextFile(lowerYaml)
+                    fileSystem.readTextFile(candidate)
                 } catch (e: Exception) {
-                    logger?.warn("[ModelManager] Failed reading text file at $lowerYaml: ${e.message}")
+                    logger?.warn("[ModelManager] Failed reading text file at $candidate: ${e.message}")
                     null
+                }
+                if (yamlText != null) break
+            }
+        }
+
+        if (yamlText == null) {
+            val devDir = System.getProperty("wip.dev.models.dir") ?: System.getenv("WIP_DEV_MODELS_DIR")
+            if (!devDir.isNullOrBlank()) {
+                val localYamlCandidates = listOf(
+                    File("$devDir/$clean/$clean.yaml"),
+                    File("$devDir/$clean.yaml"),
+                    File("$devDir/$clean/generator.yaml"),
+                    File("$devDir/$clean/zits.yaml"),
+                    File("$devDir/$clean/zitspp.yaml")
+                )
+                val localYaml = localYamlCandidates.firstOrNull { it.exists() && it.length() > 0 }
+                if (localYaml != null) {
+                    try {
+                        yamlText = localYaml.readText()
+                    } catch (e: Exception) {
+                        logger?.warn("[ModelManager] Failed reading local YAML at ${localYaml.absolutePath}: ${e.message}")
+                    }
                 }
             }
         }
@@ -209,22 +246,88 @@ class ModelManager(
      */
     fun getModelAbsolutePath(modelId: String, fileSystem: PluginFileSystem): String {
         val basePath = fileSystem.getBasePath().trimEnd('/', '\\')
+        val clean = modelId.trim().lowercase()
         val catalogEntry = ModelCatalog.findById(modelId)
         val exactName = catalogEntry?.id ?: modelId.trim()
-        val onnxPath = "$basePath/$MODELS_DIR/$exactName.onnx"
-        if (File(onnxPath).exists()) return onnxPath
-        val ggufPath = "$basePath/$MODELS_DIR/$exactName.gguf"
-        if (File(ggufPath).exists()) return ggufPath
-        val lowerOnnx = "$basePath/$MODELS_DIR/${modelId.trim().lowercase()}.onnx"
-        if (File(lowerOnnx).exists()) return lowerOnnx
-        val lowerGguf = "$basePath/$MODELS_DIR/${modelId.trim().lowercase()}.gguf"
-        if (File(lowerGguf).exists()) return lowerGguf
+
+        val candidates = listOf(
+            "$basePath/$MODELS_DIR/$clean/generator.onnx",
+            "$basePath/$MODELS_DIR/$clean/$clean.onnx",
+            "$basePath/$MODELS_DIR/$exactName.onnx",
+            "$basePath/$MODELS_DIR/$exactName.gguf",
+            "$basePath/$MODELS_DIR/$clean.onnx",
+            "$basePath/$MODELS_DIR/$clean.gguf"
+        )
+        for (path in candidates) {
+            if (File(path).exists()) return path
+        }
 
         val lmStudioModel = findLmStudioModelFile(modelId)
         if (lmStudioModel != null && lmStudioModel.exists()) {
             return lmStudioModel.absolutePath
         }
-        return onnxPath
+
+        val devDir = System.getProperty("wip.dev.models.dir") ?: System.getenv("WIP_DEV_MODELS_DIR")
+        if (!devDir.isNullOrBlank()) {
+            val localCandidates = listOf(
+                File("$devDir/$clean/generator.onnx"),
+                File("$devDir/$clean/$clean.onnx"),
+                File("$devDir/$clean.onnx")
+            )
+            val localMatch = localCandidates.firstOrNull { it.exists() && it.length() > 0 }
+            if (localMatch != null) return localMatch.absolutePath
+        }
+
+        return "$basePath/$MODELS_DIR/$exactName.onnx"
+    }
+
+    /**
+     * Resolves a companion/component file for a multi-stage or multi-component model.
+     */
+    fun getModelComponentFile(modelId: String, componentFile: String, fileSystem: PluginFileSystem): File? {
+        val basePath = fileSystem.getBasePath().trimEnd('/', '\\')
+        val clean = modelId.trim().lowercase()
+        val simpleName = componentFile.substringAfterLast('/')
+        val localCandidates = mutableListOf<File>()
+        if (basePath.isNotEmpty()) {
+            localCandidates.add(File("$basePath/$MODELS_DIR/$clean/$simpleName"))
+            localCandidates.add(File("$basePath/$MODELS_DIR/$clean/$componentFile"))
+            localCandidates.add(File("$basePath/$MODELS_DIR/$componentFile"))
+            localCandidates.add(File("$basePath/$MODELS_DIR/$simpleName"))
+        }
+        val devDir = System.getProperty("wip.dev.models.dir") ?: System.getenv("WIP_DEV_MODELS_DIR")
+        if (!devDir.isNullOrBlank()) {
+            localCandidates.add(File("$devDir/$clean/$simpleName"))
+            localCandidates.add(File("$devDir/$clean/$componentFile"))
+            localCandidates.add(File("$devDir/$componentFile"))
+            localCandidates.add(File("$devDir/$simpleName"))
+        }
+        return localCandidates.firstOrNull { it.exists() && it.length() > 0 }
+    }
+
+    /**
+     * Creates an [OnnxInferenceSession] map for multi-component models (e.g. TSR, SSU, Generator).
+     */
+    suspend fun createInferenceSessions(
+        modelId: String,
+        fileSystem: PluginFileSystem,
+        preferredDevice: ExecutionDevice = ExecutionDevice.AUTO,
+        logger: PluginLogger? = null
+    ): Map<String, OnnxInferenceSession> {
+        val spec = getModelSpec(modelId, fileSystem, logger) ?: return emptyMap()
+        val sessions = mutableMapOf<String, OnnxInferenceSession>()
+        for ((compName, compSpec) in spec.components) {
+            val f = getModelComponentFile(modelId, compSpec.file, fileSystem)
+            if (f != null && f.exists() && f.length() > 0) {
+                try {
+                    val session = OnnxInferenceEngine.createSession(f.absolutePath, preferredDevice, logger)
+                    sessions[compName] = session
+                } catch (e: Exception) {
+                    logger?.warn("[ModelManager] Failed creating session for component '$compName' (${f.absolutePath}): ${e.message}")
+                }
+            }
+        }
+        return sessions
     }
 
     /**
@@ -314,9 +417,18 @@ class ModelManager(
         }
 
         // Save YAML to plugin file system
+        val clean = catalogEntry.id.trim().lowercase()
+        val isFolderModel = modelSpec.components.isNotEmpty() || modelSpec.files.size > 1 || catalogEntry.yamlUrl.contains("/$clean/")
+
         val yamlRelPath = getModelYamlRelativePath(catalogEntry.id)
         fileSystem.writeTextFile(yamlRelPath, yamlText).getOrElse {
             return Result.failure(it)
+        }
+        if (isFolderModel) {
+            val folderYamlRel = "$MODELS_DIR/$clean/$clean.yaml".toRelativePath().getOrNull()
+            if (folderYamlRel != null) {
+                fileSystem.writeTextFile(folderYamlRel, yamlText)
+            }
         }
         progress.report(0.15f)
 
@@ -331,8 +443,11 @@ class ModelManager(
         val totalFiles = requiredFiles.size
         var totalBytesDownloaded: Long = 0
 
-        for ((fileIdx, fileName) in requiredFiles.withIndex()) {
-            val fileUrl = if (catalogEntry.extraFileUrls.containsKey(fileName)) {
+        for ((fileIdx, rawFileName) in requiredFiles.withIndex()) {
+            val fileName = rawFileName.substringAfterLast('/')
+            val fileUrl = if (catalogEntry.extraFileUrls.containsKey(rawFileName)) {
+                catalogEntry.extraFileUrls[rawFileName]!!
+            } else if (catalogEntry.extraFileUrls.containsKey(fileName)) {
                 catalogEntry.extraFileUrls[fileName]!!
             } else if (fileName.equals(catalogEntry.onnxUrl.substringAfterLast('/'), ignoreCase = true)) {
                 catalogEntry.onnxUrl
@@ -365,7 +480,8 @@ class ModelManager(
             }
 
             totalBytesDownloaded += fileBytes.size
-            val fileRelPath = "$MODELS_DIR/$fileName".toRelativePath().getOrElse {
+            val effectiveRelPath = if (isFolderModel) "$MODELS_DIR/$clean/$fileName" else "$MODELS_DIR/$rawFileName"
+            val fileRelPath = effectiveRelPath.toRelativePath().getOrElse {
                 return Result.failure(it)
             }
             fileSystem.writeFile(fileRelPath, fileBytes).getOrElse {
