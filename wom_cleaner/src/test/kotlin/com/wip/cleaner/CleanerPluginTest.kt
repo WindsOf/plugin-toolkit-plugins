@@ -1,5 +1,6 @@
 package com.wip.cleaner
 
+import com.wip.common.models.BlendingMode
 import com.wip.common.models.ChapterVisionResult
 import com.wip.common.models.DetectionBox
 import com.wip.common.models.PolygonPoint
@@ -668,7 +669,7 @@ class CleanerPluginTest {
                 saveMask = true,
                 isolatedRegionsOnly = false,
                 featherRadius = 3,
-                usePoisson = false,
+                blendingMode = BlendingMode.FEATHER,
                 cropMargin = 16,
                 iterations = 5,
                 addV = 0.05,
@@ -684,6 +685,96 @@ class CleanerPluginTest {
             assertEquals(1, result.cleanedObjectsCount)
             assertTrue(File(result.cleanedImagePath).exists())
             assertTrue(result.maskPath != null && File(result.maskPath!!).exists())
+        }
+    }
+
+    @Test
+    fun testCleanImageWithDifferentBlendingModes() {
+        val cleaner = CleanerPlugin()
+        val tempDir = File(System.getProperty("java.io.tmpdir"), "cleaner_blending_test_${System.currentTimeMillis()}")
+        tempDir.mkdirs()
+
+        val imgFile = File(tempDir, "test_blend_in.png")
+        val outDir = File(tempDir, "out")
+        outDir.mkdirs()
+
+        val img = BufferedImage(100, 100, BufferedImage.TYPE_INT_RGB)
+        val g = img.createGraphics()
+        g.color = Color(80, 80, 80)
+        g.fillRect(0, 0, 100, 100)
+        g.color = Color.BLACK
+        g.fillRect(30, 30, 40, 40)
+        g.dispose()
+        ImageIO.write(img, "png", imgFile)
+
+        val visResult = VisionResult(
+            imageWidth = 100,
+            imageHeight = 100,
+            objects = listOf(
+                SegmentedObject(
+                    label = "text",
+                    confidence = 0.95,
+                    box = DetectionBox("text", 0.95, 0.3, 0.3, 0.7, 0.7),
+                    polygon = listOf(
+                        PolygonPoint(0.3, 0.3),
+                        PolygonPoint(0.7, 0.3),
+                        PolygonPoint(0.7, 0.7),
+                        PolygonPoint(0.3, 0.7)
+                    )
+                )
+            )
+        )
+
+        val logger = FakeLogger()
+        val pluginFs = mockk<PluginFileSystem>(relaxed = true) {
+            coEvery { readFile(any()) } returns null
+            coEvery { exists(any()) } returns false
+        }
+        val hostFs = mockk<HostFileSystem>(relaxed = true)
+        val context = mockk<PluginContext>(relaxed = true) {
+            every { this@mockk.logger } returns logger
+            every { this@mockk.fileSystem } returns pluginFs
+        }
+
+        runBlocking {
+            // Test 1: POISSON blending mode
+            val poissonResult = cleaner.cleanImage(
+                imagePath = imgFile.absolutePath,
+                segmentationData = visResult,
+                outputDir = File(outDir, "poisson").absolutePath,
+                model = InpaintingModel.LAMA,
+                targetClasses = listOf("text"),
+                blendingMode = BlendingMode.POISSON,
+                context = context,
+                hostFs = hostFs
+            )
+            assertTrue(File(poissonResult.cleanedImagePath).exists())
+
+            // Test 2: MODIFIED_POISSON blending mode
+            val modPoissonResult = cleaner.cleanImage(
+                imagePath = imgFile.absolutePath,
+                segmentationData = visResult,
+                outputDir = File(outDir, "mod_poisson").absolutePath,
+                model = InpaintingModel.LAMA,
+                targetClasses = listOf("text"),
+                blendingMode = BlendingMode.MODIFIED_POISSON,
+                context = context,
+                hostFs = hostFs
+            )
+            assertTrue(File(modPoissonResult.cleanedImagePath).exists())
+
+            // Test 3: LAPLACIAN_PYRAMID blending mode
+            val laplacianResult = cleaner.cleanImage(
+                imagePath = imgFile.absolutePath,
+                segmentationData = visResult,
+                outputDir = File(outDir, "laplacian").absolutePath,
+                model = InpaintingModel.LAMA,
+                targetClasses = listOf("text"),
+                blendingMode = BlendingMode.LAPLACIAN_PYRAMID,
+                context = context,
+                hostFs = hostFs
+            )
+            assertTrue(File(laplacianResult.cleanedImagePath).exists())
         }
     }
 }

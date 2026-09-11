@@ -1,3 +1,17 @@
+Version: 1.3.0
+Date: 2026-09-11
+Added:
+  - Added BlendingMode dropdown parameter to all 8 inpainting capabilities with 5 boundary blending techniques:
+    * FEATHER: Smooth boundary alpha feathering with Euclidean distance transform.
+    * POISSON: True Poisson gradient reconstruction solver using Gauss-Seidel Successive Over-Relaxation (SOR) matching boundary Dirichlet conditions.
+    * MODIFIED_POISSON: Modified Poisson with soft alpha matting / distance-based boundary attenuation, eliminating color bleeding/tinting inside the hole.
+    * LAPLACIAN_PYRAMID: Multi-band Burt & Adelson frequency pyramid blending decomposing and reconstructing across spatial frequency scales.
+    * NONE: Direct hard cut-and-paste without boundary modification.
+  - Implemented automatic port migration from legacy usePoisson to blendingMode in migrations.json for drop-in flow compatibility.
+Changed:
+  - Replaced legacy dormant usePoisson boolean parameter with blendingMode across all inpainting capabilities.
+  - Fixed dormant Poisson blending issue where toggling usePoisson previously yielded identical output images.
+-------------------------------------------------------------------------------------------------
 Version: 1.2.0
 Date: 2026-09-11
 Added:

@@ -1,5 +1,30 @@
 # Cleaner Plugin Migration Guide
 
+## Upgrading to Inpainting Engine 1.3.0 (Version 1.3.0)
+
+Version 1.3.0 replaces the legacy boolean `usePoisson` parameter with a comprehensive **`BlendingMode`** dropdown across all 8 cleaner capabilities, and introduces mathematical gradient domain solvers and multi-band frequency pyramid blending.
+
+---
+
+### Breaking Changes & Automated Migration
+
+* **`usePoisson` Replaced by `blendingMode`**:
+  * In earlier versions, `usePoisson: Boolean = false` was dormant and did not execute a Poisson solver.
+  * In version 1.3.0, `usePoisson` is removed in favor of `blendingMode: BlendingMode = BlendingMode.FEATHER`.
+  * **Automated Flow Migration:** User flow graphs from `1.2.0` automatically migrate via `migrations.json` port mapping (`usePoisson` $\to$ `blendingMode`) without user intervention.
+
+### Supported Blending Modes
+
+| Mode (`BlendingMode`) | Display Name | Mathematical Foundation | Best Used For |
+| :--- | :--- | :--- | :--- |
+| `FEATHER` | **Alpha Feathering** | Euclidean distance transform with linear boundary fade | Standard text hole cleaning with smooth edges (Default) |
+| `POISSON` | **Poisson Gradient Blending** | Gauss-Seidel Successive Over-Relaxation solving discrete $\Delta d = 0$ with Dirichlet boundary $d|_{\partial\Omega} = T - S$ | Matching lighting and eliminating hard seams across variable gradient backgrounds |
+| `MODIFIED_POISSON` | **Modified Poisson (Alpha Matting)** | Poisson solver + distance-based smoothstep/cosine boundary attenuation | Eliminating boundary seams without color bleeding or tint shifts into the hole interior |
+| `LAPLACIAN_PYRAMID` | **Laplacian Pyramid Blending** | Burt & Adelson multi-resolution Gaussian/Laplacian decomposition and octave blending | Seamless frequency fusion across large complex photographic/manga textures |
+| `NONE` | **None (Direct Paste)** | Binary pixel replacement where mask $> 128$ | Crisp pixel-art, comic panels, or benchmarking |
+
+---
+
 ## Upgrading to Inpainting Engine 1.2.0 (Version 1.2.0)
 
 Version 1.2.0 overhauls neural inpainting model support and introduces dynamic, model-aware advanced parameter controls using **Plugin API 2.1.0**.

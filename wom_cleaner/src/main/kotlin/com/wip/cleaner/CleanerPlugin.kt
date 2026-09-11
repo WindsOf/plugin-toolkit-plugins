@@ -1,6 +1,7 @@
 package com.wip.cleaner
 
 import com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi
+import com.wip.common.models.BlendingMode
 import com.wip.common.models.ChapterCleanerResult
 import com.wip.common.models.ChapterVisionResult
 import com.wip.common.models.CleanerResult
@@ -40,7 +41,7 @@ import javax.imageio.spi.IIORegistry
 @PluginInfo(
     id = "com.wip.cleaner",
     name = "WOM Cleaner",
-    version = "1.2.0",
+    version = "1.3.0",
     description = "Inpaints and erases segmented text and artifacts from images using segmentation maps.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
@@ -509,11 +510,11 @@ class CleanerPlugin {
         )
         featherRadius: Int = 2,
         @CapabilityParam(
-            description = "Apply Poisson gradient blending along hole boundaries",
-            defaultValue = "false",
+            description = "Boundary blending technique to eliminate seams (FEATHER, POISSON, MODIFIED_POISSON, LAPLACIAN_PYRAMID, NONE)",
+            defaultValue = "\"FEATHER\"",
             isAdvanced = true
         )
-        usePoisson: Boolean = false,
+        blendingMode: BlendingMode = BlendingMode.FEATHER,
         @CapabilityParam(
             description = "Context expansion margin (px) around mask bounding box",
             defaultValue = "32",
@@ -574,7 +575,7 @@ class CleanerPlugin {
     ): CleanerResult {
         val options = InpaintingOptions(
             featherRadius = featherRadius,
-            usePoisson = usePoisson,
+            blendingMode = blendingMode,
             cropMargin = cropMargin,
             iterations = iterations,
             addV = addV,
@@ -652,11 +653,11 @@ class CleanerPlugin {
         )
         featherRadius: Int = 2,
         @CapabilityParam(
-            description = "Apply Poisson gradient blending along hole boundaries",
-            defaultValue = "false",
+            description = "Boundary blending technique to eliminate seams (FEATHER, POISSON, MODIFIED_POISSON, LAPLACIAN_PYRAMID, NONE)",
+            defaultValue = "\"FEATHER\"",
             isAdvanced = true
         )
-        usePoisson: Boolean = false,
+        blendingMode: BlendingMode = BlendingMode.FEATHER,
         @CapabilityParam(
             description = "Context expansion margin (px) around mask bounding box",
             defaultValue = "32",
@@ -717,7 +718,7 @@ class CleanerPlugin {
     ): CleanerResult {
         val options = InpaintingOptions(
             featherRadius = featherRadius,
-            usePoisson = usePoisson,
+            blendingMode = blendingMode,
             cropMargin = cropMargin,
             iterations = iterations,
             addV = addV,
@@ -784,11 +785,11 @@ class CleanerPlugin {
         )
         featherRadius: Int = 2,
         @CapabilityParam(
-            description = "Apply Poisson gradient blending along hole boundaries",
-            defaultValue = "false",
+            description = "Boundary blending technique to eliminate seams (FEATHER, POISSON, MODIFIED_POISSON, LAPLACIAN_PYRAMID, NONE)",
+            defaultValue = "\"FEATHER\"",
             isAdvanced = true
         )
-        usePoisson: Boolean = false,
+        blendingMode: BlendingMode = BlendingMode.FEATHER,
         @CapabilityParam(
             description = "Context expansion margin (px) around mask bounding box",
             defaultValue = "32",
@@ -857,7 +858,7 @@ class CleanerPlugin {
             saveMask = false,
             isolatedRegionsOnly = true,
             featherRadius = featherRadius,
-            usePoisson = usePoisson,
+            blendingMode = blendingMode,
             cropMargin = cropMargin,
             iterations = iterations,
             addV = addV,
@@ -907,11 +908,11 @@ class CleanerPlugin {
         )
         featherRadius: Int = 2,
         @CapabilityParam(
-            description = "Apply Poisson gradient blending along hole boundaries",
-            defaultValue = "false",
+            description = "Boundary blending technique to eliminate seams (FEATHER, POISSON, MODIFIED_POISSON, LAPLACIAN_PYRAMID, NONE)",
+            defaultValue = "\"FEATHER\"",
             isAdvanced = true
         )
-        usePoisson: Boolean = false,
+        blendingMode: BlendingMode = BlendingMode.FEATHER,
         @CapabilityParam(
             description = "Context expansion margin (px) around mask bounding box",
             defaultValue = "32",
@@ -982,7 +983,7 @@ class CleanerPlugin {
             saveMask = false,
             isolatedRegionsOnly = true,
             featherRadius = featherRadius,
-            usePoisson = usePoisson,
+            blendingMode = blendingMode,
             cropMargin = cropMargin,
             iterations = iterations,
             addV = addV,
@@ -1035,11 +1036,11 @@ class CleanerPlugin {
         )
         featherRadius: Int = 2,
         @CapabilityParam(
-            description = "Apply Poisson gradient blending along hole boundaries",
-            defaultValue = "false",
+            description = "Boundary blending technique to eliminate seams (FEATHER, POISSON, MODIFIED_POISSON, LAPLACIAN_PYRAMID, NONE)",
+            defaultValue = "\"FEATHER\"",
             isAdvanced = true
         )
-        usePoisson: Boolean = false,
+        blendingMode: BlendingMode = BlendingMode.FEATHER,
         @CapabilityParam(
             description = "Context expansion margin (px) around mask bounding box",
             defaultValue = "32",
@@ -1120,7 +1121,7 @@ class CleanerPlugin {
 
         val options = InpaintingOptions(
             featherRadius = featherRadius,
-            usePoisson = usePoisson,
+            blendingMode = blendingMode,
             cropMargin = cropMargin,
             iterations = iterations,
             addV = addV,
@@ -1225,11 +1226,11 @@ class CleanerPlugin {
         )
         featherRadius: Int = 2,
         @CapabilityParam(
-            description = "Apply Poisson gradient blending along hole boundaries",
-            defaultValue = "false",
+            description = "Boundary blending technique to eliminate seams (FEATHER, POISSON, MODIFIED_POISSON, LAPLACIAN_PYRAMID, NONE)",
+            defaultValue = "\"FEATHER\"",
             isAdvanced = true
         )
-        usePoisson: Boolean = false,
+        blendingMode: BlendingMode = BlendingMode.FEATHER,
         @CapabilityParam(
             description = "Context expansion margin (px) around mask bounding box",
             defaultValue = "32",
@@ -1310,7 +1311,7 @@ class CleanerPlugin {
 
         val options = InpaintingOptions(
             featherRadius = featherRadius,
-            usePoisson = usePoisson,
+            blendingMode = blendingMode,
             cropMargin = cropMargin,
             iterations = iterations,
             addV = addV,
@@ -1404,11 +1405,11 @@ class CleanerPlugin {
         )
         featherRadius: Int = 2,
         @CapabilityParam(
-            description = "Apply Poisson gradient blending along hole boundaries",
-            defaultValue = "false",
+            description = "Boundary blending technique to eliminate seams (FEATHER, POISSON, MODIFIED_POISSON, LAPLACIAN_PYRAMID, NONE)",
+            defaultValue = "\"FEATHER\"",
             isAdvanced = true
         )
-        usePoisson: Boolean = false,
+        blendingMode: BlendingMode = BlendingMode.FEATHER,
         @CapabilityParam(
             description = "Context expansion margin (px) around mask bounding box",
             defaultValue = "32",
@@ -1477,7 +1478,7 @@ class CleanerPlugin {
             saveMasks = false,
             isolatedRegionsOnly = true,
             featherRadius = featherRadius,
-            usePoisson = usePoisson,
+            blendingMode = blendingMode,
             cropMargin = cropMargin,
             iterations = iterations,
             addV = addV,
@@ -1530,11 +1531,11 @@ class CleanerPlugin {
         )
         featherRadius: Int = 2,
         @CapabilityParam(
-            description = "Apply Poisson gradient blending along hole boundaries",
-            defaultValue = "false",
+            description = "Boundary blending technique to eliminate seams (FEATHER, POISSON, MODIFIED_POISSON, LAPLACIAN_PYRAMID, NONE)",
+            defaultValue = "\"FEATHER\"",
             isAdvanced = true
         )
-        usePoisson: Boolean = false,
+        blendingMode: BlendingMode = BlendingMode.FEATHER,
         @CapabilityParam(
             description = "Context expansion margin (px) around mask bounding box",
             defaultValue = "32",
@@ -1605,7 +1606,7 @@ class CleanerPlugin {
             saveMasks = false,
             isolatedRegionsOnly = true,
             featherRadius = featherRadius,
-            usePoisson = usePoisson,
+            blendingMode = blendingMode,
             cropMargin = cropMargin,
             iterations = iterations,
             addV = addV,

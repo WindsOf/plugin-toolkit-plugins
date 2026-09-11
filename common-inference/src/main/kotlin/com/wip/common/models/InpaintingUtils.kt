@@ -17,6 +17,7 @@ import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -24,7 +25,7 @@ import kotlin.math.sqrt
  * Configuration options for neural and deterministic inpainting pipelines.
  *
  * @param featherRadius Feathering radius in pixels for blending boundary alpha contours.
- * @param usePoisson Whether to apply Poisson image editing / gradient reconstruction.
+ * @param blendingMode Boundary blending technique (FEATHER, POISSON, MODIFIED_POISSON, LAPLACIAN_PYRAMID, NONE).
  * @param cropMargin Context expansion margin in pixels when cropping patches around mask clusters.
  * @param iterations Autoregressive sampling steps (e.g. TSR transformer sampling iterations).
  * @param addV Additive color offset correction.
@@ -37,7 +38,7 @@ import kotlin.math.sqrt
  */
 data class InpaintingOptions(
     val featherRadius: Int = 0,
-    val usePoisson: Boolean = false,
+    val blendingMode: BlendingMode = BlendingMode.FEATHER,
     val cropMargin: Int = 32,
     val iterations: Int = 5,
     val addV: Double = 0.0,
@@ -539,19 +540,26 @@ object InpaintingUtils {
                     )
                 }
 
-                val finalPatch = if (options.featherRadius > 0) {
-                    applyAlphaFeather(cleanedPatch, patchImg, patchMask, options.featherRadius)
-                } else {
-                    cleanedPatch
-                }
+                val finalPatch = blendPatch(
+                    cleanedPatch = cleanedPatch,
+                    originalPatch = patchImg,
+                    maskPatch = patchMask,
+                    options = options
+                )
 
                 val gPatch = outputImage.createGraphics()
                 gPatch.drawImage(finalPatch, rx, ry, null)
                 gPatch.dispose()
             } catch (e: Exception) {
                 val cleanedPatch = inpaintPatchPureKotlin(patchImg, patchMask)
+                val finalPatch = blendPatch(
+                    cleanedPatch = cleanedPatch,
+                    originalPatch = patchImg,
+                    maskPatch = patchMask,
+                    options = options
+                )
                 val gPatch = outputImage.createGraphics()
-                gPatch.drawImage(cleanedPatch, rx, ry, null)
+                gPatch.drawImage(finalPatch, rx, ry, null)
                 gPatch.dispose()
             }
         }
@@ -696,6 +704,76 @@ object InpaintingUtils {
     }
 
     /**
+     * Unified router dispatching to the configured [BlendingMode] algorithm.
+     */
+    fun blendPatch(
+        cleanedPatch: BufferedImage,
+        originalPatch: BufferedImage,
+        maskPatch: BufferedImage,
+        options: InpaintingOptions
+    ): BufferedImage {
+        return when (options.blendingMode) {
+            BlendingMode.NONE -> applyDirectPaste(cleanedPatch, originalPatch, maskPatch)
+            BlendingMode.FEATHER -> applyAlphaFeather(
+                cleanedImg = cleanedPatch,
+                origImg = originalPatch,
+                mask = maskPatch,
+                featherRadiusPx = if (options.featherRadius > 0) options.featherRadius else 2
+            )
+            BlendingMode.POISSON -> applyPoissonBlending(
+                cleanedImg = cleanedPatch,
+                origImg = originalPatch,
+                mask = maskPatch
+            )
+            BlendingMode.MODIFIED_POISSON -> applyModifiedPoissonBlending(
+                cleanedImg = cleanedPatch,
+                origImg = originalPatch,
+                mask = maskPatch,
+                decayRadius = if (options.featherRadius > 0) options.featherRadius * 4 else 16
+            )
+            BlendingMode.LAPLACIAN_PYRAMID -> applyLaplacianPyramidBlending(
+                cleanedImg = cleanedPatch,
+                origImg = originalPatch,
+                mask = maskPatch
+            )
+        }
+    }
+
+    /**
+     * Direct hard paste of inpainted pixels inside the mask (> 128) onto the original background.
+     */
+    fun applyDirectPaste(
+        cleanedImg: BufferedImage,
+        origImg: BufferedImage,
+        mask: BufferedImage
+    ): BufferedImage {
+        val w = cleanedImg.width
+        val h = cleanedImg.height
+        val out = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+        val g = out.createGraphics()
+        g.drawImage(origImg, 0, 0, null)
+        g.dispose()
+
+        val maskRaster = mask.raster
+        val maskPixels = IntArray(w * h)
+        maskRaster.getSamples(0, 0, w, h, 0, maskPixels)
+
+        val cPixels = IntArray(w * h)
+        cleanedImg.getRGB(0, 0, w, h, cPixels, 0, w)
+
+        val outPixels = IntArray(w * h)
+        out.getRGB(0, 0, w, h, outPixels, 0, w)
+
+        for (i in 0 until w * h) {
+            if (maskPixels[i] > 128) {
+                outPixels[i] = cPixels[i]
+            }
+        }
+        out.setRGB(0, 0, w, h, outPixels, 0, w)
+        return out
+    }
+
+    /**
      * Soft alpha feathering blending along the mask contour boundaries.
      */
     fun applyAlphaFeather(
@@ -704,17 +782,24 @@ object InpaintingUtils {
         mask: BufferedImage,
         featherRadiusPx: Int = 2
     ): BufferedImage {
-        if (featherRadiusPx <= 0) return cleanedImg
+        if (featherRadiusPx <= 0) return applyDirectPaste(cleanedImg, origImg, mask)
         val w = cleanedImg.width
         val h = cleanedImg.height
         val out = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
         val g = out.createGraphics()
-        g.drawImage(cleanedImg, 0, 0, null)
+        g.drawImage(origImg, 0, 0, null)
         g.dispose()
 
         val maskRaster = mask.raster
         val maskPixels = IntArray(w * h)
         maskRaster.getSamples(0, 0, w, h, 0, maskPixels)
+
+        val cPixels = IntArray(w * h)
+        cleanedImg.getRGB(0, 0, w, h, cPixels, 0, w)
+        val oPixels = IntArray(w * h)
+        origImg.getRGB(0, 0, w, h, oPixels, 0, w)
+        val outPixels = IntArray(w * h)
+        out.getRGB(0, 0, w, h, outPixels, 0, w)
 
         for (y in 0 until h) {
             for (x in 0 until w) {
@@ -737,8 +822,8 @@ object InpaintingUtils {
                     }
                     if (minDist <= featherRadiusPx) {
                         val alpha = (minDist / featherRadiusPx.toDouble()).toFloat().coerceIn(0.0f, 1.0f)
-                        val cRgb = cleanedImg.getRGB(x, y)
-                        val oRgb = origImg.getRGB(x, y)
+                        val cRgb = cPixels[idx]
+                        val oRgb = oPixels[idx]
                         val cr = (cRgb shr 16) and 0xFF
                         val cg = (cRgb shr 8) and 0xFF
                         val cb = cRgb and 0xFF
@@ -748,23 +833,546 @@ object InpaintingUtils {
                         val blendR = ((1.0f - alpha) * or + alpha * cr).toInt().coerceIn(0, 255)
                         val blendG = ((1.0f - alpha) * og + alpha * cg).toInt().coerceIn(0, 255)
                         val blendB = ((1.0f - alpha) * ob + alpha * cb).toInt().coerceIn(0, 255)
-                        out.setRGB(x, y, (blendR shl 16) or (blendG shl 8) or blendB)
+                        outPixels[idx] = (blendR shl 16) or (blendG shl 8) or blendB
+                    } else {
+                        outPixels[idx] = cPixels[idx]
                     }
                 }
             }
         }
+        out.setRGB(0, 0, w, h, outPixels, 0, w)
         return out
+    }
+
+    /**
+     * Solves Poisson equation (\Delta d = 0) on the masked hole with Dirichlet boundary conditions
+     * derived from the surrounding target image pixels.
+     * Uses Gauss-Seidel Successive Over-Relaxation (SOR) with boundary residual initialization.
+     */
+    fun applyPoissonBlending(
+        cleanedImg: BufferedImage,
+        origImg: BufferedImage,
+        mask: BufferedImage,
+        iterations: Int = 40,
+        omega: Float = 1.7f
+    ): BufferedImage {
+        val w = cleanedImg.width
+        val h = cleanedImg.height
+        val total = w * h
+
+        val maskRaster = mask.raster
+        val maskPixels = IntArray(total)
+        maskRaster.getSamples(0, 0, w, h, 0, maskPixels)
+
+        val isHole = BooleanArray(total) { maskPixels[it] > 128 }
+        var holeCount = 0
+        for (i in 0 until total) {
+            if (isHole[i]) holeCount++
+        }
+        if (holeCount == 0) return origImg
+        if (holeCount == total) return cleanedImg
+
+        val cPixels = IntArray(total)
+        cleanedImg.getRGB(0, 0, w, h, cPixels, 0, w)
+
+        val oPixels = IntArray(total)
+        origImg.getRGB(0, 0, w, h, oPixels, 0, w)
+
+        val dR = FloatArray(total)
+        val dG = FloatArray(total)
+        val dB = FloatArray(total)
+
+        var boundarySumR = 0.0
+        var boundarySumG = 0.0
+        var boundarySumB = 0.0
+        var boundaryCount = 0
+
+        for (y in 0 until h) {
+            val yOff = y * w
+            for (x in 0 until w) {
+                val idx = yOff + x
+                if (!isHole[idx]) {
+                    val cr = (cPixels[idx] shr 16) and 0xFF
+                    val cg = (cPixels[idx] shr 8) and 0xFF
+                    val cb = cPixels[idx] and 0xFF
+                    val or = (oPixels[idx] shr 16) and 0xFF
+                    val og = (oPixels[idx] shr 8) and 0xFF
+                    val ob = oPixels[idx] and 0xFF
+
+                    val diffR = (or - cr).toFloat()
+                    val diffG = (og - cg).toFloat()
+                    val diffB = (ob - cb).toFloat()
+
+                    dR[idx] = diffR
+                    dG[idx] = diffG
+                    dB[idx] = diffB
+
+                    val isBoundary = (x > 0 && isHole[idx - 1]) ||
+                            (x < w - 1 && isHole[idx + 1]) ||
+                            (y > 0 && isHole[idx - w]) ||
+                            (y < h - 1 && isHole[idx + w])
+
+                    if (isBoundary) {
+                        boundarySumR += diffR
+                        boundarySumG += diffG
+                        boundarySumB += diffB
+                        boundaryCount++
+                    }
+                }
+            }
+        }
+
+        val initR = if (boundaryCount > 0) (boundarySumR / boundaryCount).toFloat() else 0f
+        val initG = if (boundaryCount > 0) (boundarySumG / boundaryCount).toFloat() else 0f
+        val initB = if (boundaryCount > 0) (boundarySumB / boundaryCount).toFloat() else 0f
+
+        for (i in 0 until total) {
+            if (isHole[i]) {
+                dR[i] = initR
+                dG[i] = initG
+                dB[i] = initB
+            }
+        }
+
+        val actualIters = iterations.coerceIn(10, 100)
+        for (iter in 0 until actualIters) {
+            for (y in 0 until h) {
+                val yOff = y * w
+                for (x in 0 until w) {
+                    val idx = yOff + x
+                    if (isHole[idx]) {
+                        val leftIdx = if (x > 0) idx - 1 else idx
+                        val rightIdx = if (x < w - 1) idx + 1 else idx
+                        val upIdx = if (y > 0) idx - w else idx
+                        val downIdx = if (y < h - 1) idx + w else idx
+
+                        val targetR = 0.25f * (dR[leftIdx] + dR[rightIdx] + dR[upIdx] + dR[downIdx])
+                        val targetG = 0.25f * (dG[leftIdx] + dG[rightIdx] + dG[upIdx] + dG[downIdx])
+                        val targetB = 0.25f * (dB[leftIdx] + dB[rightIdx] + dB[upIdx] + dB[downIdx])
+
+                        dR[idx] += omega * (targetR - dR[idx])
+                        dG[idx] += omega * (targetG - dG[idx])
+                        dB[idx] += omega * (targetB - dB[idx])
+                    }
+                }
+            }
+        }
+
+        val out = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+        val outPixels = IntArray(total)
+
+        for (i in 0 until total) {
+            if (isHole[i]) {
+                val cr = (cPixels[i] shr 16) and 0xFF
+                val cg = (cPixels[i] shr 8) and 0xFF
+                val cb = cPixels[i] and 0xFF
+
+                val fr = (cr + dR[i]).roundToInt().coerceIn(0, 255)
+                val fg = (cg + dG[i]).roundToInt().coerceIn(0, 255)
+                val fb = (cb + dB[i]).roundToInt().coerceIn(0, 255)
+
+                outPixels[i] = (fr shl 16) or (fg shl 8) or fb
+            } else {
+                outPixels[i] = oPixels[i]
+            }
+        }
+
+        out.setRGB(0, 0, w, h, outPixels, 0, w)
+        return out
+    }
+
+    /**
+     * Modified Poisson solver with soft alpha matting / distance-based boundary attenuation.
+     * Restricts Poisson offset adaptation to the boundary zone, preventing color bleed into the interior.
+     */
+    fun applyModifiedPoissonBlending(
+        cleanedImg: BufferedImage,
+        origImg: BufferedImage,
+        mask: BufferedImage,
+        decayRadius: Int = 16,
+        iterations: Int = 40,
+        omega: Float = 1.7f
+    ): BufferedImage {
+        val w = cleanedImg.width
+        val h = cleanedImg.height
+        val total = w * h
+
+        val maskRaster = mask.raster
+        val maskPixels = IntArray(total)
+        maskRaster.getSamples(0, 0, w, h, 0, maskPixels)
+
+        val isHole = BooleanArray(total) { maskPixels[it] > 128 }
+        var holeCount = 0
+        for (i in 0 until total) {
+            if (isHole[i]) holeCount++
+        }
+        if (holeCount == 0) return origImg
+        if (holeCount == total) return cleanedImg
+
+        val cPixels = IntArray(total)
+        cleanedImg.getRGB(0, 0, w, h, cPixels, 0, w)
+
+        val oPixels = IntArray(total)
+        origImg.getRGB(0, 0, w, h, oPixels, 0, w)
+
+        val dR = FloatArray(total)
+        val dG = FloatArray(total)
+        val dB = FloatArray(total)
+
+        var boundarySumR = 0.0
+        var boundarySumG = 0.0
+        var boundarySumB = 0.0
+        var boundaryCount = 0
+
+        for (y in 0 until h) {
+            val yOff = y * w
+            for (x in 0 until w) {
+                val idx = yOff + x
+                if (!isHole[idx]) {
+                    val cr = (cPixels[idx] shr 16) and 0xFF
+                    val cg = (cPixels[idx] shr 8) and 0xFF
+                    val cb = cPixels[idx] and 0xFF
+                    val or = (oPixels[idx] shr 16) and 0xFF
+                    val og = (oPixels[idx] shr 8) and 0xFF
+                    val ob = oPixels[idx] and 0xFF
+
+                    val diffR = (or - cr).toFloat()
+                    val diffG = (og - cg).toFloat()
+                    val diffB = (ob - cb).toFloat()
+
+                    dR[idx] = diffR
+                    dG[idx] = diffG
+                    dB[idx] = diffB
+
+                    val isBoundary = (x > 0 && isHole[idx - 1]) ||
+                            (x < w - 1 && isHole[idx + 1]) ||
+                            (y > 0 && isHole[idx - w]) ||
+                            (y < h - 1 && isHole[idx + w])
+
+                    if (isBoundary) {
+                        boundarySumR += diffR
+                        boundarySumG += diffG
+                        boundarySumB += diffB
+                        boundaryCount++
+                    }
+                }
+            }
+        }
+
+        val initR = if (boundaryCount > 0) (boundarySumR / boundaryCount).toFloat() else 0f
+        val initG = if (boundaryCount > 0) (boundarySumG / boundaryCount).toFloat() else 0f
+        val initB = if (boundaryCount > 0) (boundarySumB / boundaryCount).toFloat() else 0f
+
+        for (i in 0 until total) {
+            if (isHole[i]) {
+                dR[i] = initR
+                dG[i] = initG
+                dB[i] = initB
+            }
+        }
+
+        val actualIters = iterations.coerceIn(10, 100)
+        for (iter in 0 until actualIters) {
+            for (y in 0 until h) {
+                val yOff = y * w
+                for (x in 0 until w) {
+                    val idx = yOff + x
+                    if (isHole[idx]) {
+                        val leftIdx = if (x > 0) idx - 1 else idx
+                        val rightIdx = if (x < w - 1) idx + 1 else idx
+                        val upIdx = if (y > 0) idx - w else idx
+                        val downIdx = if (y < h - 1) idx + w else idx
+
+                        val targetR = 0.25f * (dR[leftIdx] + dR[rightIdx] + dR[upIdx] + dR[downIdx])
+                        val targetG = 0.25f * (dG[leftIdx] + dG[rightIdx] + dG[upIdx] + dG[downIdx])
+                        val targetB = 0.25f * (dB[leftIdx] + dB[rightIdx] + dB[upIdx] + dB[downIdx])
+
+                        dR[idx] += omega * (targetR - dR[idx])
+                        dG[idx] += omega * (targetG - dG[idx])
+                        dB[idx] += omega * (targetB - dB[idx])
+                    }
+                }
+            }
+        }
+
+        val radius = max(2, decayRadius)
+        val dist = FloatArray(total) { if (isHole[it]) Float.MAX_VALUE else 0f }
+
+        for (y in 0 until h) {
+            val yOff = y * w
+            for (x in 0 until w) {
+                val idx = yOff + x
+                if (isHole[idx]) {
+                    var d = dist[idx]
+                    if (x > 0) d = min(d, dist[idx - 1] + 1f)
+                    if (y > 0) d = min(d, dist[idx - w] + 1f)
+                    if (x > 0 && y > 0) d = min(d, dist[idx - w - 1] + 1.414f)
+                    if (x < w - 1 && y > 0) d = min(d, dist[idx - w + 1] + 1.414f)
+                    dist[idx] = d
+                }
+            }
+        }
+        for (y in h - 1 downTo 0) {
+            val yOff = y * w
+            for (x in w - 1 downTo 0) {
+                val idx = yOff + x
+                if (isHole[idx]) {
+                    var d = dist[idx]
+                    if (x < w - 1) d = min(d, dist[idx + 1] + 1f)
+                    if (y < h - 1) d = min(d, dist[idx + w] + 1f)
+                    if (x < w - 1 && y < h - 1) d = min(d, dist[idx + w + 1] + 1.414f)
+                    if (x > 0 && y < h - 1) d = min(d, dist[idx + w - 1] + 1.414f)
+                    dist[idx] = d
+                }
+            }
+        }
+
+        val out = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+        val outPixels = IntArray(total)
+
+        for (i in 0 until total) {
+            if (isHole[i]) {
+                val d = dist[i]
+                val alpha = if (d >= radius) {
+                    0.0f
+                } else {
+                    val t = d / radius.toFloat()
+                    (0.5f * (1.0f + cos(Math.PI.toFloat() * t))).coerceIn(0.0f, 1.0f)
+                }
+
+                val cr = (cPixels[i] shr 16) and 0xFF
+                val cg = (cPixels[i] shr 8) and 0xFF
+                val cb = cPixels[i] and 0xFF
+
+                val fr = (cr + alpha * dR[i]).roundToInt().coerceIn(0, 255)
+                val fg = (cg + alpha * dG[i]).roundToInt().coerceIn(0, 255)
+                val fb = (cb + alpha * dB[i]).roundToInt().coerceIn(0, 255)
+
+                outPixels[i] = (fr shl 16) or (fg shl 8) or fb
+            } else {
+                outPixels[i] = oPixels[i]
+            }
+        }
+
+        out.setRGB(0, 0, w, h, outPixels, 0, w)
+        return out
+    }
+
+    /**
+     * Laplacian pyramid multi-band frequency blending (Burt & Adelson 1983).
+     * Decomposes patch and target into frequency octaves, blending low spatial frequencies
+     * smoothly and high frequencies crisply.
+     */
+    fun applyLaplacianPyramidBlending(
+        cleanedImg: BufferedImage,
+        origImg: BufferedImage,
+        mask: BufferedImage,
+        levels: Int = 4
+    ): BufferedImage {
+        val w = cleanedImg.width
+        val h = cleanedImg.height
+
+        val actualLevels = min(levels, max(1, (ln(min(w, h).toDouble()) / ln(2.0)).toInt() - 2)).coerceIn(1, 6)
+        if (actualLevels <= 1 || min(w, h) < 16) {
+            return applyAlphaFeather(cleanedImg, origImg, mask, 2)
+        }
+
+        val total = w * h
+        val cPixels = IntArray(total)
+        cleanedImg.getRGB(0, 0, w, h, cPixels, 0, w)
+
+        val oPixels = IntArray(total)
+        origImg.getRGB(0, 0, w, h, oPixels, 0, w)
+
+        val maskRaster = mask.raster
+        val mPixels = IntArray(total)
+        maskRaster.getSamples(0, 0, w, h, 0, mPixels)
+
+        val srcR = FloatArray(total) { ((cPixels[it] shr 16) and 0xFF).toFloat() }
+        val srcG = FloatArray(total) { ((cPixels[it] shr 8) and 0xFF).toFloat() }
+        val srcB = FloatArray(total) { (cPixels[it] and 0xFF).toFloat() }
+
+        val tgtR = FloatArray(total) { ((oPixels[it] shr 16) and 0xFF).toFloat() }
+        val tgtG = FloatArray(total) { ((oPixels[it] shr 8) and 0xFF).toFloat() }
+        val tgtB = FloatArray(total) { (oPixels[it] and 0xFF).toFloat() }
+
+        val maskFloat = FloatArray(total) { if (mPixels[it] > 128) 1.0f else 0.0f }
+
+        val outR = blendChannelLaplacian(srcR, tgtR, maskFloat, w, h, actualLevels)
+        val outG = blendChannelLaplacian(srcG, tgtG, maskFloat, w, h, actualLevels)
+        val outB = blendChannelLaplacian(srcB, tgtB, maskFloat, w, h, actualLevels)
+
+        val out = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+        val outPixels = IntArray(total)
+        for (i in 0 until total) {
+            val r = outR[i].roundToInt().coerceIn(0, 255)
+            val g = outG[i].roundToInt().coerceIn(0, 255)
+            val b = outB[i].roundToInt().coerceIn(0, 255)
+            outPixels[i] = (r shl 16) or (g shl 8) or b
+        }
+        out.setRGB(0, 0, w, h, outPixels, 0, w)
+        return out
+    }
+
+    private val pyrKernel = floatArrayOf(0.0625f, 0.25f, 0.375f, 0.25f, 0.0625f)
+    private val upKernel = floatArrayOf(0.125f, 0.5f, 0.75f, 0.5f, 0.125f)
+
+    private fun pyrDown(src: FloatArray, srcW: Int, srcH: Int, dstW: Int, dstH: Int): FloatArray {
+        val temp = FloatArray(srcW * srcH)
+        for (y in 0 until srcH) {
+            val yOff = y * srcW
+            for (x in 0 until srcW) {
+                var sum = 0f
+                for (k in -2..2) {
+                    val nx = (x + k).coerceIn(0, srcW - 1)
+                    sum += src[yOff + nx] * pyrKernel[k + 2]
+                }
+                temp[yOff + x] = sum
+            }
+        }
+        val dst = FloatArray(dstW * dstH)
+        for (dy in 0 until dstH) {
+            val sy = dy * 2
+            val dyOff = dy * dstW
+            for (dx in 0 until dstW) {
+                val sx = dx * 2
+                var sum = 0f
+                for (k in -2..2) {
+                    val ny = (sy + k).coerceIn(0, srcH - 1)
+                    sum += temp[ny * srcW + sx] * pyrKernel[k + 2]
+                }
+                dst[dyOff + dx] = sum
+            }
+        }
+        return dst
+    }
+
+    private fun pyrUp(src: FloatArray, srcW: Int, srcH: Int, dstW: Int, dstH: Int): FloatArray {
+        val upsampled = FloatArray(dstW * dstH)
+        for (sy in 0 until srcH) {
+            val dy = sy * 2
+            if (dy >= dstH) continue
+            val syOff = sy * srcW
+            val dyOff = dy * dstW
+            for (sx in 0 until srcW) {
+                val dx = sx * 2
+                if (dx >= dstW) continue
+                upsampled[dyOff + dx] = src[syOff + sx]
+            }
+        }
+
+        val temp = FloatArray(dstW * dstH)
+        for (y in 0 until dstH) {
+            val yOff = y * dstW
+            for (x in 0 until dstW) {
+                var sum = 0f
+                for (k in -2..2) {
+                    val nx = (x + k).coerceIn(0, dstW - 1)
+                    sum += upsampled[yOff + nx] * upKernel[k + 2]
+                }
+                temp[yOff + x] = sum
+            }
+        }
+
+        val dst = FloatArray(dstW * dstH)
+        for (y in 0 until dstH) {
+            val yOff = y * dstW
+            for (x in 0 until dstW) {
+                var sum = 0f
+                for (k in -2..2) {
+                    val ny = (y + k).coerceIn(0, dstH - 1)
+                    sum += temp[ny * dstW + x] * upKernel[k + 2]
+                }
+                dst[yOff + x] = sum * 2.0f
+            }
+        }
+        return dst
+    }
+
+    private fun blendChannelLaplacian(
+        src: FloatArray,
+        tgt: FloatArray,
+        mask: FloatArray,
+        w: Int,
+        h: Int,
+        levels: Int
+    ): FloatArray {
+        val gSrc = mutableListOf<FloatArray>()
+        val gTgt = mutableListOf<FloatArray>()
+        val gMask = mutableListOf<FloatArray>()
+        val widths = mutableListOf<Int>()
+        val heights = mutableListOf<Int>()
+
+        gSrc.add(src)
+        gTgt.add(tgt)
+        gMask.add(mask)
+        widths.add(w)
+        heights.add(h)
+
+        var curW = w
+        var curH = h
+        for (l in 1 until levels) {
+            val nextW = max(1, (curW + 1) / 2)
+            val nextH = max(1, (curH + 1) / 2)
+            widths.add(nextW)
+            heights.add(nextH)
+
+            gSrc.add(pyrDown(gSrc[l - 1], curW, curH, nextW, nextH))
+            gTgt.add(pyrDown(gTgt[l - 1], curW, curH, nextW, nextH))
+            gMask.add(pyrDown(gMask[l - 1], curW, curH, nextW, nextH))
+
+            curW = nextW
+            curH = nextH
+        }
+
+        val lSrc = mutableListOf<FloatArray>()
+        val lTgt = mutableListOf<FloatArray>()
+        for (l in 0 until levels - 1) {
+            val upSrc = pyrUp(gSrc[l + 1], widths[l + 1], heights[l + 1], widths[l], heights[l])
+            val upTgt = pyrUp(gTgt[l + 1], widths[l + 1], heights[l + 1], widths[l], heights[l])
+
+            val lapSrc = FloatArray(widths[l] * heights[l]) { i -> gSrc[l][i] - upSrc[i] }
+            val lapTgt = FloatArray(widths[l] * heights[l]) { i -> gTgt[l][i] - upTgt[i] }
+            lSrc.add(lapSrc)
+            lTgt.add(lapTgt)
+        }
+        lSrc.add(gSrc[levels - 1])
+        lTgt.add(gTgt[levels - 1])
+
+        val lBlend = mutableListOf<FloatArray>()
+        for (l in 0 until levels) {
+            val size = widths[l] * heights[l]
+            val m = gMask[l]
+            val s = lSrc[l]
+            val t = lTgt[l]
+            val blended = FloatArray(size) { i ->
+                val alpha = m[i].coerceIn(0.0f, 1.0f)
+                alpha * s[i] + (1.0f - alpha) * t[i]
+            }
+            lBlend.add(blended)
+        }
+
+        var current = lBlend[levels - 1]
+        for (l in levels - 2 downTo 0) {
+            val up = pyrUp(current, widths[l + 1], heights[l + 1], widths[l], heights[l])
+            val size = widths[l] * heights[l]
+            val reconstructed = FloatArray(size) { i -> lBlend[l][i] + up[i] }
+            current = reconstructed
+        }
+
+        return current
     }
 
     /**
      * High-level inpainting pipeline: Performs ROI patch-based inpainting on a [BufferedImage] using a binary mask.
      * Extracts only the bounding regions containing mask pixels (+ padding context), runs pure Kotlin inpainting,
-     * and alpha-blends the patches back onto the output image.
+     * and blends the patches back onto the output image according to [options].
      */
     fun inpaintImage(
         sourceImage: BufferedImage,
         mask: BufferedImage,
-        roiPaddingPx: Int = 24
+        roiPaddingPx: Int = 24,
+        options: InpaintingOptions = InpaintingOptions()
     ): BufferedImage {
         val width = sourceImage.width
         val height = sourceImage.height
@@ -789,9 +1397,10 @@ object InpaintingUtils {
             val patchMask = mask.getSubimage(rx, ry, rw, rh)
 
             val cleanedPatch = inpaintPatchPureKotlin(patchImg, patchMask)
+            val finalPatch = blendPatch(cleanedPatch, patchImg, patchMask, options)
 
             val gPatch = outputImage.createGraphics()
-            gPatch.drawImage(cleanedPatch, rx, ry, null)
+            gPatch.drawImage(finalPatch, rx, ry, null)
             gPatch.dispose()
         }
 
@@ -830,7 +1439,8 @@ object InpaintingUtils {
             inpaintImage(
                 sourceImage = sourceImage,
                 mask = mask,
-                roiPaddingPx = roiPaddingPx
+                roiPaddingPx = roiPaddingPx,
+                options = options
             )
         }
 
@@ -1570,29 +2180,16 @@ object InpaintingUtils {
                 inpaintPatchPureKotlin(contextImg, contextMask)
             }
 
-            val finalPatch = if (options.featherRadius > 0) {
-                applyAlphaFeather(cleanedPatch, contextImg, contextMask, options.featherRadius)
-            } else {
-                cleanedPatch
-            }
+            val finalPatch = blendPatch(
+                cleanedPatch = cleanedPatch,
+                originalPatch = contextImg,
+                maskPatch = contextMask,
+                options = options
+            )
 
-            // Seamlessly paste ONLY the masked pixels from the cleaned context back onto the output image
-            val maskRaster = contextMask.raster
-            val patchMaskPixels = IntArray(cropW * cropH)
-            maskRaster.getSamples(0, 0, cropW, cropH, 0, patchMaskPixels)
-
-            val cleanedPatchPixels = IntArray(cropW * cropH)
-            finalPatch.getRGB(0, 0, cropW, cropH, cleanedPatchPixels, 0, cropW)
-
-            val currentCanvasPixels = IntArray(cropW * cropH)
-            outputImage.getRGB(cropX, cropY, cropW, cropH, currentCanvasPixels, 0, cropW)
-
-            for (i in 0 until cropW * cropH) {
-                if (patchMaskPixels[i] > 128) {
-                    currentCanvasPixels[i] = cleanedPatchPixels[i]
-                }
-            }
-            outputImage.setRGB(cropX, cropY, cropW, cropH, currentCanvasPixels, 0, cropW)
+            val gPatch = outputImage.createGraphics()
+            gPatch.drawImage(finalPatch, cropX, cropY, null)
+            gPatch.dispose()
         }
 
         return outputImage

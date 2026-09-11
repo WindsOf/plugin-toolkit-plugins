@@ -53,5 +53,101 @@
     ],
     "settingMigrations": [],
     "objectMigrations": []
+  },
+  {
+    "fromVersion": "1.2.0",
+    "toVersion": "1.3.0",
+    "capabilityMigrations": [
+      {
+        "oldName": "cleanImage",
+        "newName": "cleanImage",
+        "isDropInReplacement": true,
+        "portMigrations": [
+          {
+            "oldName": "usePoisson",
+            "newName": "blendingMode"
+          }
+        ]
+      },
+      {
+        "oldName": "cleanImageHybrid",
+        "newName": "cleanImageHybrid",
+        "isDropInReplacement": true,
+        "portMigrations": [
+          {
+            "oldName": "usePoisson",
+            "newName": "blendingMode"
+          }
+        ]
+      },
+      {
+        "oldName": "cleanImagePatchesOnly",
+        "newName": "cleanImagePatchesOnly",
+        "isDropInReplacement": true,
+        "portMigrations": [
+          {
+            "oldName": "usePoisson",
+            "newName": "blendingMode"
+          }
+        ]
+      },
+      {
+        "oldName": "cleanImagePatchesOnlyHybrid",
+        "newName": "cleanImagePatchesOnlyHybrid",
+        "isDropInReplacement": true,
+        "portMigrations": [
+          {
+            "oldName": "usePoisson",
+            "newName": "blendingMode"
+          }
+        ]
+      },
+      {
+        "oldName": "cleanChapter",
+        "newName": "cleanChapter",
+        "isDropInReplacement": true,
+        "portMigrations": [
+          {
+            "oldName": "usePoisson",
+            "newName": "blendingMode"
+          }
+        ]
+      },
+      {
+        "oldName": "cleanChapterHybrid",
+        "newName": "cleanChapterHybrid",
+        "isDropInReplacement": true,
+        "portMigrations": [
+          {
+            "oldName": "usePoisson",
+            "newName": "blendingMode"
+          }
+        ]
+      },
+      {
+        "oldName": "cleanChapterPatchesOnly",
+        "newName": "cleanChapterPatchesOnly",
+        "isDropInReplacement": true,
+        "portMigrations": [
+          {
+            "oldName": "usePoisson",
+            "newName": "blendingMode"
+          }
+        ]
+      },
+      {
+        "oldName": "cleanChapterPatchesOnlyHybrid",
+        "newName": "cleanChapterPatchesOnlyHybrid",
+        "isDropInReplacement": true,
+        "portMigrations": [
+          {
+            "oldName": "usePoisson",
+            "newName": "blendingMode"
+          }
+        ]
+      }
+    ],
+    "settingMigrations": [],
+    "objectMigrations": []
   }
 ]

@@ -416,5 +416,175 @@ class InpaintingUtilsTest {
         val inAlpha = (isolated.getRGB(50, 50) ushr 24) and 0xFF
         assertEquals(255, inAlpha)
     }
+
+    @Test
+    fun testPoissonBlendingSolvesBoundaryContinuity() {
+        val w = 80
+        val h = 80
+        val orig = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+        val gO = orig.createGraphics()
+        gO.color = Color(100, 100, 100)
+        gO.fillRect(0, 0, w, h)
+        gO.dispose()
+
+        // Cleaned has sharp contrast (200, 200, 200)
+        val cleaned = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+        val gC = cleaned.createGraphics()
+        gC.color = Color(200, 200, 200)
+        gC.fillRect(0, 0, w, h)
+        gC.dispose()
+
+        val mask = BufferedImage(w, h, BufferedImage.TYPE_BYTE_GRAY)
+        val gM = mask.createGraphics()
+        gM.color = Color.BLACK
+        gM.fillRect(0, 0, w, h)
+        gM.color = Color.WHITE
+        gM.fillRect(20, 20, 40, 40) // Mask from (20, 20) to (60, 60)
+        gM.dispose()
+
+        val direct = InpaintingUtils.applyDirectPaste(cleaned, orig, mask)
+        val poisson = InpaintingUtils.applyPoissonBlending(cleaned, orig, mask, iterations = 50)
+
+        // Pixel outside mask (10, 10) must be untouched target (100, 100, 100)
+        val outRgb = poisson.getRGB(10, 10)
+        assertEquals(100, (outRgb shr 16) and 0xFF)
+
+        // Pixel right at the boundary inside the mask (20, 20)
+        // Under direct paste, this is 200 (sharp seam jump: 100 -> 200)
+        val directSeamR = (direct.getRGB(20, 20) shr 16) and 0xFF
+        assertEquals(200, directSeamR)
+
+        // Under Poisson, boundary pixel (20, 20) is pulled close to background (100) to eliminate seam
+        val poissonSeamR = (poisson.getRGB(20, 20) shr 16) and 0xFF
+        assertTrue(poissonSeamR < 150, "Poisson must pull boundary pixels toward target background (got $poissonSeamR)")
+
+        // Direct paste and Poisson MUST NOT be identical (resolving reported bug)
+        var diffCount = 0
+        for (y in 20 until 60) {
+            for (x in 20 until 60) {
+                if (poisson.getRGB(x, y) != direct.getRGB(x, y)) {
+                    diffCount++
+                }
+            }
+        }
+        assertTrue(diffCount > 0, "Poisson blending must produce distinct pixel values from direct paste")
+    }
+
+    @Test
+    fun testModifiedPoissonPreventsColorBleedInCenter() {
+        val w = 80
+        val h = 80
+        val orig = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+        val gO = orig.createGraphics()
+        gO.color = Color(30, 30, 30) // Dark background
+        gO.fillRect(0, 0, w, h)
+        gO.dispose()
+
+        // Cleaned has bright white patch (240, 240, 240)
+        val cleaned = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+        val gC = cleaned.createGraphics()
+        gC.color = Color(240, 240, 240)
+        gC.fillRect(0, 0, w, h)
+        gC.dispose()
+
+        val mask = BufferedImage(w, h, BufferedImage.TYPE_BYTE_GRAY)
+        val gM = mask.createGraphics()
+        gM.color = Color.BLACK
+        gM.fillRect(0, 0, w, h)
+        gM.color = Color.WHITE
+        gM.fillRect(15, 15, 50, 50)
+        gM.dispose()
+
+        val purePoisson = InpaintingUtils.applyPoissonBlending(cleaned, orig, mask, iterations = 40)
+        val modPoisson = InpaintingUtils.applyModifiedPoissonBlending(cleaned, orig, mask, decayRadius = 10, iterations = 40)
+
+        // In pure Poisson, the dark boundary diffuses throughout the hole, significantly darkening the center (40, 40)
+        val pureCenterR = (purePoisson.getRGB(40, 40) shr 16) and 0xFF
+
+        // In Modified Poisson, boundary attenuation preserves the bright center color
+        val modCenterR = (modPoisson.getRGB(40, 40) shr 16) and 0xFF
+
+        assertTrue(
+            modCenterR > pureCenterR,
+            "Modified Poisson must preserve higher brightness in hole center than pure Poisson (mod: $modCenterR vs pure: $pureCenterR)"
+        )
+        assertTrue(modCenterR >= 200, "Modified Poisson center should remain close to original inpainting brightness (240)")
+
+        // Boundary pixel (15, 15) in Modified Poisson should still smoothly transition to background (30)
+        val modEdgeR = (modPoisson.getRGB(15, 15) shr 16) and 0xFF
+        assertTrue(modEdgeR < 150, "Modified Poisson boundary must adapt toward background (got $modEdgeR)")
+    }
+
+    @Test
+    fun testLaplacianPyramidBlendingFusesMultiScale() {
+        val w = 64
+        val h = 64
+        val orig = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+        val gO = orig.createGraphics()
+        gO.color = Color(50, 100, 150)
+        gO.fillRect(0, 0, w, h)
+        gO.dispose()
+
+        val cleaned = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+        val gC = cleaned.createGraphics()
+        gC.color = Color(200, 150, 100)
+        gC.fillRect(0, 0, w, h)
+        gC.dispose()
+
+        val mask = BufferedImage(w, h, BufferedImage.TYPE_BYTE_GRAY)
+        val gM = mask.createGraphics()
+        gM.color = Color.BLACK
+        gM.fillRect(0, 0, w, h)
+        gM.color = Color.WHITE
+        gM.fillRect(16, 16, 32, 32)
+        gM.dispose()
+
+        val blended = InpaintingUtils.applyLaplacianPyramidBlending(cleaned, orig, mask, levels = 3)
+        assertEquals(w, blended.width)
+        assertEquals(h, blended.height)
+
+        // Pixel outside mask should be close to orig
+        val outRgb = blended.getRGB(5, 5)
+        val outR = (outRgb shr 16) and 0xFF
+        assertTrue(outR in 40..60, "Outside pixel should be close to background R=50 (got $outR)")
+
+        // Pixel inside mask should reflect cleaned image
+        val inRgb = blended.getRGB(32, 32)
+        val inR = (inRgb shr 16) and 0xFF
+        assertTrue(inR > 150, "Inside pixel should reflect inpainting R=200 (got $inR)")
+    }
+
+    @Test
+    fun testBlendPatchRoutesAllBlendingModes() {
+        val w = 50
+        val h = 50
+        val orig = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+        val gO = orig.createGraphics()
+        gO.color = Color.BLUE
+        gO.fillRect(0, 0, w, h)
+        gO.dispose()
+
+        val cleaned = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+        val gC = cleaned.createGraphics()
+        gC.color = Color.RED
+        gC.fillRect(0, 0, w, h)
+        gC.dispose()
+
+        val mask = BufferedImage(w, h, BufferedImage.TYPE_BYTE_GRAY)
+        val gM = mask.createGraphics()
+        gM.color = Color.BLACK
+        gM.fillRect(0, 0, w, h)
+        gM.color = Color.WHITE
+        gM.fillRect(15, 15, 20, 20)
+        gM.dispose()
+
+        for (mode in BlendingMode.entries) {
+            val options = InpaintingOptions(blendingMode = mode, featherRadius = 2)
+            val result = InpaintingUtils.blendPatch(cleaned, orig, mask, options)
+            assertNotNull(result)
+            assertEquals(w, result.width)
+            assertEquals(h, result.height)
+        }
+    }
 }
 
