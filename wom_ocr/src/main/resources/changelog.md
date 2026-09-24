@@ -1,3 +1,14 @@
+Version: 2.7.5
+Date: 2026-09-24
+Fixed:
+  - Centralized OCR hallucination detection via shared `OcrTextFilter` to filter out non-text tokens (`[Non-Text]`) and degenerate model repetition loops (e.g. repeating digit sequences like `1.1.1.1.1...`).
+-------------------------------------------------------------------------------------------------
+Version: 2.7.4
+Date: 2026-09-19
+Added:
+  - Integrated centralized `retryWithBackoff` from common-inference with automatic HTTP 429 Rate Limit / Quota Exhaustion detection.
+  - Automatically waits at least 1 minute (or server-requested retryDelay) plus jitter when rate-limited before retrying.
+-------------------------------------------------------------------------------------------------
 Version: 2.7.3
 Date: 2026-09-10
 Changes:

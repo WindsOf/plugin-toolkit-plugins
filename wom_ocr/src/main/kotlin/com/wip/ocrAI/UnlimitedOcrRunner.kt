@@ -12,6 +12,7 @@ import com.wip.common.models.ChapterVisionResult
 import com.wip.common.models.ModelCatalog
 import com.wip.common.models.ModelManager
 import com.wip.common.models.OCRResult
+import com.wip.common.models.OcrTextFilter
 import com.wip.common.models.sortedNaturally
 import com.wip.ocrAI.models.OcrIASettings
 import kotlinx.coroutines.Dispatchers
@@ -158,51 +159,9 @@ class UnlimitedOcrRunner(
         val borderColor: String = ""
     )
 
-    fun isHallucinationOrEmpty(rawText: String?): Boolean {
-        if (rawText.isNullOrBlank()) return true
-        val clean = cleanExtractedText(rawText.trim())
-        if (clean.isBlank()) return true
-        if (!clean.any { it.isLetterOrDigit() }) return true
+    fun isHallucinationOrEmpty(rawText: String?): Boolean = OcrTextFilter.isHallucinationOrEmpty(rawText)
 
-        val lower = clean.lowercase().trim()
-        val directMatches = setOf(
-            "(no text)", "no text", "none", "n/a", "na", "empty", "nothing",
-            "no dialogue", "no speech", "no speech bubble", "no speech bubbles",
-            "no text detected", "no text found", "no visible text",
-            "(nessun testo)", "nessun testo", "nessun dialogo",
-            "1", "0", "null", "undefined"
-        )
-        if (lower in directMatches) return true
-
-        val hallucinationRegexes = listOf(
-            Regex("""(?i)^\s*\(?(?:no\s+text|nessun\s+testo|none|empty|nothing|no\s+dialogue|no\s+speech(?:\s+bubbles?)?)\)?\.?\s*$"""),
-            Regex("""(?i)\b(?:the\s+image\s+contains\s+no\s+text|image\s+contains\s+no\s+visible\s+text|there\s+is\s+no\s+text\s+in\s+this\s+image|no\s+text\s+(?:found|detected|visible)\s+in\s+the\s+image)\b"""),
-            Regex("""(?i)\b(?:the\s+ocr\s+result.*is\s+a\s+hallucination|does\s+not\s+correspond\s+to\s+any\s+content|absence\s+of\s+any\s+visible\s+text)\b"""),
-            Regex("""(?i)\b(?:correct\s+ocr\s+output\s+must\s+reflect\s+the\s+absence\s+of|cannot\s+find\s+any\s+text\s+to\s+transcribe|no\s+transcription\s+available)\b""")
-        )
-
-        for (regex in hallucinationRegexes) {
-            if (regex.containsMatchIn(lower)) {
-                return true
-            }
-        }
-
-        return false
-    }
-
-    fun cleanExtractedText(raw: String): String {
-        return raw
-            .replace(Regex("(?i)<\\|/?(?:ref|box|det|quad|grounding|image|text)[^>]*\\|>"), "")
-            .replace(
-                Regex("(?i)\\b(?:image|figure|table|header|footer|background|watermark)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]"),
-                ""
-            )
-            .replace(
-                Regex("(?i)^\\s*(?:text|balloon|speech|dialogue|caption|title|paragraph|line)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]\\s*"),
-                ""
-            )
-            .trim()
-    }
+    fun cleanExtractedText(raw: String): String = OcrTextFilter.cleanExtractedText(raw)
 
     fun parseOcrOutput(rawOutput: String, imgWidth: Double, imgHeight: Double): List<ExtractedTextRegion> {
         val regions = mutableListOf<ExtractedTextRegion>()
@@ -381,7 +340,7 @@ class UnlimitedOcrRunner(
         )
     }
 
-    private fun saveJsonResult(
+    private suspend fun saveJsonResult(
         save: Boolean,
         outputDir: String,
         file: File,
@@ -390,7 +349,7 @@ class UnlimitedOcrRunner(
     ) {
         if (!save) return
         val outDir = File(outputDir)
-        if (!outDir.exists()) outDir.mkdirs()
+        hostFs.createDirectory(outDir.absolutePath)
 
         val jsonObject = buildJsonObject {
             putJsonArray("balloons") {
@@ -416,7 +375,7 @@ class UnlimitedOcrRunner(
         }
 
         val jsonFile = File(outDir, "${file.nameWithoutExtension}.json")
-        jsonFile.writeText(jsonPretty.encodeToString(JsonObject.serializer(), jsonObject), Charsets.UTF_8)
+        hostFs.writeTextFile(jsonFile.absolutePath, jsonPretty.encodeToString(JsonObject.serializer(), jsonObject))
     }
 
     suspend fun performOcr(
@@ -554,11 +513,11 @@ class UnlimitedOcrRunner(
                     failedFiles.add(file.name)
                     if (save) {
                         val outDir = File(outputDir)
-                        if (!outDir.exists()) outDir.mkdirs()
+                        hostFs.createDirectory(outDir.absolutePath)
                         val errorFile = File(outDir, "${file.name}_ERROR.txt")
-                        errorFile.writeText(
-                            "Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}",
-                            Charsets.UTF_8
+                        hostFs.writeTextFile(
+                            errorFile.absolutePath,
+                            "Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}"
                         )
                     }
                 }
@@ -743,11 +702,11 @@ class UnlimitedOcrRunner(
                     failedFiles.add(file.name)
                     if (save) {
                         val outDir = File(outputDir)
-                        if (!outDir.exists()) outDir.mkdirs()
+                        hostFs.createDirectory(outDir.absolutePath)
                         val errorFile = File(outDir, "${file.name}_ERROR.txt")
-                        errorFile.writeText(
-                            "Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}",
-                            Charsets.UTF_8
+                        hostFs.writeTextFile(
+                            errorFile.absolutePath,
+                            "Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}"
                         )
                     }
                 }

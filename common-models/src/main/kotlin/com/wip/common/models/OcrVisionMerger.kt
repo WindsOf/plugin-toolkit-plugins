@@ -9,41 +9,7 @@ import kotlin.math.min
  */
 object OcrVisionMerger {
 
-    fun isHallucinationOrEmpty(rawText: String?): Boolean {
-        if (rawText.isNullOrBlank()) return true
-        val clean = rawText.trim()
-            .replace(Regex("(?i)<\\|/?(?:ref|box|det|quad|grounding|image|text)[^>]*\\|>"), "")
-            .replace(Regex("(?i)\\b(?:image|figure|table|header|footer|background|watermark)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]"), "")
-            .replace(Regex("(?i)^\\s*(?:text|balloon|speech|dialogue|caption|title|paragraph|line)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]\\s*"), "")
-            .trim()
-        if (clean.isBlank()) return true
-        if (!clean.any { it.isLetterOrDigit() }) return true
-
-        val lower = clean.lowercase()
-        val directMatches = setOf(
-            "(no text)", "no text", "none", "n/a", "na", "empty", "nothing",
-            "no dialogue", "no speech", "no speech bubble", "no speech bubbles",
-            "no text detected", "no text found", "no visible text",
-            "(nessun testo)", "nessun testo", "nessun dialogo",
-            "1", "0", "null", "undefined"
-        )
-        if (lower in directMatches) return true
-
-        val hallucinationRegexes = listOf(
-            Regex("""(?i)^\s*\(?(?:no\s+text|nessun\s+testo|none|empty|nothing|no\s+dialogue|no\s+speech(?:\s+bubbles?)?)\)?\.?\s*$"""),
-            Regex("""(?i)\b(?:the\s+image\s+contains\s+no\s+text|image\s+contains\s+no\s+visible\s+text|there\s+is\s+no\s+text\s+in\s+this\s+image|no\s+text\s+(?:found|detected|visible)\s+in\s+the\s+image)\b"""),
-            Regex("""(?i)\b(?:the\s+ocr\s+result.*is\s+a\s+hallucination|does\s+not\s+correspond\s+to\s+any\s+content|absence\s+of\s+any\s+visible\s+text)\b"""),
-            Regex("""(?i)\b(?:correct\s+ocr\s+output\s+must\s+reflect\s+the\s+absence\s+of|cannot\s+find\s+any\s+text\s+to\s+transcribe|no\s+transcription\s+available)\b""")
-        )
-
-        for (regex in hallucinationRegexes) {
-            if (regex.containsMatchIn(lower)) {
-                return true
-            }
-        }
-
-        return false
-    }
+    fun isHallucinationOrEmpty(rawText: String?): Boolean = OcrTextFilter.isHallucinationOrEmpty(rawText)
 
     private class DisjointSet(size: Int) {
         private val parent = IntArray(size) { it }

@@ -415,5 +415,51 @@ class OcrIATest {
         assertEquals(1, mergedAdvSingle.texts.size)
         assertEquals("Adv Line 1 Adv Line 2", mergedAdvSingle.texts[0])
     }
+
+    @Test
+    fun testMergeOcrWithVisionFiltersHallucinationsAndDegenerateLoops() = kotlinx.coroutines.runBlocking {
+        val plugin = OCR_IA(OcrIASettings(googleApiKey = "key123"))
+        val context = io.mockk.mockk<PluginContext>(relaxed = true)
+
+        val ocr = com.wip.common.models.OCRResult(
+            texts = listOf(
+                "[Non-Text]",
+                "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1",
+                "Actual speech text"
+            ),
+            bb = listOf(
+                listOf(0.0, 0.0, 0.2, 0.2),
+                listOf(0.2, 0.2, 0.4, 0.4),
+                listOf(0.1, 0.1, 0.3, 0.3)
+            ),
+            pageNumbers = listOf(1, 1, 1),
+            pageNames = listOf("p1.png", "p1.png", "p1.png"),
+            failedFiles = emptyList()
+        )
+
+        val singleVision = com.wip.common.models.VisionResult(
+            objects = listOf(
+                com.wip.common.models.SegmentedObject(
+                    label = "balloon",
+                    confidence = 0.9,
+                    box = com.wip.common.models.DetectionBox(
+                        label = "balloon",
+                        confidence = 0.9,
+                        ymin = 0.05,
+                        xmin = 0.05,
+                        ymax = 0.35,
+                        xmax = 0.35
+                    )
+                )
+            ),
+            imageWidth = 1000,
+            imageHeight = 1000,
+            pageName = "p1.png"
+        )
+
+        val merged = plugin.mergeSingleOcrWithVision(ocr, singleVision, context)
+        assertEquals(1, merged.texts.size)
+        assertEquals("Actual speech text", merged.texts[0])
+    }
 }
 

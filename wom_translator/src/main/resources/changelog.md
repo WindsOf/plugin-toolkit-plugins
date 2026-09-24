@@ -1,3 +1,27 @@
+Version: 1.6.0
+Date: 2026-09-24
+Added:
+  - Added DeepSeek support
+  - Added advanced toggle for thinking
+  - Added advanced selector for thinking effort
+  - Added advanced toggle for structured output (`useStructuredOutput`) overriding the global setting per capability/action
+  - Action to test if the api provider is reachable
+Fixed:
+  - Ensured OpenAI-compatible models (DeepSeek, LM Studio) include LLMCapability.OpenAIEndpoint.Completions to prevent chat completion parameter validation errors in Koog.
+  - Dynamically registered `LLMCapability.Schema.JSON.Basic` to model capabilities when structured output is active.
+  - Implemented immediate retry (0ms delay) when an attempt fails due to model formatting, chunk size mismatch, or JSON decoding errors rather than API/network issues.
+  - Implemented robust balanced JSON object extractor that strips preambles, fences, and trailing commentary (such as reasoning verification remarks) regardless of whether structured output is enabled.
+  - Pre-filtered OCR non-text tokens (`[Non-Text]`) and degenerate hallucination loops (`1.1.1.1.1...`) from translation requests while preserving exact 1:1 index-to-index mapping with empty string placeholders for downstream nodes.
+  - Instructed translating LLM via prompt guidelines on identifying OCR artifacts and degenerate repeating sequences, directing the model to shrink them to an empty string (`""`) to prevent generation failure and output bloat while preserving the exact 1:1 element count.
+Planned:
+  - Advanced toggle for server grounding
+-------------------------------------------------------------------------------------------------
+Version: 1.5.0
+Date: 2026-09-19
+Added:
+  - Integrated centralized `retryWithBackoff` from common-inference with automatic HTTP 429 Rate Limit / Quota Exhaustion detection.
+  - Automatically waits at least 1 minute (or server-requested retryDelay) plus jitter when rate-limited before retrying, preventing rolling token quota crashes.
+-------------------------------------------------------------------------------------------------
 Version: 1.4.3
 Date: 2026-09-10
 Changes:

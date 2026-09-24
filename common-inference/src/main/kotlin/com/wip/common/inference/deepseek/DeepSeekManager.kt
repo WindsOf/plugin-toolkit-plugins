@@ -1,4 +1,4 @@
-package com.wip.common.inference.lmstudio
+package com.wip.common.inference.deepseek
 
 import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.prompt.dsl.Prompt
@@ -6,6 +6,7 @@ import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
 import ai.koog.prompt.executor.clients.openai.OpenAILLMClient
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.llm.LLMCapability
+import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.streaming.StreamFrame
@@ -20,7 +21,6 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
-import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -31,26 +31,29 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.wip.plugintoolkit.api.PluginLogger
 
 /**
- * Status snapshot of an LM Studio server instance.
+ * Status snapshot of a DeepSeek API connection check.
  */
-data class LmStudioStatus(
+data class DeepSeekStatus(
     val connected: Boolean,
     val baseUrl: String,
     val models: List<String> = emptyList(),
-    val activeModel: String? = null,
     val errorMessage: String? = null
 )
 
 /**
- * Centralized manager and utility client for LM Studio integrations across plugins.
+ * Centralized manager and utility client for DeepSeek integrations across plugins.
  */
-class LmStudioManager(
+class DeepSeekManager(
     private val httpClient: HttpClient = createDefaultHttpClient()
 ) {
     companion object {
+        const val DEFAULT_BASE_URL: String = "https://api.deepseek.com"
+        const val MODEL_FLASH: String = "deepseek-flash"
+        const val MODEL_PRO: String = "deepseek-v4-pro"
+
         private val jsonParser = Json { ignoreUnknownKeys = true }
 
-        val Default = LmStudioManager()
+        val Default = DeepSeekManager()
 
         fun createDefaultHttpClient(): HttpClient {
             return HttpClient(CIO) {
@@ -58,43 +61,29 @@ class LmStudioManager(
                     json(jsonParser)
                 }
                 install(HttpTimeout) {
-                    requestTimeoutMillis = 15_000L
-                    connectTimeoutMillis = 10_000L
-                    socketTimeoutMillis = 15_000L
+                    requestTimeoutMillis = 30_000L
+                    connectTimeoutMillis = 15_000L
+                    socketTimeoutMillis = 30_000L
                 }
             }
-        }
-
-        /**
-         * Standard paths where LM Studio models are stored across operating systems.
-         */
-        fun getStandardModelDirectories(): List<File> {
-            val userHome = System.getProperty("user.home", ".")
-            val localAppData = System.getenv("LOCALAPPDATA") ?: "$userHome/AppData/Local"
-            return listOf(
-                File(userHome, ".cache/lm-studio/models"),
-                File(userHome, ".lmstudio/models"),
-                File(userHome, ".lmstudio/models/sahilchachra/Unlimited-OCR-GGUF"),
-                File(localAppData, "lm-studio/models")
-            )
         }
     }
 
     /**
-     * Probes the LM Studio endpoint to determine connectivity and enumerate currently loaded models.
+     * Probes the DeepSeek endpoint to determine connectivity and enumerate available models.
      */
     suspend fun checkStatus(
-        baseUrl: String = "http://localhost:1234/v1",
-        apiKey: String? = null,
+        baseUrl: String = DEFAULT_BASE_URL,
+        apiKey: String,
         logger: PluginLogger? = null
-    ): LmStudioStatus = withContext(Dispatchers.IO) {
+    ): DeepSeekStatus = withContext(Dispatchers.IO) {
         val cleanUrl = baseUrl.trim().trimEnd('/')
         val modelsUrl = if (cleanUrl.endsWith("/v1")) "$cleanUrl/models" else "$cleanUrl/v1/models"
 
         try {
-            logger?.info("[LmStudioManager] Checking LM Studio status at: $modelsUrl")
+            logger?.info("[DeepSeekManager] Checking DeepSeek status at: $modelsUrl")
             val response: HttpResponse = httpClient.get(modelsUrl) {
-                if (!apiKey.isNullOrBlank()) {
+                if (apiKey.isNotBlank()) {
                     header(HttpHeaders.Authorization, "Bearer $apiKey")
                 }
             }
@@ -106,28 +95,25 @@ class LmStudioManager(
                 val modelIds = dataArray.mapNotNull { item ->
                     item.jsonObject["id"]?.jsonPrimitive?.content
                 }
-                val active = modelIds.firstOrNull()
-
-                logger?.info("[LmStudioManager] LM Studio connected successfully! Models found: $modelIds")
-                LmStudioStatus(
+                logger?.info("[DeepSeekManager] DeepSeek connected successfully! Models found: $modelIds")
+                DeepSeekStatus(
                     connected = true,
                     baseUrl = cleanUrl,
-                    models = modelIds,
-                    activeModel = active
+                    models = modelIds
                 )
             } else {
                 val err = "HTTP ${response.status.value}: ${response.status.description}"
-                logger?.warn("[LmStudioManager] LM Studio returned non-OK status: $err")
-                LmStudioStatus(
+                logger?.warn("[DeepSeekManager] DeepSeek returned non-OK status: $err")
+                DeepSeekStatus(
                     connected = false,
                     baseUrl = cleanUrl,
                     errorMessage = err
                 )
             }
         } catch (e: Exception) {
-            val msg = e.message ?: "Failed to reach LM Studio"
-            logger?.warn("[LmStudioManager] Connection check failed for $cleanUrl: $msg")
-            LmStudioStatus(
+            val msg = e.message ?: "Failed to reach DeepSeek API"
+            logger?.warn("[DeepSeekManager] Connection check failed for $cleanUrl: $msg")
+            DeepSeekStatus(
                 connected = false,
                 baseUrl = cleanUrl,
                 errorMessage = msg
@@ -136,44 +122,15 @@ class LmStudioManager(
     }
 
     /**
-     * Resolves the effective model name to query in LM Studio.
-     * If [configuredModel] is blank or generic ("default-model", "auto"), attempts to query LM Studio
-     * for the actively loaded model.
-     */
-    suspend fun resolveModelName(
-        baseUrl: String = "http://localhost:1234/v1",
-        configuredModel: String?,
-        apiKey: String? = null,
-        logger: PluginLogger? = null
-    ): String {
-        val configured = configuredModel?.trim()
-        val isGeneric = configured.isNullOrBlank() ||
-            configured.equals("default-model", ignoreCase = true) ||
-            configured.equals("auto", ignoreCase = true)
-
-        if (!isGeneric) {
-            return configured!!
-        }
-
-        val status = checkStatus(baseUrl = baseUrl, apiKey = apiKey, logger = logger)
-        if (status.connected && !status.activeModel.isNullOrBlank()) {
-            logger?.info("[LmStudioManager] Auto-selected active LM Studio model: ${status.activeModel}")
-            return status.activeModel
-        }
-
-        return configured?.ifBlank { "default-model" } ?: "default-model"
-    }
-
-    /**
-     * Creates a Koog-compatible OpenAILLMClient tailored for LM Studio with required capability overrides.
+     * Creates a Koog-compatible OpenAILLMClient tailored for DeepSeek with required capabilities.
      */
     fun createKoogClient(
-        baseUrl: String,
         apiKey: String,
-        baseHttpClient: HttpClient
+        baseUrl: String = DEFAULT_BASE_URL,
+        baseHttpClient: HttpClient = createDefaultHttpClient()
     ): OpenAILLMClient {
         val cleanUrl = baseUrl.trim().trimEnd('/')
-        val key = apiKey.ifBlank { "lm-studio" }
+        val key = apiKey.trim()
 
         return object : OpenAILLMClient(
             apiKey = key,
@@ -200,11 +157,11 @@ class LmStudioManager(
                     }
                 }
                 return LLModel(
-                    provider = model.provider,
+                    provider = LLMProvider.OpenAI,
                     id = model.id,
                     capabilities = mergedCaps,
-                    contextLength = model.contextLength ?: 128000,
-                    maxOutputTokens = model.maxOutputTokens ?: 16384
+                    contextLength = model.contextLength ?: 1_000_000,
+                    maxOutputTokens = model.maxOutputTokens ?: 384_000
                 )
             }
 
@@ -233,48 +190,5 @@ class LmStudioManager(
                 return super.executeStreaming(prompt, injectCapabilities(model), tools)
             }
         }
-    }
-
-    /**
-     * Searches standard and common LM Studio folders for a matching GGUF model file.
-     */
-    fun findLmStudioModelFile(modelId: String): File? {
-        val candidates = mutableListOf<File>()
-        val targetName = modelId.trim()
-
-        for (dir in getStandardModelDirectories()) {
-            if (dir.exists() && dir.isDirectory) {
-                dir.walkTopDown().maxDepth(5).filter { it.isFile && it.extension.equals("gguf", ignoreCase = true) }.forEach {
-                    candidates.add(it)
-                }
-            }
-        }
-
-        return candidates.firstOrNull { file ->
-            val nameWithoutExt = file.nameWithoutExtension
-            file.name.equals("$targetName.gguf", ignoreCase = true) ||
-                nameWithoutExt.equals(targetName, ignoreCase = true) ||
-                (targetName.contains("bf16", ignoreCase = true) && nameWithoutExt.contains("bf16", ignoreCase = true)) ||
-                (targetName.contains("q8_0", ignoreCase = true) && nameWithoutExt.contains("q8_0", ignoreCase = true)) ||
-                (targetName.contains("q4_k_m", ignoreCase = true) && nameWithoutExt.contains("q4_k_m", ignoreCase = true)) ||
-                (targetName.contains("iq2_m", ignoreCase = true) && nameWithoutExt.contains("iq2_m", ignoreCase = true))
-        }
-    }
-
-    /**
-     * Searches standard LM Studio directories for a multimodal projector (.gguf) file.
-     */
-    fun findLmStudioMmprojFile(): File? {
-        for (dir in getStandardModelDirectories()) {
-            if (dir.exists() && dir.isDirectory) {
-                val direct = File(dir, "mmproj-Unlimited-OCR-F16.gguf")
-                if (direct.exists()) return direct
-                val found = dir.walkTopDown().maxDepth(5).firstOrNull {
-                    it.isFile && it.name.startsWith("mmproj", ignoreCase = true) && it.extension.equals("gguf", ignoreCase = true)
-                }
-                if (found != null) return found
-            }
-        }
-        return null
     }
 }

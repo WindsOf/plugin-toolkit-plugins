@@ -10,6 +10,7 @@ import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.params.LLMParams
 import com.wip.common.inference.lmstudio.LmStudioManager
+import com.wip.common.inference.retry.retryWithBackoff as commonRetryWithBackoff
 import com.wip.common.models.AdvancedBalloonsResponse
 import com.wip.common.models.AdvancedOcrServiceResult
 import com.wip.common.models.BalloonsResponse
@@ -53,27 +54,12 @@ class KoogOcrService(
     private val progressReporter = context.progress
     private var isCancelled = false
 
-    private suspend fun <T> retryWithBackoff(block: suspend () -> T): T {
-        val delaysMs = listOf(10000L, 10000L, 10000L, 10000L, 10000L, 10000L, 10000L) // Max 7 retries
-        val maxAttempts = delaysMs.size + 1
-        var lastException: Throwable? = null
-
-        for (attempt in 1..maxAttempts) {
-            try {
-                return block()
-            } catch (e: Throwable) {
-                lastException = e
-                if (attempt < maxAttempts) {
-                    val currentDelay = delaysMs[attempt - 1]
-                    logger.warn("Attempt $attempt failed: ${e::class.simpleName}: ${e.message}. Retrying in ${currentDelay}ms...")
-                    delay(currentDelay)
-                } else {
-                    logger.error("Attempt $attempt failed: ${e::class.simpleName}: ${e.message}. Max retries reached.")
-                }
-            }
-        }
-        throw lastException ?: RuntimeException("Failed after $maxAttempts attempts")
-    }
+    private suspend fun <T> retryWithBackoff(block: suspend () -> T): T = commonRetryWithBackoff(
+        logger = logger,
+        delaysMs = listOf(10000L, 10000L, 10000L, 10000L, 10000L, 10000L, 10000L),
+        isCancelled = { isCancelled },
+        block = block
+    )
 
     init {
         context.signals.onSignal { signal ->
@@ -932,12 +918,12 @@ class KoogOcrService(
         return text.trim()
     }
 
-    private fun saveResult(save: Boolean, outputDir: String, file: File, rawResponse: String) {
+    private suspend fun saveResult(save: Boolean, outputDir: String, file: File, rawResponse: String) {
         if (!save) return
         val outDir = File(outputDir)
-        if (!outDir.exists()) outDir.mkdirs()
+        hostFs.createDirectory(outDir.absolutePath)
         val outFile = File(outDir, "${file.nameWithoutExtension}_OCR.json")
-        outFile.writeText(rawResponse, Charsets.UTF_8)
+        hostFs.writeTextFile(outFile.absolutePath, rawResponse)
         logger.info("Saved OCR JSON result to: ${outFile.absolutePath}")
     }
 
@@ -958,11 +944,11 @@ class KoogOcrService(
         }
         if (save) {
             val outDir = File(outputDir)
-            if (!outDir.exists()) outDir.mkdirs()
+            hostFs.createDirectory(outDir.absolutePath)
             val errorFile = File(outDir, "${file.name}_ERROR.txt")
-            errorFile.writeText(
-                "Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}",
-                Charsets.UTF_8
+            hostFs.writeTextFile(
+                errorFile.absolutePath,
+                "Error processing '${file.name}':\n${e::class.simpleName}: ${e.message}\n\n${e.stackTraceToString()}"
             )
             logger.info("Saved error details to: ${errorFile.absolutePath}")
         }
