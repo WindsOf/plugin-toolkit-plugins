@@ -188,6 +188,8 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
 
     @PluginUpdate
     suspend fun update(context: PluginContext): Result<Unit> {
+        context.logger.info("[Vision] update: Organizing models directory...")
+        ModelManager.Default.organizeModelsDirectory(context.fileSystem, context.logger)
         context.logger.info("[Vision] update: Vision Plugin update complete.")
         return Result.success(Unit)
     }

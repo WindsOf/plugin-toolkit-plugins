@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonElement
 import org.wip.plugintoolkit.api.PluginFileSystem
 import org.wip.plugintoolkit.api.PluginStorage
 import org.wip.plugintoolkit.api.RelativePath
+import org.wip.plugintoolkit.api.toRelativePath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -185,5 +186,89 @@ class ModelManagerTest {
         val result = manager.downloadModel(ModelCatalog.YOLO_DET_X_ID, context)
         assertTrue(result.isSuccess)
         assertEquals("yolo-det-x-best-v3", result.getOrNull()?.name)
+    }
+
+    @Test
+    fun testResolveTargetFolderForFile() {
+        assertEquals("Qwen3-VL-4B-Instruct-GGUF", ModelManager.resolveTargetFolderForFile("Qwen3-VL-4B-Instruct-Q4_K_M.gguf"))
+        assertEquals("Qwen3-VL-4B-Instruct-GGUF", ModelManager.resolveTargetFolderForFile("mmproj-Qwen3-VL-4B-Instruct-F16.gguf"))
+        assertEquals("Qwen3-VL-4B-Instruct-GGUF", ModelManager.resolveTargetFolderForFile("Qwen3-VL-4B-Instruct-Q4_K_M.yaml"))
+        assertEquals("Qwen3-VL-8B-Instruct-GGUF", ModelManager.resolveTargetFolderForFile("Qwen3-VL-8B-Instruct-Q8_0.gguf"))
+        assertEquals("Unlimited-OCR", ModelManager.resolveTargetFolderForFile("Unlimited-OCR-Q4_K_M.gguf"))
+        assertEquals("Unlimited-OCR", ModelManager.resolveTargetFolderForFile("mmproj-Unlimited-OCR-F16.gguf"))
+        assertEquals("big-lama", ModelManager.resolveTargetFolderForFile("big-lama.onnx"))
+        assertEquals("big-lama", ModelManager.resolveTargetFolderForFile("big-lama.yaml"))
+        assertEquals("yolo-det-x-best-v3", ModelManager.resolveTargetFolderForFile("yolo-det-x-best-v3.onnx"))
+        assertEquals("rfdetr-seg-2xlarge-ema-v3", ModelManager.resolveTargetFolderForFile("rfdetr-seg-2xlarge-ema-v3.onnx"))
+        assertEquals("Places_512_FullData_G", ModelManager.resolveTargetFolderForFile("Places_512_FullData_G.onnx"))
+        assertEquals("zits", ModelManager.resolveTargetFolderForFile("zits.yaml"))
+        assertEquals("zitspp", ModelManager.resolveTargetFolderForFile("tsr.onnx"))
+    }
+
+    @Test
+    fun testOrganizeModelsDirectoryMovesLooseFilesToSubfolders() = runBlocking {
+        val fs = FakePluginFileSystem()
+        val manager = ModelManager.Default
+
+        val qwenGgufRel = "models/Qwen3-VL-4B-Instruct-Q4_K_M.gguf".toRelativePath().getOrThrow()
+        val qwenMmprojRel = "models/mmproj-Qwen3-VL-4B-Instruct-F16.gguf".toRelativePath().getOrThrow()
+        val lamaRel = "models/big-lama.onnx".toRelativePath().getOrThrow()
+
+        fs.writeFile(qwenGgufRel, byteArrayOf(1, 2, 3))
+        fs.writeFile(qwenMmprojRel, byteArrayOf(4, 5, 6))
+        fs.writeFile(lamaRel, byteArrayOf(7, 8, 9))
+
+        val organizeResult = manager.organizeModelsDirectory(fs)
+        assertTrue(organizeResult.isSuccess)
+        assertEquals(3, organizeResult.getOrNull())
+
+        // Source loose files should no longer exist
+        assertFalse(fs.exists(qwenGgufRel))
+        assertFalse(fs.exists(qwenMmprojRel))
+        assertFalse(fs.exists(lamaRel))
+
+        // Target organized files should exist
+        val targetQwenGguf = "models/Qwen3-VL-4B-Instruct-GGUF/Qwen3-VL-4B-Instruct-Q4_K_M.gguf".toRelativePath().getOrThrow()
+        val targetQwenMmproj = "models/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3-VL-4B-Instruct-F16.gguf".toRelativePath().getOrThrow()
+        val targetLama = "models/big-lama/big-lama.onnx".toRelativePath().getOrThrow()
+
+        assertTrue(fs.exists(targetQwenGguf))
+        assertTrue(fs.exists(targetQwenMmproj))
+        assertTrue(fs.exists(targetLama))
+    }
+
+    @Test
+    fun testOrganizeModelsDirectoryRemovesDuplicateLooseFiles() = runBlocking {
+        val fs = FakePluginFileSystem()
+        val manager = ModelManager.Default
+
+        val looseLama = "models/big-lama.onnx".toRelativePath().getOrThrow()
+        val targetLama = "models/big-lama/big-lama.onnx".toRelativePath().getOrThrow()
+
+        fs.writeFile(looseLama, byteArrayOf(1, 2, 3))
+        fs.writeFile(targetLama, byteArrayOf(1, 2, 3))
+
+        val organizeResult = manager.organizeModelsDirectory(fs)
+        assertTrue(organizeResult.isSuccess)
+        assertEquals(1, organizeResult.getOrNull())
+
+        assertFalse(fs.exists(looseLama))
+        assertTrue(fs.exists(targetLama))
+    }
+
+    @Test
+    fun testFindModelFileRelativePathInSubfolder() = runBlocking {
+        val fs = FakePluginFileSystem()
+
+        val subfolderPath = "models/Qwen3-VL-4B-Instruct-GGUF/Qwen3-VL-4B-Instruct-Q4_K_M.gguf".toRelativePath().getOrThrow()
+        fs.writeFile(subfolderPath, byteArrayOf(10, 20))
+
+        val found = ModelManager.findModelFileRelativePath(
+            ModelCatalog.QWEN3_VL_4B_Q4_K_M_ID,
+            "Qwen3-VL-4B-Instruct-Q4_K_M.gguf",
+            fs
+        )
+        assertNotNull(found)
+        assertEquals(subfolderPath, found)
     }
 }

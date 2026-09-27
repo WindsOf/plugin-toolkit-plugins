@@ -1,3 +1,8 @@
+Version: 1.3.1
+Date: 2026-09-27
+Added:
+  - Automated models folder organization in @PluginUpdate hook to move loose model files into dedicated subfolders.
+-------------------------------------------------------------------------------------------------
 Version: 1.3.0
 Date: 2026-09-11
 Added:

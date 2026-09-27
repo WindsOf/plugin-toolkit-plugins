@@ -213,6 +213,8 @@ class CleanerPlugin {
 
     @PluginUpdate
     suspend fun update(context: PluginContext): Result<Unit> {
+        context.logger.info("[Cleaner] update: Organizing models directory...")
+        ModelManager.Default.organizeModelsDirectory(context.fileSystem, context.logger)
         context.logger.info("[Cleaner] update: Cleaner Plugin update hook complete.")
         return Result.success(Unit)
     }

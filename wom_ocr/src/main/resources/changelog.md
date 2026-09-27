@@ -1,3 +1,10 @@
+Version: 2.8.1
+Date: 2026-09-27
+Added:
+  - Automated models folder organization in @PluginUpdate hook to move loose model files into dedicated subfolders.
+Fixed:
+  - Enforced strict fallback to 'speech' category for OCR models and outputs that do not specify an explicit 'sfx' category.
+-------------------------------------------------------------------------------------------------
 Version: 2.8.0
 Date: 2026-09-27
 Added:

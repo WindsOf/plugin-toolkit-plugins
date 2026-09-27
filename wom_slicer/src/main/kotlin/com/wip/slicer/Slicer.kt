@@ -137,6 +137,8 @@ class Slicer {
 
     @PluginUpdate
     suspend fun update(context: PluginContext): Result<Unit> {
+        context.logger.info("[Slicer] update: Organizing models directory...")
+        ModelManager.Default.organizeModelsDirectory(context.fileSystem, context.logger)
         context.logger.info("[Slicer] update: Slicer update complete.")
         return Result.success(Unit)
     }

@@ -438,84 +438,84 @@ object ModelCatalog {
     val QWEN3_VL_4B = ModelCatalogEntry(
         id = QWEN3_VL_4B_ID,
         displayName = "Qwen3-VL 4B Instruct",
-        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-Q4_K_M.yaml",
-        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-Q4_K_M.gguf",
+        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-GGUF/Qwen3-VL-4B-Instruct-Q4_K_M.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-GGUF/Qwen3-VL-4B-Instruct-Q4_K_M.gguf",
         lockKey = "model:$QWEN3_VL_4B_ID",
         description = "Qwen3-VL 4B Instruct multimodal vision-language model with mmproj projector",
         type = ModelType.OCR,
         format = "gguf",
         extraFileUrls = mapOf(
-            "mmproj-Qwen3-VL-4B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Qwen3-VL-4B-Instruct-F16.gguf"
+            "mmproj-Qwen3-VL-4B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3-VL-4B-Instruct-F16.gguf"
         )
     )
 
     val QWEN3_VL_4B_Q4_K_M = ModelCatalogEntry(
         id = QWEN3_VL_4B_Q4_K_M_ID,
         displayName = "Qwen3-VL 4B Instruct (Q4_K_M)",
-        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-Q4_K_M.yaml",
-        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-Q4_K_M.gguf",
+        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-GGUF/Qwen3-VL-4B-Instruct-Q4_K_M.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-GGUF/Qwen3-VL-4B-Instruct-Q4_K_M.gguf",
         lockKey = "model:$QWEN3_VL_4B_Q4_K_M_ID",
         description = "Qwen3-VL 4B Instruct 4-bit quantized GGUF vision-language model with mmproj multimodal projector",
         type = ModelType.OCR,
         format = "gguf",
         extraFileUrls = mapOf(
-            "mmproj-Qwen3-VL-4B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Qwen3-VL-4B-Instruct-F16.gguf"
+            "mmproj-Qwen3-VL-4B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3-VL-4B-Instruct-F16.gguf"
         )
     )
 
     val QWEN3_VL_4B_Q8_0 = ModelCatalogEntry(
         id = QWEN3_VL_4B_Q8_0_ID,
         displayName = "Qwen3-VL 4B Instruct (Q8_0)",
-        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-Q8_0.yaml",
-        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-Q8_0.gguf",
+        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-GGUF/Qwen3-VL-4B-Instruct-Q8_0.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-GGUF/Qwen3-VL-4B-Instruct-Q8_0.gguf",
         lockKey = "model:$QWEN3_VL_4B_Q8_0_ID",
         description = "Qwen3-VL 4B Instruct 8-bit quantized GGUF vision-language model with mmproj multimodal projector",
         type = ModelType.OCR,
         format = "gguf",
         extraFileUrls = mapOf(
-            "mmproj-Qwen3-VL-4B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Qwen3-VL-4B-Instruct-F16.gguf"
+            "mmproj-Qwen3-VL-4B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3-VL-4B-Instruct-F16.gguf"
         )
     )
 
     val QWEN3_VL_8B = ModelCatalogEntry(
         id = QWEN3_VL_8B_ID,
         displayName = "Qwen3-VL 8B Instruct",
-        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-Q4_K_M.yaml",
-        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-Q4_K_M.gguf",
+        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-GGUF/Qwen3-VL-8B-Instruct-Q4_K_M.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-GGUF/Qwen3-VL-8B-Instruct-Q4_K_M.gguf",
         lockKey = "model:$QWEN3_VL_8B_ID",
         description = "Qwen3-VL 8B Instruct multimodal vision-language model with mmproj projector",
         type = ModelType.OCR,
         format = "gguf",
         extraFileUrls = mapOf(
-            "mmproj-Qwen3-VL-8B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Qwen3-VL-8B-Instruct-F16.gguf"
+            "mmproj-Qwen3-VL-8B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-GGUF/mmproj-Qwen3-VL-8B-Instruct-F16.gguf"
         )
     )
 
     val QWEN3_VL_8B_Q4_K_M = ModelCatalogEntry(
         id = QWEN3_VL_8B_Q4_K_M_ID,
         displayName = "Qwen3-VL 8B Instruct (Q4_K_M)",
-        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-Q4_K_M.yaml",
-        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-Q4_K_M.gguf",
+        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-GGUF/Qwen3-VL-8B-Instruct-Q4_K_M.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-GGUF/Qwen3-VL-8B-Instruct-Q4_K_M.gguf",
         lockKey = "model:$QWEN3_VL_8B_Q4_K_M_ID",
         description = "Qwen3-VL 8B Instruct 4-bit quantized GGUF vision-language model with mmproj multimodal projector",
         type = ModelType.OCR,
         format = "gguf",
         extraFileUrls = mapOf(
-            "mmproj-Qwen3-VL-8B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Qwen3-VL-8B-Instruct-F16.gguf"
+            "mmproj-Qwen3-VL-8B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-GGUF/mmproj-Qwen3-VL-8B-Instruct-F16.gguf"
         )
     )
 
     val QWEN3_VL_8B_Q8_0 = ModelCatalogEntry(
         id = QWEN3_VL_8B_Q8_0_ID,
         displayName = "Qwen3-VL 8B Instruct (Q8_0)",
-        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-Q8_0.yaml",
-        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-Q8_0.gguf",
+        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-GGUF/Qwen3-VL-8B-Instruct-Q8_0.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-GGUF/Qwen3-VL-8B-Instruct-Q8_0.gguf",
         lockKey = "model:$QWEN3_VL_8B_Q8_0_ID",
         description = "Qwen3-VL 8B Instruct 8-bit quantized GGUF vision-language model with mmproj multimodal projector",
         type = ModelType.OCR,
         format = "gguf",
         extraFileUrls = mapOf(
-            "mmproj-Qwen3-VL-8B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Qwen3-VL-8B-Instruct-F16.gguf"
+            "mmproj-Qwen3-VL-8B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-GGUF/mmproj-Qwen3-VL-8B-Instruct-F16.gguf"
         )
     )
 

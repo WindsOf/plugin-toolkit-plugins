@@ -134,13 +134,12 @@ Now process the image. Output only valid instances, one per line:"""
         }
 
         val installedId = candidateGgufIds.firstOrNull {
-            ModelManager.Default.isModelInstalled(it, context.fileSystem, logger) ||
-                    ModelManager.Default.findLmStudioModelFile(it)?.exists() == true
+            ModelManager.Default.isModelInstalled(it, context.fileSystem, logger)
         }
 
         if (installedId == null) {
             val modelFamilyName = if (isQwen) "Qwen3-VL" else "Unlimited-OCR"
-            logger.warn("$modelFamilyName model is not installed in plugin storage or LM Studio. Please download it via the 'Download Model' action.")
+            logger.warn("$modelFamilyName model is not installed in plugin storage. Please download it via the 'Download Model' action.")
             return null
         }
 
@@ -151,7 +150,6 @@ Now process the image. Output only valid instances, one per line:"""
         }
 
         val mmprojPath = ModelManager.Default.getMmprojAbsolutePath(installedId, context.fileSystem)
-            ?: ModelManager.Default.findLmStudioMmprojFile(installedId, File(modelPath))?.absolutePath
         if (mmprojPath != null) {
             logger.info("Found multimodal projector (mmproj) for $installedId: $mmprojPath")
         } else {
@@ -239,12 +237,13 @@ Now process the image. Output only valid instances, one per line:"""
 
         // 2. Format: {speech/sfx} [top_left_x, top_left_y, bottom_right_x, bottom_right_y] text
         val qwenPattern = Pattern.compile(
-            "\\{\\s*(speech|sfx)\\s*\\}\\s*\\[?\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*\\]?\\s*([\\s\\S]*?)(?=(?:\\s*\\{\\s*(?:speech|sfx)\\s*\\}\\s*[\\[\\d]|<\\||$))",
+            "\\{\\s*([^}]+)\\s*\\}\\s*\\[?\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*\\]?\\s*([\\s\\S]*?)(?=(?:\\s*\\{[^}]+\\}\\s*[\\[\\d]|<\\||$))",
             Pattern.CASE_INSENSITIVE
         )
         val qwenMatcher = qwenPattern.matcher(rawOutput)
         while (qwenMatcher.find()) {
-            val category = qwenMatcher.group(1).lowercase().trim()
+            val rawCategory = qwenMatcher.group(1).lowercase().trim()
+            val category = if (rawCategory == "sfx") "sfx" else "speech"
             val xmin = qwenMatcher.group(2).toDoubleOrNull() ?: 0.0
             val ymin = qwenMatcher.group(3).toDoubleOrNull() ?: 0.0
             val xmax = qwenMatcher.group(4).toDoubleOrNull() ?: 0.0
@@ -453,7 +452,7 @@ Now process the image. Output only valid instances, one per line:"""
                         put("text_color", r.textColor)
                         put("has_border", r.hasBorder)
                         put("border_color", r.borderColor)
-                        put("category", r.category)
+                        put("category", if (r.category.equals("sfx", ignoreCase = true)) "sfx" else "speech")
                     })
                 }
             }

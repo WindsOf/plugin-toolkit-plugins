@@ -543,6 +543,8 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
 
     @PluginUpdate
     suspend fun update(context: PluginContext): Result<Unit> {
+        context.logger.info("[OCR_IA] update: Organizing models directory...")
+        ModelManager.Default.organizeModelsDirectory(context.fileSystem, context.logger)
         context.logger.info("[OCR_IA] update: OCR IA update hook complete.")
         return Result.success(Unit)
     }

@@ -169,8 +169,10 @@ class ModelManifestTest {
 
         val qwen4bQ4 = ModelCatalog.findById("Qwen3-VL-4B-Instruct-Q4_K_M")
         assertNotNull(qwen4bQ4)
-        assertEquals("https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-Q4_K_M.gguf", qwen4bQ4.onnxUrl)
+        assertEquals("https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-GGUF/Qwen3-VL-4B-Instruct-Q4_K_M.gguf", qwen4bQ4.onnxUrl)
+        assertEquals("https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-GGUF/Qwen3-VL-4B-Instruct-Q4_K_M.yaml", qwen4bQ4.yamlUrl)
         assertTrue(qwen4bQ4.extraFileUrls.containsKey("mmproj-Qwen3-VL-4B-Instruct-F16.gguf"))
+        assertEquals("https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3-VL-4B-Instruct-F16.gguf", qwen4bQ4.extraFileUrls["mmproj-Qwen3-VL-4B-Instruct-F16.gguf"])
 
         val qwen4bQ8 = ModelCatalog.findById("qwen-4b-q8_0")
         assertNotNull(qwen4bQ8)
@@ -182,8 +184,10 @@ class ModelManifestTest {
 
         val qwen8bQ4 = ModelCatalog.findById("Qwen3-VL-8B-Instruct-Q4_K_M")
         assertNotNull(qwen8bQ4)
-        assertEquals("https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-Q4_K_M.gguf", qwen8bQ4.onnxUrl)
+        assertEquals("https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-GGUF/Qwen3-VL-8B-Instruct-Q4_K_M.gguf", qwen8bQ4.onnxUrl)
+        assertEquals("https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-GGUF/Qwen3-VL-8B-Instruct-Q4_K_M.yaml", qwen8bQ4.yamlUrl)
         assertTrue(qwen8bQ4.extraFileUrls.containsKey("mmproj-Qwen3-VL-8B-Instruct-F16.gguf"))
+        assertEquals("https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-GGUF/mmproj-Qwen3-VL-8B-Instruct-F16.gguf", qwen8bQ4.extraFileUrls["mmproj-Qwen3-VL-8B-Instruct-F16.gguf"])
 
         val qwen8bQ8 = ModelCatalog.findById("qwen3-vl-8b-instruct-q8_0")
         assertNotNull(qwen8bQ8)

@@ -2,6 +2,8 @@ package com.wip.common.models
 
 import com.wip.common.inference.lmstudio.LmStudioManager
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
@@ -11,6 +13,7 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.client.statement.readRawBytes
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -63,6 +66,156 @@ class ModelManager(
         fun getModelFileRelativePath(fileName: String): RelativePath {
             return "$MODELS_DIR/$fileName".toRelativePath().getOrThrow()
         }
+        fun getModelDirectoryName(catalogEntry: ModelCatalogEntry): String {
+            val remoteFolder = catalogEntry.yamlUrl.substringAfter("/models/").substringBeforeLast('/', "").takeIf { it.isNotEmpty() }
+            if (remoteFolder != null) return remoteFolder
+            if (catalogEntry.id.startsWith("Unlimited-OCR", ignoreCase = true)) return "Unlimited-OCR"
+            return catalogEntry.id
+        }
+
+        private fun pathExists(fileSystem: PluginFileSystem, relPath: RelativePath): Boolean {
+            val basePath = fileSystem.getBasePath().trimEnd('/', '\\')
+            if (basePath.isNotBlank()) {
+                val f = File(basePath, relPath.value)
+                if (f.exists() && f.length() > 0) return true
+            }
+            return try {
+                runBlocking { fileSystem.exists(relPath) }
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        private fun listModelsFiles(fileSystem: PluginFileSystem, relPath: RelativePath): List<String> {
+            return try {
+                runBlocking { fileSystem.listFiles(relPath) }
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+
+        fun findModelFileRelativePath(modelId: String, fileName: String, fileSystem: PluginFileSystem): RelativePath? {
+            val simpleName = fileName.substringAfterLast('/')
+            val catalogEntry = ModelCatalog.findById(modelId)
+            val exactName = catalogEntry?.id ?: modelId.trim()
+            val clean = exactName.lowercase()
+            val remoteFolder = catalogEntry?.yamlUrl?.substringAfter("/models/")?.substringBeforeLast('/', "")?.takeIf { it.isNotEmpty() }
+
+            val candidateFolders = listOfNotNull(
+                remoteFolder,
+                remoteFolder?.lowercase(),
+                if (exactName.startsWith("Unlimited-OCR", ignoreCase = true)) "Unlimited-OCR" else null,
+                exactName,
+                clean
+            ).distinct()
+
+            for (folder in candidateFolders) {
+                val path = "$MODELS_DIR/$folder/$simpleName".toRelativePath().getOrNull()
+                if (path != null && pathExists(fileSystem, path)) return path
+                val lowerPath = "$MODELS_DIR/$folder/${simpleName.lowercase()}".toRelativePath().getOrNull()
+                if (lowerPath != null && pathExists(fileSystem, lowerPath)) return lowerPath
+            }
+
+            // Root models dir check (for existing/legacy installations)
+            val rootPath = "$MODELS_DIR/$simpleName".toRelativePath().getOrNull()
+            if (rootPath != null && pathExists(fileSystem, rootPath)) return rootPath
+            val lowerRoot = "$MODELS_DIR/${simpleName.lowercase()}".toRelativePath().getOrNull()
+            if (lowerRoot != null && pathExists(fileSystem, lowerRoot)) return lowerRoot
+
+            // Subdirectory scan on disk: check if any immediate subfolder of models/ has this file
+            val basePath = fileSystem.getBasePath().trimEnd('/', '\\')
+            if (basePath.isNotBlank()) {
+                val modelsDir = File(basePath, MODELS_DIR)
+                if (modelsDir.exists() && modelsDir.isDirectory) {
+                    val subdirs = modelsDir.listFiles { f -> f.isDirectory } ?: emptyArray()
+                    for (subdir in subdirs) {
+                        val child = File(subdir, simpleName)
+                        if (child.exists() && child.length() > 0) {
+                            return "$MODELS_DIR/${subdir.name}/$simpleName".toRelativePath().getOrNull()
+                        }
+                    }
+                }
+            }
+
+            // Virtual fileSystem list scan (for in-memory file systems or tests)
+            val modelsRel = MODELS_DIR.toRelativePath().getOrNull()
+            if (modelsRel != null) {
+                val allInModels = listModelsFiles(fileSystem, modelsRel)
+                val matching = allInModels.firstOrNull {
+                    it.endsWith("/$simpleName", ignoreCase = true) || it.endsWith("\\$simpleName", ignoreCase = true)
+                }
+                if (matching != null) {
+                    return matching.toRelativePath().getOrNull()
+                }
+            }
+
+            return null
+        }
+
+        /**
+         * Resolves the target subfolder inside models/ for a given filename based on ModelCatalog entries.
+         */
+        fun resolveTargetFolderForFile(fileName: String): String? {
+            val simpleName = fileName.substringAfterLast('/')
+
+            if (simpleName.contains("Qwen3-VL-4B", ignoreCase = true)) {
+                return "Qwen3-VL-4B-Instruct-GGUF"
+            }
+            if (simpleName.contains("Qwen3-VL-8B", ignoreCase = true)) {
+                return "Qwen3-VL-8B-Instruct-GGUF"
+            }
+            if (simpleName.contains("Unlimited-OCR", ignoreCase = true) || simpleName.contains("unlimited_ocr", ignoreCase = true)) {
+                return "Unlimited-OCR"
+            }
+            if (simpleName.contains("zitspp", ignoreCase = true) || simpleName.equals("tsr.onnx", ignoreCase = true)) {
+                return "zitspp"
+            }
+            if (simpleName.contains("zits", ignoreCase = true)) {
+                return "zits"
+            }
+            if (simpleName.contains("anime-manga-big-lama", ignoreCase = true)) {
+                return "anime-manga-big-lama"
+            }
+            if (simpleName.contains("big-lama", ignoreCase = true) || simpleName.equals("lama.onnx", ignoreCase = true) || simpleName.equals("lama.yaml", ignoreCase = true)) {
+                return "big-lama"
+            }
+            if (simpleName.contains("Places_512_FullData_G", ignoreCase = true)) {
+                return "Places_512_FullData_G"
+            }
+            if (simpleName.contains("places_512_G", ignoreCase = true)) {
+                return "places_512_G"
+            }
+            if (simpleName.contains("diffusion", ignoreCase = true)) {
+                return "diffusion"
+            }
+            if (simpleName.contains("migan", ignoreCase = true)) {
+                return "migan_traced"
+            }
+            if (simpleName.contains("yolo-det-x", ignoreCase = true)) {
+                return "yolo-det-x-best-v3"
+            }
+            if (simpleName.contains("rfdetr", ignoreCase = true)) {
+                return "rfdetr-seg-2xlarge-ema-v3"
+            }
+
+            for (entry in ModelCatalog.ALL_MODELS) {
+                val target = getModelDirectoryName(entry)
+                val yamlName = entry.yamlUrl.substringAfterLast('/')
+                val onnxName = entry.onnxUrl.substringAfterLast('/')
+                if (simpleName.equals(yamlName, ignoreCase = true) ||
+                    simpleName.equals(onnxName, ignoreCase = true) ||
+                    simpleName.equals("${entry.id}.yaml", ignoreCase = true) ||
+                    simpleName.equals("${entry.id}.onnx", ignoreCase = true) ||
+                    simpleName.equals("${entry.id}.gguf", ignoreCase = true) ||
+                    simpleName.equals("${entry.id}.onnx.data", ignoreCase = true) ||
+                    entry.extraFileUrls.keys.any { it.substringAfterLast('/').equals(simpleName, ignoreCase = true) }
+                ) {
+                    return target
+                }
+            }
+
+            return null
+        }
     }
 
     /**
@@ -71,7 +224,9 @@ class ModelManager(
     suspend fun isModelInstalled(modelId: String, fileSystem: PluginFileSystem, logger: PluginLogger? = null): Boolean {
         logger?.info("[ModelManager] Checking installation status for model '$modelId'...")
         val modelSpec = getModelSpec(modelId, fileSystem, logger)
-        val clean = modelId.trim().lowercase()
+        val catalogEntry = ModelCatalog.findById(modelId)
+        val exactName = catalogEntry?.id ?: modelId.trim()
+
         if (modelSpec != null) {
             val requiredFiles = modelSpec.getRequiredFileNames(modelId)
             if (requiredFiles.isEmpty()) {
@@ -79,50 +234,31 @@ class ModelManager(
                 return false
             }
             val allPresent = requiredFiles.all { fileName ->
-                val simpleName = fileName.substringAfterLast('/')
-                val relPath = "$MODELS_DIR/$fileName".toRelativePath().getOrNull()
-                val lowerRelPath = "$MODELS_DIR/${fileName.lowercase()}".toRelativePath().getOrNull()
-                val folderRelPath = "$MODELS_DIR/$clean/$simpleName".toRelativePath().getOrNull()
-                val lowerFolderRelPath = "$MODELS_DIR/$clean/${simpleName.lowercase()}".toRelativePath().getOrNull()
-
-                val exists = (relPath != null && fileSystem.exists(relPath)) ||
-                        (lowerRelPath != null && fileSystem.exists(lowerRelPath)) ||
-                        (folderRelPath != null && fileSystem.exists(folderRelPath)) ||
-                        (lowerFolderRelPath != null && fileSystem.exists(lowerFolderRelPath))
-                logger?.info("[ModelManager] Model '$modelId': file '$fileName' exists = $exists")
-                exists
+                val found = findModelFileRelativePath(modelId, fileName, fileSystem) != null
+                logger?.info("[ModelManager] Model '$modelId': file '$fileName' exists = $found")
+                found
             }
             logger?.info("[ModelManager] Model '$modelId' installation check by spec: all files present = $allPresent")
             return allPresent
         }
 
-        val yamlRelPath = getModelYamlRelativePath(modelId)
-        val onnxRelPath = getModelOnnxRelativePath(modelId)
-        val yamlExists = fileSystem.exists(yamlRelPath) ||
-                ("$MODELS_DIR/$clean/$clean.yaml".toRelativePath().getOrNull()?.let { fileSystem.exists(it) } ?: false)
-        val onnxExists = fileSystem.exists(onnxRelPath) ||
-                ("$MODELS_DIR/$clean/generator.onnx".toRelativePath().getOrNull()?.let { fileSystem.exists(it) } ?: false) ||
-                ("$MODELS_DIR/$clean/$clean.onnx".toRelativePath().getOrNull()?.let { fileSystem.exists(it) } ?: false)
-        logger?.info("[ModelManager] Model '$modelId' fallback check: exact yamlExists=$yamlExists, onnxExists=$onnxExists")
-        if (yamlExists && onnxExists) {
-            return true
-        }
-        val lowerYaml = "$MODELS_DIR/$clean.yaml".toRelativePath().getOrNull()
-        val lowerOnnx = "$MODELS_DIR/$clean.onnx".toRelativePath().getOrNull()
-        val lowerGguf = "$MODELS_DIR/$clean.gguf".toRelativePath().getOrNull()
-        val lowerYamlExists = lowerYaml != null && fileSystem.exists(lowerYaml)
-        val lowerOnnxExists = lowerOnnx != null && fileSystem.exists(lowerOnnx)
-        val lowerGgufExists = lowerGguf != null && fileSystem.exists(lowerGguf)
-        val fallbackResult = lowerYamlExists && (lowerOnnxExists || lowerGgufExists)
-        logger?.info("[ModelManager] Model '$modelId' lowercase fallback result = $fallbackResult (yaml=$lowerYamlExists, onnx=$lowerOnnxExists, gguf=$lowerGgufExists)")
-        if (fallbackResult) return true
+        // Fallback check if YAML spec could not be parsed but files might be present
+        val yamlFileName = catalogEntry?.yamlUrl?.substringAfterLast('/') ?: "$exactName.yaml"
+        val hasYaml = findModelFileRelativePath(modelId, yamlFileName, fileSystem) != null ||
+                findModelFileRelativePath(modelId, "$exactName.yaml", fileSystem) != null ||
+                findModelFileRelativePath(modelId, "${exactName.lowercase()}.yaml", fileSystem) != null
 
-        val lmStudioModel = findLmStudioModelFile(modelId)
-        if (lmStudioModel != null && lmStudioModel.exists()) {
-            logger?.info("[ModelManager] Model '$modelId' discovered in LM Studio storage: ${lmStudioModel.absolutePath}")
-            return true
-        }
-        return false
+        val modelFileName = catalogEntry?.onnxUrl?.substringAfterLast('/') ?: "$exactName.onnx"
+        val hasWeights = findModelFileRelativePath(modelId, modelFileName, fileSystem) != null ||
+                findModelFileRelativePath(modelId, "$exactName.onnx", fileSystem) != null ||
+                findModelFileRelativePath(modelId, "$exactName.gguf", fileSystem) != null ||
+                findModelFileRelativePath(modelId, "${exactName.lowercase()}.onnx", fileSystem) != null ||
+                findModelFileRelativePath(modelId, "${exactName.lowercase()}.gguf", fileSystem) != null ||
+                findModelFileRelativePath(modelId, "generator.onnx", fileSystem) != null
+
+        val fallbackResult = hasYaml && hasWeights
+        logger?.info("[ModelManager] Model '$modelId' fallback check = $fallbackResult (yaml=$hasYaml, weights=$hasWeights)")
+        return fallbackResult
     }
 
     /**
@@ -150,19 +286,19 @@ class ModelManager(
         val extraFiles = catalogEntry?.extraFileUrls?.keys ?: emptySet()
         for (extra in extraFiles) {
             if (extra.startsWith("mmproj", ignoreCase = true)) {
-                val candidate = File("$basePath/$MODELS_DIR/$extra")
-                if (candidate.exists()) return candidate.absolutePath
+                val foundRel = findModelFileRelativePath(modelId, extra, fileSystem)
+                if (foundRel != null) {
+                    val f = File(basePath, foundRel.value)
+                    if (f.exists() && f.length() > 0) return f.absolutePath
+                }
             }
         }
 
-        val lmModelFile = findLmStudioModelFile(modelId)
-        val lmStudioMmproj = findLmStudioMmprojFile(modelId, lmModelFile)
-        if (lmStudioMmproj != null && lmStudioMmproj.exists()) {
-            return lmStudioMmproj.absolutePath
+        val defaultRel = findModelFileRelativePath(modelId, "mmproj-Unlimited-OCR-F16.gguf", fileSystem)
+        if (defaultRel != null) {
+            val f = File(basePath, defaultRel.value)
+            if (f.exists() && f.length() > 0) return f.absolutePath
         }
-
-        val defaultMmproj = File("$basePath/$MODELS_DIR/mmproj-Unlimited-OCR-F16.gguf")
-        if (defaultMmproj.exists()) return defaultMmproj.absolutePath
 
         return null
     }
@@ -188,15 +324,20 @@ class ModelManager(
     suspend fun getModelSpec(modelId: String, fileSystem: PluginFileSystem, logger: PluginLogger? = null): ModelSpec? {
         val clean = modelId.trim().lowercase()
         val catalogEntry = ModelCatalog.findById(modelId)
-        val catalogId = catalogEntry?.id?.lowercase() ?: clean
+        val exactName = catalogEntry?.id ?: modelId.trim()
+        val catalogId = exactName.lowercase()
+        val yamlFileName = catalogEntry?.yamlUrl?.substringAfterLast('/') ?: "$exactName.yaml"
 
         val candidatePaths = listOfNotNull(
+            findModelFileRelativePath(modelId, yamlFileName, fileSystem),
+            findModelFileRelativePath(modelId, "$exactName.yaml", fileSystem),
+            findModelFileRelativePath(modelId, "$clean.yaml", fileSystem),
             getModelYamlRelativePath(modelId),
             "$MODELS_DIR/$clean/$clean.yaml".toRelativePath().getOrNull(),
             "$MODELS_DIR/$clean.yaml".toRelativePath().getOrNull(),
             "$MODELS_DIR/$catalogId/$catalogId.yaml".toRelativePath().getOrNull(),
             "$MODELS_DIR/$catalogId.yaml".toRelativePath().getOrNull()
-        )
+        ).distinct()
         var yamlText: String? = null
         for (candidate in candidatePaths) {
             if (fileSystem.exists(candidate)) {
@@ -260,39 +401,52 @@ class ModelManager(
      */
     fun getModelAbsolutePath(modelId: String, fileSystem: PluginFileSystem): String {
         val basePath = fileSystem.getBasePath().trimEnd('/', '\\')
-        val clean = modelId.trim().lowercase()
         val catalogEntry = ModelCatalog.findById(modelId)
         val exactName = catalogEntry?.id ?: modelId.trim()
+        val onnxFileName = catalogEntry?.onnxUrl?.substringAfterLast('/')
 
-        val candidates = listOf(
-            "$basePath/$MODELS_DIR/$clean/generator.onnx",
-            "$basePath/$MODELS_DIR/$clean/$clean.onnx",
-            "$basePath/$MODELS_DIR/$exactName.onnx",
-            "$basePath/$MODELS_DIR/$exactName.gguf",
-            "$basePath/$MODELS_DIR/$clean.onnx",
-            "$basePath/$MODELS_DIR/$clean.gguf"
-        )
-        for (path in candidates) {
-            if (File(path).exists()) return path
+        val fileNamesToCheck = listOfNotNull(
+            onnxFileName,
+            "$exactName.onnx",
+            "$exactName.gguf",
+            "${exactName.lowercase()}.onnx",
+            "${exactName.lowercase()}.gguf",
+            "generator.onnx"
+        ).distinct()
+
+        var foundRelPath: RelativePath? = null
+        for (fileName in fileNamesToCheck) {
+            val foundRel = findModelFileRelativePath(modelId, fileName, fileSystem)
+            if (foundRel != null) {
+                if (foundRelPath == null) foundRelPath = foundRel
+                val f = File(basePath, foundRel.value)
+                if (f.exists() && f.length() > 0) return f.absolutePath
+            }
         }
-
-        val lmStudioModel = findLmStudioModelFile(modelId)
-        if (lmStudioModel != null && lmStudioModel.exists()) {
-            return lmStudioModel.absolutePath
+        if (foundRelPath != null) {
+            return if (basePath.isNotEmpty()) "$basePath/${foundRelPath.value}" else foundRelPath.value
         }
 
         val devDir = System.getProperty("wip.dev.models.dir") ?: System.getenv("WIP_DEV_MODELS_DIR")
         if (!devDir.isNullOrBlank()) {
+            val clean = exactName.lowercase()
             val localCandidates = listOf(
                 File("$devDir/$clean/generator.onnx"),
                 File("$devDir/$clean/$clean.onnx"),
-                File("$devDir/$clean.onnx")
+                File("$devDir/$clean.onnx"),
+                File("$devDir/$clean/$clean.gguf"),
+                File("$devDir/$clean.gguf"),
+                File("$devDir/$exactName.onnx"),
+                File("$devDir/$exactName.gguf")
             )
             val localMatch = localCandidates.firstOrNull { it.exists() && it.length() > 0 }
             if (localMatch != null) return localMatch.absolutePath
         }
 
-        return "$basePath/$MODELS_DIR/$exactName.onnx"
+        val targetFolder = if (catalogEntry != null) getModelDirectoryName(catalogEntry) else exactName
+        val fallbackExt = if (catalogEntry?.format.equals("gguf", ignoreCase = true)) "gguf" else "onnx"
+        val expectedFile = onnxFileName ?: "$exactName.$fallbackExt"
+        return "$basePath/$MODELS_DIR/$targetFolder/$expectedFile"
     }
 
     /**
@@ -300,8 +454,16 @@ class ModelManager(
      */
     fun getModelComponentFile(modelId: String, componentFile: String, fileSystem: PluginFileSystem): File? {
         val basePath = fileSystem.getBasePath().trimEnd('/', '\\')
-        val clean = modelId.trim().lowercase()
         val simpleName = componentFile.substringAfterLast('/')
+
+        val foundRel = findModelFileRelativePath(modelId, simpleName, fileSystem)
+        if (foundRel != null) {
+            val f = File(basePath, foundRel.value)
+            if (f.exists() && f.length() > 0) return f
+            if (basePath.isNotEmpty()) return f
+        }
+
+        val clean = modelId.trim().lowercase()
         val localCandidates = mutableListOf<File>()
         if (basePath.isNotEmpty()) {
             localCandidates.add(File("$basePath/$MODELS_DIR/$clean/$simpleName"))
@@ -431,18 +593,18 @@ class ModelManager(
         }
 
         // Save YAML to plugin file system
-        val clean = catalogEntry.id.trim().lowercase()
-        val isFolderModel = modelSpec.components.isNotEmpty() || modelSpec.files.size > 1 || catalogEntry.yamlUrl.contains("/$clean/")
+        val targetFolderName = getModelDirectoryName(catalogEntry)
+        val yamlFileName = catalogEntry.yamlUrl.substringAfterLast('/')
 
-        val yamlRelPath = getModelYamlRelativePath(catalogEntry.id)
-        fileSystem.writeTextFile(yamlRelPath, yamlText).getOrElse {
-            return Result.failure(it)
-        }
-        if (isFolderModel) {
-            val folderYamlRel = "$MODELS_DIR/$clean/$clean.yaml".toRelativePath().getOrNull()
-            if (folderYamlRel != null) {
-                fileSystem.writeTextFile(folderYamlRel, yamlText)
+        val folderYamlRel = "$MODELS_DIR/$targetFolderName/$yamlFileName".toRelativePath().getOrNull()
+        if (folderYamlRel != null) {
+            fileSystem.writeTextFile(folderYamlRel, yamlText).getOrElse {
+                return Result.failure(it)
             }
+        }
+        val yamlRelPath = getModelYamlRelativePath(catalogEntry.id)
+        if (yamlRelPath != folderYamlRel) {
+            fileSystem.writeTextFile(yamlRelPath, yamlText)
         }
         progress.report(0.15f)
 
@@ -494,7 +656,7 @@ class ModelManager(
             }
 
             totalBytesDownloaded += fileBytes.size
-            val effectiveRelPath = if (isFolderModel) "$MODELS_DIR/$clean/$fileName" else "$MODELS_DIR/$rawFileName"
+            val effectiveRelPath = "$MODELS_DIR/$targetFolderName/$fileName"
             val fileRelPath = effectiveRelPath.toRelativePath().getOrElse {
                 return Result.failure(it)
             }
@@ -520,8 +682,95 @@ class ModelManager(
         }
 
         progress.report(1.0f)
-        logger.info("Successfully installed model: ${catalogEntry.displayName} ($totalFiles files) to $MODELS_DIR/")
+        logger.info("Successfully installed model: ${catalogEntry.displayName} ($totalFiles files) to $MODELS_DIR/$targetFolderName/")
         return Result.success(modelSpec)
+    }
+
+    /**
+     * Inspects the plugin's local models/ directory and moves loose, root-level model files
+     * into organized model-specific subdirectories (e.g. Qwen3-VL-4B-Instruct-GGUF, zits, big-lama, etc.).
+     *
+     * If a target destination already contains an identical file, the loose duplicate is removed
+     * to conserve storage space.
+     *
+     * @return Result containing the count of files successfully organized/moved.
+     */
+    suspend fun organizeModelsDirectory(
+        fileSystem: PluginFileSystem,
+        logger: PluginLogger? = null
+    ): Result<Int> {
+        var movedCount = 0
+        try {
+            logger?.info("[ModelManager] Checking models directory for loose files to organize...")
+            val basePath = fileSystem.getBasePath().trimEnd('/', '\\')
+            val diskModelsDir = if (basePath.isNotBlank()) File(basePath, MODELS_DIR) else null
+
+            if (diskModelsDir != null && diskModelsDir.exists() && diskModelsDir.isDirectory) {
+                val looseFiles = diskModelsDir.listFiles { f -> f.isFile } ?: emptyArray()
+                for (file in looseFiles) {
+                    val targetSub = resolveTargetFolderForFile(file.name)
+                    if (targetSub != null) {
+                        val targetDir = File(diskModelsDir, targetSub)
+                        if (!targetDir.exists()) {
+                            targetDir.mkdirs()
+                        }
+                        val destFile = File(targetDir, file.name)
+                        if (destFile.exists() && destFile.length() == file.length() && file.length() > 0) {
+                            logger?.info("[ModelManager] Duplicate file in models root: ${file.name} already exists in $targetSub. Removing redundant root copy.")
+                            file.delete()
+                            movedCount++
+                        } else {
+                            logger?.info("[ModelManager] Moving ${file.name} -> $targetSub/${file.name}")
+                            try {
+                                Files.move(
+                                    file.toPath(),
+                                    destFile.toPath(),
+                                    StandardCopyOption.REPLACE_EXISTING
+                                )
+                                movedCount++
+                            } catch (e: Exception) {
+                                logger?.warn("[ModelManager] Failed moving ${file.name} to $destFile: ${e.message}")
+                            }
+                        }
+                    }
+                }
+            } else {
+                // In-memory or virtual file system fallback (e.g. tests)
+                val modelsRel = MODELS_DIR.toRelativePath().getOrNull()
+                if (modelsRel != null) {
+                    val allFiles = try { fileSystem.listFiles(modelsRel) } catch (_: Exception) { emptyList() }
+                    for (filePath in allFiles) {
+                        val sub = filePath.removePrefix("$MODELS_DIR/").removePrefix("$MODELS_DIR\\")
+                        if (!sub.contains('/') && !sub.contains('\\') && sub.isNotEmpty()) {
+                            val fileName = sub
+                            val targetSub = resolveTargetFolderForFile(fileName)
+                            if (targetSub != null) {
+                                val srcRel = "$MODELS_DIR/$fileName".toRelativePath().getOrNull()
+                                val destRel = "$MODELS_DIR/$targetSub/$fileName".toRelativePath().getOrNull()
+                                if (srcRel != null && destRel != null) {
+                                    if (fileSystem.exists(destRel)) {
+                                        fileSystem.deleteFile(srcRel)
+                                        movedCount++
+                                    } else {
+                                        val bytes = fileSystem.readFile(srcRel)
+                                        if (bytes != null) {
+                                            fileSystem.writeFile(destRel, bytes)
+                                            fileSystem.deleteFile(srcRel)
+                                            movedCount++
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            logger?.info("[ModelManager] Models directory organization finished. Total files moved/organized: $movedCount")
+            return Result.success(movedCount)
+        } catch (e: Exception) {
+            logger?.error("[ModelManager] Error organizing models directory: ${e.message}", e)
+            return Result.failure(e)
+        }
     }
 
     /**

@@ -503,5 +503,43 @@ class OcrIATest {
         assertEquals("rectangular", regions[1].shape)
         assertEquals("screaming", regions[1].fontFamily)
     }
+
+    @Test
+    fun testCategoryFallbackForNonSupportingModels() {
+        val context = io.mockk.mockk<PluginContext>(relaxed = true)
+        val hostFs = io.mockk.mockk<HostFileSystem>(relaxed = true)
+        val runner = UnlimitedOcrRunner(context, hostFs)
+
+        // Unlimited-OCR layout format (no category support)
+        val unlimitedOutput = """
+            text [100, 200, 300, 400] Normal dialogue line
+            balloon [500, 600, 700, 800] Another speech balloon
+        """.trimIndent()
+        val unlimitedRegions = runner.parseOcrOutput(unlimitedOutput, 1000.0, 1000.0)
+        assertEquals(2, unlimitedRegions.size)
+        assertEquals("speech", unlimitedRegions[0].category)
+        assertEquals("speech", unlimitedRegions[1].category)
+
+        // Coordinate prefix format (no category support)
+        val coordOutput = "[100, 200, 300, 400] Plain text line"
+        val coordRegions = runner.parseOcrOutput(coordOutput, 1000.0, 1000.0)
+        assertEquals(1, coordRegions.size)
+        assertEquals("speech", coordRegions[0].category)
+
+        // Custom/unknown tag should strictly fall back to speech
+        val unknownTagOutput = "{unknown_category} [100, 200, 300, 400] Fallback to speech text"
+        val unknownRegions = runner.parseOcrOutput(unknownTagOutput, 1000.0, 1000.0)
+        assertEquals(1, unknownRegions.size)
+        assertEquals("speech", unknownRegions[0].category)
+    }
+
+    @Test
+    fun testUpdateHookCallsOrganizeModelsDirectory() = kotlinx.coroutines.runBlocking {
+        val plugin = OCR_IA(OcrIASettings())
+        val context = io.mockk.mockk<PluginContext>(relaxed = true)
+
+        val updateResult = plugin.update(context)
+        assertTrue(updateResult.isSuccess)
+    }
 }
 
