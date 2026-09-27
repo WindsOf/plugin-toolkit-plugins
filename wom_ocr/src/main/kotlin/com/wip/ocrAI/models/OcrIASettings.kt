@@ -94,8 +94,20 @@ data class OcrIASettings(
         defaultValue = "true",
         required = false
     )
-    val llamaServerAutoStop: Boolean? = true
+    val llamaServerAutoStop: Boolean? = true,
+
+    @PluginSetting(
+        description = "Custom system prompt for Qwen Vision OCR text extraction (leave blank to use default)",
+        defaultValue = "",
+        required = false
+    )
+    val qwenOcrPrompt: String? = null
 )
+
+enum class OcrQuantization(val id: String) {
+    Q4_K_M("Q4_K_M"),
+    Q8_0("Q8_0")
+}
 
 enum class AIModel(val id: String) {
     GEMMA_26B("gemma-4-26b-a4b-it"),
@@ -123,12 +135,22 @@ enum class AIModel(val id: String) {
     UNLIMITED_OCR_Q4_K_M("Unlimited-OCR-Q4_K_M"),
 
     @RequiresLock(locks = ["model:Unlimited-OCR-IQ2_M", "model:unlimited-ocr-iq2_m", "Unlimited-OCR-IQ2_M", "unlimited-ocr-iq2_m"])
-    UNLIMITED_OCR_IQ2_M("Unlimited-OCR-IQ2_M")
+    UNLIMITED_OCR_IQ2_M("Unlimited-OCR-IQ2_M"),
+
+    @RequiresLock(locks = ["model:Qwen3-VL-4B-Instruct", "model:qwen3-vl-4b-instruct", "Qwen3-VL-4B-Instruct", "qwen3-vl-4b-instruct"])
+    QWEN3_VL_4B("Qwen3-VL-4B-Instruct"),
+
+    @RequiresLock(locks = ["model:Qwen3-VL-8B-Instruct", "model:qwen3-vl-8b-instruct", "Qwen3-VL-8B-Instruct", "qwen3-vl-8b-instruct"])
+    QWEN3_VL_8B("Qwen3-VL-8B-Instruct")
 }
 
 enum class OcrDownloadModel(val modelId: String) {
     UNLIMITED_OCR_BF16("Unlimited-OCR-BF16"),
     UNLIMITED_OCR_Q8_0("Unlimited-OCR-Q8_0"),
     UNLIMITED_OCR_Q4_K_M("Unlimited-OCR-Q4_K_M"),
-    UNLIMITED_OCR_IQ2_M("Unlimited-OCR-IQ2_M")
+    UNLIMITED_OCR_IQ2_M("Unlimited-OCR-IQ2_M"),
+    QWEN3_VL_4B_Q4_K_M("Qwen3-VL-4B-Instruct-Q4_K_M"),
+    QWEN3_VL_4B_Q8_0("Qwen3-VL-4B-Instruct-Q8_0"),
+    QWEN3_VL_8B_Q4_K_M("Qwen3-VL-8B-Instruct-Q4_K_M"),
+    QWEN3_VL_8B_Q8_0("Qwen3-VL-8B-Instruct-Q8_0")
 }

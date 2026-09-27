@@ -24,7 +24,7 @@ enum class ModelType {
                 "yolov10", "yolo_v10", "yolo" -> YOLO_V10
                 "rfdetr_seg", "rfdetr-seg", "rfdetr" -> RFDETR_SEG
                 "inpainting", "lama", "mat", "manga_inpainting" -> INPAINTING
-                "ocr", "deepseek_ocr", "deepseek_ocr_decoder", "unlimited_ocr", "unlimited-ocr" -> OCR
+                "ocr", "deepseek_ocr", "deepseek_ocr_decoder", "unlimited_ocr", "unlimited-ocr", "qwen", "qwen_vl", "qwen3_vl", "qwen-vl", "qwen3-vl" -> OCR
                 else -> UNKNOWN
             }
         }
@@ -251,6 +251,12 @@ object ModelCatalog {
     const val UNLIMITED_OCR_Q8_0_ID = "Unlimited-OCR-Q8_0"
     const val UNLIMITED_OCR_Q4_K_M_ID = "Unlimited-OCR-Q4_K_M"
     const val UNLIMITED_OCR_IQ2_M_ID = "Unlimited-OCR-IQ2_M"
+    const val QWEN3_VL_4B_ID = "Qwen3-VL-4B-Instruct"
+    const val QWEN3_VL_4B_Q4_K_M_ID = "Qwen3-VL-4B-Instruct-Q4_K_M"
+    const val QWEN3_VL_4B_Q8_0_ID = "Qwen3-VL-4B-Instruct-Q8_0"
+    const val QWEN3_VL_8B_ID = "Qwen3-VL-8B-Instruct"
+    const val QWEN3_VL_8B_Q4_K_M_ID = "Qwen3-VL-8B-Instruct-Q4_K_M"
+    const val QWEN3_VL_8B_Q8_0_ID = "Qwen3-VL-8B-Instruct-Q8_0"
 
     val YOLO_DET_X = ModelCatalogEntry(
         id = YOLO_DET_X_ID,
@@ -429,6 +435,90 @@ object ModelCatalog {
         )
     )
 
+    val QWEN3_VL_4B = ModelCatalogEntry(
+        id = QWEN3_VL_4B_ID,
+        displayName = "Qwen3-VL 4B Instruct",
+        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-Q4_K_M.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-Q4_K_M.gguf",
+        lockKey = "model:$QWEN3_VL_4B_ID",
+        description = "Qwen3-VL 4B Instruct multimodal vision-language model with mmproj projector",
+        type = ModelType.OCR,
+        format = "gguf",
+        extraFileUrls = mapOf(
+            "mmproj-Qwen3-VL-4B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Qwen3-VL-4B-Instruct-F16.gguf"
+        )
+    )
+
+    val QWEN3_VL_4B_Q4_K_M = ModelCatalogEntry(
+        id = QWEN3_VL_4B_Q4_K_M_ID,
+        displayName = "Qwen3-VL 4B Instruct (Q4_K_M)",
+        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-Q4_K_M.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-Q4_K_M.gguf",
+        lockKey = "model:$QWEN3_VL_4B_Q4_K_M_ID",
+        description = "Qwen3-VL 4B Instruct 4-bit quantized GGUF vision-language model with mmproj multimodal projector",
+        type = ModelType.OCR,
+        format = "gguf",
+        extraFileUrls = mapOf(
+            "mmproj-Qwen3-VL-4B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Qwen3-VL-4B-Instruct-F16.gguf"
+        )
+    )
+
+    val QWEN3_VL_4B_Q8_0 = ModelCatalogEntry(
+        id = QWEN3_VL_4B_Q8_0_ID,
+        displayName = "Qwen3-VL 4B Instruct (Q8_0)",
+        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-Q8_0.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-Q8_0.gguf",
+        lockKey = "model:$QWEN3_VL_4B_Q8_0_ID",
+        description = "Qwen3-VL 4B Instruct 8-bit quantized GGUF vision-language model with mmproj multimodal projector",
+        type = ModelType.OCR,
+        format = "gguf",
+        extraFileUrls = mapOf(
+            "mmproj-Qwen3-VL-4B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Qwen3-VL-4B-Instruct-F16.gguf"
+        )
+    )
+
+    val QWEN3_VL_8B = ModelCatalogEntry(
+        id = QWEN3_VL_8B_ID,
+        displayName = "Qwen3-VL 8B Instruct",
+        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-Q4_K_M.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-Q4_K_M.gguf",
+        lockKey = "model:$QWEN3_VL_8B_ID",
+        description = "Qwen3-VL 8B Instruct multimodal vision-language model with mmproj projector",
+        type = ModelType.OCR,
+        format = "gguf",
+        extraFileUrls = mapOf(
+            "mmproj-Qwen3-VL-8B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Qwen3-VL-8B-Instruct-F16.gguf"
+        )
+    )
+
+    val QWEN3_VL_8B_Q4_K_M = ModelCatalogEntry(
+        id = QWEN3_VL_8B_Q4_K_M_ID,
+        displayName = "Qwen3-VL 8B Instruct (Q4_K_M)",
+        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-Q4_K_M.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-Q4_K_M.gguf",
+        lockKey = "model:$QWEN3_VL_8B_Q4_K_M_ID",
+        description = "Qwen3-VL 8B Instruct 4-bit quantized GGUF vision-language model with mmproj multimodal projector",
+        type = ModelType.OCR,
+        format = "gguf",
+        extraFileUrls = mapOf(
+            "mmproj-Qwen3-VL-8B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Qwen3-VL-8B-Instruct-F16.gguf"
+        )
+    )
+
+    val QWEN3_VL_8B_Q8_0 = ModelCatalogEntry(
+        id = QWEN3_VL_8B_Q8_0_ID,
+        displayName = "Qwen3-VL 8B Instruct (Q8_0)",
+        yamlUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-Q8_0.yaml",
+        onnxUrl = "https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-Q8_0.gguf",
+        lockKey = "model:$QWEN3_VL_8B_Q8_0_ID",
+        description = "Qwen3-VL 8B Instruct 8-bit quantized GGUF vision-language model with mmproj multimodal projector",
+        type = ModelType.OCR,
+        format = "gguf",
+        extraFileUrls = mapOf(
+            "mmproj-Qwen3-VL-8B-Instruct-F16.gguf" to "https://www.windsofresub.cloud/models/mmproj-Qwen3-VL-8B-Instruct-F16.gguf"
+        )
+    )
+
     val ALL_MODELS: List<ModelCatalogEntry> = listOf(
         YOLO_DET_X,
         RFDETR_SEG_2XLARGE,
@@ -444,7 +534,13 @@ object ModelCatalog {
         UNLIMITED_OCR_BF16,
         UNLIMITED_OCR_Q8_0,
         UNLIMITED_OCR_Q4_K_M,
-        UNLIMITED_OCR_IQ2_M
+        UNLIMITED_OCR_IQ2_M,
+        QWEN3_VL_4B,
+        QWEN3_VL_4B_Q4_K_M,
+        QWEN3_VL_4B_Q8_0,
+        QWEN3_VL_8B,
+        QWEN3_VL_8B_Q4_K_M,
+        QWEN3_VL_8B_Q8_0
     )
 
     fun findById(id: String): ModelCatalogEntry? {
@@ -472,7 +568,27 @@ object ModelCatalog {
             (clean == "unlimited-ocr-bf16" && it.id == UNLIMITED_OCR_BF16_ID) ||
             (clean == "unlimited-ocr-q8_0" && it.id == UNLIMITED_OCR_Q8_0_ID) ||
             (clean == "unlimited-ocr-q4_k_m" && it.id == UNLIMITED_OCR_Q4_K_M_ID) ||
-            (clean == "unlimited-ocr-iq2_m" && it.id == UNLIMITED_OCR_IQ2_M_ID)
+            (clean == "unlimited-ocr-iq2_m" && it.id == UNLIMITED_OCR_IQ2_M_ID) ||
+            (clean == "qwen3-vl-4b-instruct" && it.id == QWEN3_VL_4B_ID) ||
+            (clean == "qwen3-vl-4b" && it.id == QWEN3_VL_4B_ID) ||
+            (clean == "qwen-4b" && it.id == QWEN3_VL_4B_ID) ||
+            (clean == "qwen-vl-4b" && it.id == QWEN3_VL_4B_ID) ||
+            (clean == "qwen3-vl-4b-instruct-q4_k_m" && it.id == QWEN3_VL_4B_Q4_K_M_ID) ||
+            (clean == "qwen3-vl-4b-q4_k_m" && it.id == QWEN3_VL_4B_Q4_K_M_ID) ||
+            (clean == "qwen-4b-q4_k_m" && it.id == QWEN3_VL_4B_Q4_K_M_ID) ||
+            (clean == "qwen3-vl-4b-instruct-q8_0" && it.id == QWEN3_VL_4B_Q8_0_ID) ||
+            (clean == "qwen3-vl-4b-q8_0" && it.id == QWEN3_VL_4B_Q8_0_ID) ||
+            (clean == "qwen-4b-q8_0" && it.id == QWEN3_VL_4B_Q8_0_ID) ||
+            (clean == "qwen3-vl-8b-instruct" && it.id == QWEN3_VL_8B_ID) ||
+            (clean == "qwen3-vl-8b" && it.id == QWEN3_VL_8B_ID) ||
+            (clean == "qwen-8b" && it.id == QWEN3_VL_8B_ID) ||
+            (clean == "qwen-vl-8b" && it.id == QWEN3_VL_8B_ID) ||
+            (clean == "qwen3-vl-8b-instruct-q4_k_m" && it.id == QWEN3_VL_8B_Q4_K_M_ID) ||
+            (clean == "qwen3-vl-8b-q4_k_m" && it.id == QWEN3_VL_8B_Q4_K_M_ID) ||
+            (clean == "qwen-8b-q4_k_m" && it.id == QWEN3_VL_8B_Q4_K_M_ID) ||
+            (clean == "qwen3-vl-8b-instruct-q8_0" && it.id == QWEN3_VL_8B_Q8_0_ID) ||
+            (clean == "qwen3-vl-8b-q8_0" && it.id == QWEN3_VL_8B_Q8_0_ID) ||
+            (clean == "qwen-8b-q8_0" && it.id == QWEN3_VL_8B_Q8_0_ID)
         }
     }
 

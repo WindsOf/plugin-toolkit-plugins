@@ -115,7 +115,14 @@ class ModelManager(
         val lowerGgufExists = lowerGguf != null && fileSystem.exists(lowerGguf)
         val fallbackResult = lowerYamlExists && (lowerOnnxExists || lowerGgufExists)
         logger?.info("[ModelManager] Model '$modelId' lowercase fallback result = $fallbackResult (yaml=$lowerYamlExists, onnx=$lowerOnnxExists, gguf=$lowerGgufExists)")
-        return fallbackResult
+        if (fallbackResult) return true
+
+        val lmStudioModel = findLmStudioModelFile(modelId)
+        if (lmStudioModel != null && lmStudioModel.exists()) {
+            logger?.info("[ModelManager] Model '$modelId' discovered in LM Studio storage: ${lmStudioModel.absolutePath}")
+            return true
+        }
+        return false
     }
 
     /**
@@ -130,8 +137,8 @@ class ModelManager(
     /**
      * Searches standard LM Studio directories or local plugin storage for the multimodal projector (mmproj).
      */
-    fun findLmStudioMmprojFile(): File? {
-        return LmStudioManager.Default.findLmStudioMmprojFile()
+    fun findLmStudioMmprojFile(modelId: String? = null, modelFile: File? = null): File? {
+        return LmStudioManager.Default.findLmStudioMmprojFile(modelId, modelFile)
     }
 
     /**
@@ -147,10 +154,17 @@ class ModelManager(
                 if (candidate.exists()) return candidate.absolutePath
             }
         }
+
+        val lmModelFile = findLmStudioModelFile(modelId)
+        val lmStudioMmproj = findLmStudioMmprojFile(modelId, lmModelFile)
+        if (lmStudioMmproj != null && lmStudioMmproj.exists()) {
+            return lmStudioMmproj.absolutePath
+        }
+
         val defaultMmproj = File("$basePath/$MODELS_DIR/mmproj-Unlimited-OCR-F16.gguf")
         if (defaultMmproj.exists()) return defaultMmproj.absolutePath
 
-        return findLmStudioMmprojFile()?.absolutePath
+        return null
     }
 
     /**

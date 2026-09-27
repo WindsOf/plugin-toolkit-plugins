@@ -1,3 +1,10 @@
+Version: 2.8.0
+Date: 2026-09-27
+Added:
+  - Added local Qwen Vision model support (`Qwen3-VL-4B-Instruct` and `Qwen3-VL-8B-Instruct`) for OCR execution via `llama-server`.
+  - Added dynamic `quantization` dropdown parameter.
+  - Implemented translated structured OCR prompt and output parser for `{speech|sfx} [top_left_x, top_left_y, bottom_right_x, bottom_right_y] text` with bounding box scaling and balloon containment rules.
+-------------------------------------------------------------------------------------------------
 Version: 2.7.5
 Date: 2026-09-24
 Fixed:

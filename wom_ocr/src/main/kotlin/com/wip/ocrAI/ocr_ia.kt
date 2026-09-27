@@ -14,6 +14,8 @@ import com.wip.common.models.VisionResult
 import com.wip.ocrAI.models.AIModel
 import com.wip.ocrAI.models.OcrDownloadModel
 import com.wip.ocrAI.models.OcrIASettings
+import com.wip.ocrAI.models.OcrQuantization
+import org.wip.plugintoolkit.api.ConditionOperator
 import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.OS
 import org.wip.plugintoolkit.api.PluginContext
@@ -22,6 +24,7 @@ import org.wip.plugintoolkit.api.annotations.Capability
 import org.wip.plugintoolkit.api.annotations.CapabilityInput
 import org.wip.plugintoolkit.api.annotations.CapabilityOutput
 import org.wip.plugintoolkit.api.annotations.CapabilityParam
+import org.wip.plugintoolkit.api.annotations.DependsOn
 import org.wip.plugintoolkit.api.annotations.PluginAction
 import org.wip.plugintoolkit.api.annotations.PluginInfo
 import org.wip.plugintoolkit.api.annotations.PluginLoad
@@ -33,7 +36,7 @@ import org.wip.plugintoolkit.api.annotations.PluginValidate
 @PluginInfo(
     id = "com.wip.ocr_ia",
     name = "WOM OCR",
-    version = "2.7.5",
+    version = "2.8.0",
     description = "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog",
     supportedOs = [OS.WINDOWS]
 )
@@ -59,6 +62,23 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
             locks[m.modelId.lowercase()] = installed
             locks[ModelCatalog.getLockKey(m.modelId)] = installed
         }
+
+        val qwen4BInstalled = locks[ModelCatalog.QWEN3_VL_4B_Q4_K_M_ID] == true ||
+            locks[ModelCatalog.QWEN3_VL_4B_Q8_0_ID] == true ||
+            ModelManager.Default.isModelInstalled(ModelCatalog.QWEN3_VL_4B_ID, context.fileSystem, logger)
+        locks["model:${ModelCatalog.QWEN3_VL_4B_ID}"] = qwen4BInstalled
+        locks["model:${ModelCatalog.QWEN3_VL_4B_ID.lowercase()}"] = qwen4BInstalled
+        locks[ModelCatalog.QWEN3_VL_4B_ID] = qwen4BInstalled
+        locks[ModelCatalog.QWEN3_VL_4B_ID.lowercase()] = qwen4BInstalled
+
+        val qwen8BInstalled = locks[ModelCatalog.QWEN3_VL_8B_Q4_K_M_ID] == true ||
+            locks[ModelCatalog.QWEN3_VL_8B_Q8_0_ID] == true ||
+            ModelManager.Default.isModelInstalled(ModelCatalog.QWEN3_VL_8B_ID, context.fileSystem, logger)
+        locks["model:${ModelCatalog.QWEN3_VL_8B_ID}"] = qwen8BInstalled
+        locks["model:${ModelCatalog.QWEN3_VL_8B_ID.lowercase()}"] = qwen8BInstalled
+        locks[ModelCatalog.QWEN3_VL_8B_ID] = qwen8BInstalled
+        locks[ModelCatalog.QWEN3_VL_8B_ID.lowercase()] = qwen8BInstalled
+
         logger.info("[OCR_IA] checkLocks: Completed OCR locks check: $locks")
         return locks
     }
@@ -261,6 +281,13 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
         saveThinking: Boolean,
         @CapabilityParam(description = "The AI Model to use", defaultValue = "GEMMA_26B")
         model: AIModel,
+        @CapabilityParam(
+            description = "Quantization variant for local OCR models (e.g. Qwen)",
+            defaultValue = "\"Q4_K_M\"",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["QWEN3_VL_4B", "QWEN3_VL_8B"])
+        quantization: OcrQuantization = OcrQuantization.Q4_K_M,
         @CapabilityParam(description = "Optional Chapter Vision segmentation result to run OCR on cropped regions of interest")
         chapterVisionResult: ChapterVisionResult? = null,
         @CapabilityParam(description = "Padding in pixels around detected regions for cutout OCR", defaultValue = "100")
@@ -269,7 +296,12 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
         hostFs: HostFileSystem
     ): OCRResult {
         val logger = context.logger
-        logger.info("OCR IA (Basic) v2.4.0 started. Model: ${model.id}")
+        val resolvedModelId = when (model) {
+            AIModel.QWEN3_VL_4B -> if (quantization == OcrQuantization.Q8_0) ModelCatalog.QWEN3_VL_4B_Q8_0_ID else ModelCatalog.QWEN3_VL_4B_Q4_K_M_ID
+            AIModel.QWEN3_VL_8B -> if (quantization == OcrQuantization.Q8_0) ModelCatalog.QWEN3_VL_8B_Q8_0_ID else ModelCatalog.QWEN3_VL_8B_Q4_K_M_ID
+            else -> model.id
+        }
+        logger.info("OCR IA (Basic) v2.4.0 started. Model: ${model.id} (resolved: $resolvedModelId, quantization: $quantization)")
         logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput | VisionAssisted: ${chapterVisionResult != null}")
 
         return try {
@@ -277,7 +309,9 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
                     AIModel.UNLIMITED_OCR_BF16,
                     AIModel.UNLIMITED_OCR_Q8_0,
                     AIModel.UNLIMITED_OCR_Q4_K_M,
-                    AIModel.UNLIMITED_OCR_IQ2_M
+                    AIModel.UNLIMITED_OCR_IQ2_M,
+                    AIModel.QWEN3_VL_4B,
+                    AIModel.QWEN3_VL_8B
                 )
             ) {
                 val runner = UnlimitedOcrRunner(context, hostFs, settings)
@@ -287,7 +321,7 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
                     outputDir,
                     useStructuredOutput,
                     saveThinking,
-                    targetModelId = model.id,
+                    targetModelId = resolvedModelId,
                     chapterVisionResult = chapterVisionResult,
                     cropPadding = cropPadding
                 )
@@ -341,6 +375,13 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
         saveThinking: Boolean,
         @CapabilityParam(description = "The AI Model to use", defaultValue = "GEMMA_31B")
         model: AIModel,
+        @CapabilityParam(
+            description = "Quantization variant for local OCR models (e.g. Qwen)",
+            defaultValue = "\"Q4_K_M\"",
+            isAdvanced = true
+        )
+        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["QWEN3_VL_4B", "QWEN3_VL_8B"])
+        quantization: OcrQuantization = OcrQuantization.Q4_K_M,
         @CapabilityParam(description = "Optional Chapter Vision segmentation result to run OCR on cropped regions of interest")
         chapterVisionResult: ChapterVisionResult? = null,
         @CapabilityParam(description = "Padding in pixels around detected regions for cutout OCR", defaultValue = "100")
@@ -349,7 +390,12 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
         hostFs: HostFileSystem
     ): AdvancedOCRResult {
         val logger = context.logger
-        logger.info("OCR IA (Advanced) v2.4.0 started. Model: ${model.id}")
+        val resolvedModelId = when (model) {
+            AIModel.QWEN3_VL_4B -> if (quantization == OcrQuantization.Q8_0) ModelCatalog.QWEN3_VL_4B_Q8_0_ID else ModelCatalog.QWEN3_VL_4B_Q4_K_M_ID
+            AIModel.QWEN3_VL_8B -> if (quantization == OcrQuantization.Q8_0) ModelCatalog.QWEN3_VL_8B_Q8_0_ID else ModelCatalog.QWEN3_VL_8B_Q4_K_M_ID
+            else -> model.id
+        }
+        logger.info("OCR IA (Advanced) v2.4.0 started. Model: ${model.id} (resolved: $resolvedModelId, quantization: $quantization)")
         logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput | VisionAssisted: ${chapterVisionResult != null}")
 
         return try {
@@ -357,7 +403,9 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
                     AIModel.UNLIMITED_OCR_BF16,
                     AIModel.UNLIMITED_OCR_Q8_0,
                     AIModel.UNLIMITED_OCR_Q4_K_M,
-                    AIModel.UNLIMITED_OCR_IQ2_M
+                    AIModel.UNLIMITED_OCR_IQ2_M,
+                    AIModel.QWEN3_VL_4B,
+                    AIModel.QWEN3_VL_8B
                 )
             ) {
                 val runner = UnlimitedOcrRunner(context, hostFs, settings)
@@ -367,7 +415,7 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
                     outputDir,
                     useStructuredOutput,
                     saveThinking,
-                    targetModelId = model.id,
+                    targetModelId = resolvedModelId,
                     chapterVisionResult = chapterVisionResult,
                     cropPadding = cropPadding
                 )

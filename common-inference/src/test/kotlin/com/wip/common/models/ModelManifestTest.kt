@@ -161,6 +161,33 @@ class ModelManifestTest {
         assertEquals("https://www.windsofresub.cloud/models/Unlimited-OCR-IQ2_M.gguf", ocrIq2.onnxUrl)
         assertTrue(ocrIq2.extraFileUrls.containsKey("mmproj-Unlimited-OCR-F16.gguf"))
 
+        val qwen4b = ModelCatalog.findById("Qwen3-VL-4B-Instruct")
+        assertNotNull(qwen4b)
+        assertEquals(ModelType.OCR, qwen4b.type)
+        assertEquals("gguf", qwen4b.format)
+        assertEquals("model:Qwen3-VL-4B-Instruct", qwen4b.lockKey)
+
+        val qwen4bQ4 = ModelCatalog.findById("Qwen3-VL-4B-Instruct-Q4_K_M")
+        assertNotNull(qwen4bQ4)
+        assertEquals("https://www.windsofresub.cloud/models/Qwen3-VL-4B-Instruct-Q4_K_M.gguf", qwen4bQ4.onnxUrl)
+        assertTrue(qwen4bQ4.extraFileUrls.containsKey("mmproj-Qwen3-VL-4B-Instruct-F16.gguf"))
+
+        val qwen4bQ8 = ModelCatalog.findById("qwen-4b-q8_0")
+        assertNotNull(qwen4bQ8)
+        assertEquals(ModelCatalog.QWEN3_VL_4B_Q8_0_ID, qwen4bQ8.id)
+
+        val qwen8b = ModelCatalog.findById("qwen-8b")
+        assertNotNull(qwen8b)
+        assertEquals(ModelCatalog.QWEN3_VL_8B_ID, qwen8b.id)
+
+        val qwen8bQ4 = ModelCatalog.findById("Qwen3-VL-8B-Instruct-Q4_K_M")
+        assertNotNull(qwen8bQ4)
+        assertEquals("https://www.windsofresub.cloud/models/Qwen3-VL-8B-Instruct-Q4_K_M.gguf", qwen8bQ4.onnxUrl)
+        assertTrue(qwen8bQ4.extraFileUrls.containsKey("mmproj-Qwen3-VL-8B-Instruct-F16.gguf"))
+
+        val qwen8bQ8 = ModelCatalog.findById("qwen3-vl-8b-instruct-q8_0")
+        assertNotNull(qwen8bQ8)
+        assertEquals(ModelCatalog.QWEN3_VL_8B_Q8_0_ID, qwen8bQ8.id)
     }
 
     @Test
@@ -313,5 +340,47 @@ class ModelManifestTest {
         assertEquals(1000, spec.pipelineConfig.numTimesteps)
         assertEquals(50, spec.pipelineConfig.defaultInferenceSteps)
         assertEquals("linear", spec.pipelineConfig.betaSchedule)
+    }
+
+    @Test
+    fun testParseQwenYamlDescriptors() {
+        val qwen4bQ4Yaml = """
+            name: Qwen3-VL-4B-Instruct-Q4_K_M
+            display_name: "Qwen3-VL 4B Instruct (Q4_K_M)"
+            model_type: ocr
+            format: gguf
+            description: "Qwen3-VL 4B Instruct 4-bit quantized GGUF vision-language model with mmproj multimodal projector"
+            files:
+              model: Qwen3-VL-4B-Instruct-Q4_K_M.gguf
+              mmproj: mmproj-Qwen3-VL-4B-Instruct-F16.gguf
+            context_size: 8192
+        """.trimIndent()
+
+        val spec4b = ModelSpec.parseFromYaml(qwen4bQ4Yaml)
+        assertEquals("Qwen3-VL-4B-Instruct-Q4_K_M", spec4b.name)
+        assertEquals(ModelType.OCR, spec4b.modelType)
+        assertEquals("gguf", spec4b.format)
+        val files4b = spec4b.getRequiredFileNames("Qwen3-VL-4B-Instruct-Q4_K_M")
+        assertTrue(files4b.contains("Qwen3-VL-4B-Instruct-Q4_K_M.gguf"))
+        assertTrue(files4b.contains("mmproj-Qwen3-VL-4B-Instruct-F16.gguf"))
+
+        val qwen8bQ8Yaml = """
+            name: Qwen3-VL-8B-Instruct-Q8_0
+            display_name: "Qwen3-VL 8B Instruct (Q8_0)"
+            model_type: ocr
+            format: gguf
+            description: "Qwen3-VL 8B Instruct 8-bit quantized GGUF vision-language model with mmproj multimodal projector"
+            files:
+              model: Qwen3-VL-8B-Instruct-Q8_0.gguf
+              mmproj: mmproj-Qwen3-VL-8B-Instruct-F16.gguf
+            context_size: 8192
+        """.trimIndent()
+
+        val spec8b = ModelSpec.parseFromYaml(qwen8bQ8Yaml)
+        assertEquals("Qwen3-VL-8B-Instruct-Q8_0", spec8b.name)
+        assertEquals(ModelType.OCR, spec8b.modelType)
+        val files8b = spec8b.getRequiredFileNames("Qwen3-VL-8B-Instruct-Q8_0")
+        assertTrue(files8b.contains("Qwen3-VL-8B-Instruct-Q8_0.gguf"))
+        assertTrue(files8b.contains("mmproj-Qwen3-VL-8B-Instruct-F16.gguf"))
     }
 }

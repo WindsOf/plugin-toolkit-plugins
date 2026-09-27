@@ -41,6 +41,31 @@ class UnlimitedOcrRunner(
     companion object {
         private val jsonPretty = Json { prettyPrint = true }
         private val jsonIgnoreUnknown = Json { ignoreUnknownKeys = true }
+
+        const val QWEN_OCR_SYSTEM_PROMPT = """Task: Extract text, sound effects, and punctuation from this comic panel.
+
+Rules:
+1. Classification:
+   - Mark as {speech} if inside a speech bubble or narration/caption box.
+   - Mark as {sfx} if floating sound words, onomatopoeia, or stylized effects outside boxes.
+2. Punctuation & Symbols:
+   - Always extract standalone punctuation marks (such as "...", "?", "!", "?!", "—") if they appear as dialogue inside a speech bubble. Do not ignore them.
+3. Boundary Filter:
+   - Drop any text or symbols touching canvas edges (coordinates near 0 or 1000).
+
+Example 1 (dialogue text):
+{speech} [540, 30, 980, 270] WASHING THE DISHES
+
+Example 2 (standalone punctuation in bubble):
+{speech} [180, 350, 420, 450] ...
+
+Example 3 (sound effect):
+{sfx} [550, 314, 909, 470] THUMP
+
+Output format:
+{category} [x1, y1, x2, y2] extracted_text
+
+Now process the image. Output only valid instances, one per line:"""
     }
 
     private val logger: PluginLogger = context.logger
@@ -86,14 +111,27 @@ class UnlimitedOcrRunner(
     }
 
     private suspend fun getLlamaServerSession(targetModelId: String? = null): LlamaServerSession? {
-        val candidateGgufIds = listOfNotNull(
-            targetModelId.takeIf { !it.isNullOrBlank() && it != ModelCatalog.UNLIMITED_OCR_ID },
-            ModelCatalog.UNLIMITED_OCR_BF16_ID,
-            ModelCatalog.UNLIMITED_OCR_Q8_0_ID,
-            ModelCatalog.UNLIMITED_OCR_Q4_K_M_ID,
-            ModelCatalog.UNLIMITED_OCR_IQ2_M_ID,
-            ModelCatalog.UNLIMITED_OCR_ID
-        ).distinct()
+        val isQwen = targetModelId?.contains("qwen", ignoreCase = true) == true
+        val candidateGgufIds = if (isQwen) {
+            listOfNotNull(
+                targetModelId,
+                ModelCatalog.QWEN3_VL_4B_Q4_K_M_ID,
+                ModelCatalog.QWEN3_VL_4B_Q8_0_ID,
+                ModelCatalog.QWEN3_VL_8B_Q4_K_M_ID,
+                ModelCatalog.QWEN3_VL_8B_Q8_0_ID,
+                ModelCatalog.QWEN3_VL_4B_ID,
+                ModelCatalog.QWEN3_VL_8B_ID
+            ).distinct()
+        } else {
+            listOfNotNull(
+                targetModelId.takeIf { !it.isNullOrBlank() && it != ModelCatalog.UNLIMITED_OCR_ID },
+                ModelCatalog.UNLIMITED_OCR_BF16_ID,
+                ModelCatalog.UNLIMITED_OCR_Q8_0_ID,
+                ModelCatalog.UNLIMITED_OCR_Q4_K_M_ID,
+                ModelCatalog.UNLIMITED_OCR_IQ2_M_ID,
+                ModelCatalog.UNLIMITED_OCR_ID
+            ).distinct()
+        }
 
         val installedId = candidateGgufIds.firstOrNull {
             ModelManager.Default.isModelInstalled(it, context.fileSystem, logger) ||
@@ -101,7 +139,8 @@ class UnlimitedOcrRunner(
         }
 
         if (installedId == null) {
-            logger.warn("Unlimited-OCR model is not installed in plugin storage or LM Studio. Please download it via the 'Download Model' action.")
+            val modelFamilyName = if (isQwen) "Qwen3-VL" else "Unlimited-OCR"
+            logger.warn("$modelFamilyName model is not installed in plugin storage or LM Studio. Please download it via the 'Download Model' action.")
             return null
         }
 
@@ -112,11 +151,11 @@ class UnlimitedOcrRunner(
         }
 
         val mmprojPath = ModelManager.Default.getMmprojAbsolutePath(installedId, context.fileSystem)
-            ?: ModelManager.Default.findLmStudioMmprojFile()?.absolutePath
+            ?: ModelManager.Default.findLmStudioMmprojFile(installedId, File(modelPath))?.absolutePath
         if (mmprojPath != null) {
-            logger.info("Found multimodal projector (mmproj) for Unlimited-OCR: $mmprojPath")
+            logger.info("Found multimodal projector (mmproj) for $installedId: $mmprojPath")
         } else {
-            logger.warn("No multimodal projector (mmproj) found for Unlimited-OCR. Multimodal vision parsing may fail without --mmproj.")
+            logger.warn("No multimodal projector (mmproj) found for $installedId. Multimodal vision parsing may fail without --mmproj.")
         }
 
         val llamaConfig = LlamaServerConfig(
@@ -156,7 +195,8 @@ class UnlimitedOcrRunner(
         val isSparse: Boolean = false,
         val textColor: String = "#000000",
         val hasBorder: Boolean = false,
-        val borderColor: String = ""
+        val borderColor: String = "",
+        val category: String = "speech"
     )
 
     fun isHallucinationOrEmpty(rawText: String?): Boolean = OcrTextFilter.isHallucinationOrEmpty(rawText)
@@ -197,7 +237,38 @@ class UnlimitedOcrRunner(
             }
         }
 
-        // 2. Format: <|ref|>text<|/ref|><|box|>[ymin, xmin, ymax, xmax]<|/box|>
+        // 2. Format: {speech/sfx} [top_left_x, top_left_y, bottom_right_x, bottom_right_y] text
+        val qwenPattern = Pattern.compile(
+            "\\{\\s*(speech|sfx)\\s*\\}\\s*\\[?\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*\\]?\\s*([\\s\\S]*?)(?=(?:\\s*\\{\\s*(?:speech|sfx)\\s*\\}\\s*[\\[\\d]|<\\||$))",
+            Pattern.CASE_INSENSITIVE
+        )
+        val qwenMatcher = qwenPattern.matcher(rawOutput)
+        while (qwenMatcher.find()) {
+            val category = qwenMatcher.group(1).lowercase().trim()
+            val xmin = qwenMatcher.group(2).toDoubleOrNull() ?: 0.0
+            val ymin = qwenMatcher.group(3).toDoubleOrNull() ?: 0.0
+            val xmax = qwenMatcher.group(4).toDoubleOrNull() ?: 0.0
+            val ymax = qwenMatcher.group(5).toDoubleOrNull() ?: 0.0
+            val text = cleanExtractedText(qwenMatcher.group(6))
+            val box = scaleBox(listOf(ymin, xmin, ymax, xmax), imgWidth, imgHeight)
+            if (!isHallucinationOrEmpty(text)) {
+                regions.add(
+                    ExtractedTextRegion(
+                        text = text,
+                        ymin = box[0],
+                        xmin = box[1],
+                        ymax = box[2],
+                        xmax = box[3],
+                        shape = if (category == "sfx") "rectangular" else "oval",
+                        fontFamily = if (category == "sfx") "screaming" else "sans-serif",
+                        category = category
+                    )
+                )
+            }
+        }
+        if (regions.isNotEmpty()) return regions
+
+        // 3. Format: <|ref|>text<|/ref|><|box|>[ymin, xmin, ymax, xmax]<|/box|>
         val refBoxPattern = Pattern.compile(
             "<\\|ref\\|>(.*?)<\\|/ref\\|>\\s*<\\|box\\|>\\s*\\[?\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*\\]?\\s*<\\|/box\\|>",
             Pattern.DOTALL
@@ -324,6 +395,20 @@ class UnlimitedOcrRunner(
 
     private fun scaleBox(box: List<Double>, width: Double, height: Double): List<Double> {
         if (box.size < 4) return box
+        val isPixel = (box[0] > 1000.0 || box[1] > 1000.0 || box[2] > 1000.0 || box[3] > 1000.0) ||
+            (width > 1000.0 && (box[1] > width || box[3] > width))
+        if (isPixel) {
+            val ymin = box[0]
+            val xmin = box[1]
+            val ymax = box[2]
+            val xmax = box[3]
+            return listOf(
+                min(ymin, ymax).coerceIn(0.0, height),
+                min(xmin, xmax).coerceIn(0.0, width),
+                max(ymin, ymax).coerceIn(0.0, height),
+                max(xmin, xmax).coerceIn(0.0, width)
+            )
+        }
         val is1000Scale = box.any { it > 2.0 }
         val scale = if (is1000Scale) 1000.0 else 1.0
 
@@ -368,6 +453,7 @@ class UnlimitedOcrRunner(
                         put("text_color", r.textColor)
                         put("has_border", r.hasBorder)
                         put("border_color", r.borderColor)
+                        put("category", r.category)
                     })
                 }
             }
@@ -441,7 +527,8 @@ class UnlimitedOcrRunner(
                                 withContext(Dispatchers.IO) {
                                     ImageIO.write(subImage, "png", tempCropFile)
                                 }
-                                val prompt = ""
+                                val isQwen = targetModelId?.contains("qwen", ignoreCase = true) == true
+                                val prompt = if (isQwen) (settings.qwenOcrPrompt?.ifBlank { null } ?: QWEN_OCR_SYSTEM_PROMPT) else ""
                                 val rawOutput = if (llamaSession != null) {
                                     LlamaInferenceClient.Default.executeVisionChat(
                                         baseUrl = llamaSession.baseUrl,
@@ -450,7 +537,7 @@ class UnlimitedOcrRunner(
                                         logger = logger
                                     )
                                 } else {
-                                    throw IllegalStateException("No Unlimited-OCR GGUF model or llama-server session is available.")
+                                    throw IllegalStateException("No Unlimited-OCR / Qwen GGUF model or llama-server session is available.")
                                 }
                                 rawOutputs.add(rawOutput)
                                 val cropW = crop.width.toDouble()
@@ -486,7 +573,8 @@ class UnlimitedOcrRunner(
 
                         saveJsonResult(save, outputDir, file, pageRegions, rawOutputs.joinToString("\n---\n"))
                     } else {
-                        val prompt = ""
+                        val isQwen = targetModelId?.contains("qwen", ignoreCase = true) == true
+                        val prompt = if (isQwen) (settings.qwenOcrPrompt?.ifBlank { null } ?: QWEN_OCR_SYSTEM_PROMPT) else ""
                         val rawOutput = if (llamaSession != null) {
                             LlamaInferenceClient.Default.executeVisionChat(
                                 baseUrl = llamaSession.baseUrl,
@@ -495,7 +583,7 @@ class UnlimitedOcrRunner(
                                 logger = logger
                             )
                         } else {
-                            throw IllegalStateException("No Unlimited-OCR GGUF model or llama-server session is available.")
+                            throw IllegalStateException("No Unlimited-OCR / Qwen GGUF model or llama-server session is available.")
                         }
 
                         val regions = parseOcrOutput(rawOutput, imgW, imgH)
@@ -610,7 +698,8 @@ class UnlimitedOcrRunner(
                                 withContext(Dispatchers.IO) {
                                     ImageIO.write(subImage, "png", tempCropFile)
                                 }
-                                val prompt = ""
+                                val isQwen = targetModelId?.contains("qwen", ignoreCase = true) == true
+                                val prompt = if (isQwen) (settings.qwenOcrPrompt?.ifBlank { null } ?: QWEN_OCR_SYSTEM_PROMPT) else ""
                                 val rawOutput = if (llamaSession != null) {
                                     LlamaInferenceClient.Default.executeVisionChat(
                                         baseUrl = llamaSession.baseUrl,
@@ -619,7 +708,7 @@ class UnlimitedOcrRunner(
                                         logger = logger
                                     )
                                 } else {
-                                    throw IllegalStateException("No Unlimited-OCR GGUF model or llama-server session is available.")
+                                    throw IllegalStateException("No Unlimited-OCR / Qwen GGUF model or llama-server session is available.")
                                 }
                                 rawOutputs.add(rawOutput)
                                 val cropW = crop.width.toDouble()
@@ -665,7 +754,8 @@ class UnlimitedOcrRunner(
 
                         saveJsonResult(save, outputDir, file, pageRegions, rawOutputs.joinToString("\n---\n"))
                     } else {
-                        val prompt = ""
+                        val isQwen = targetModelId?.contains("qwen", ignoreCase = true) == true
+                        val prompt = if (isQwen) (settings.qwenOcrPrompt?.ifBlank { null } ?: QWEN_OCR_SYSTEM_PROMPT) else ""
                         val rawOutput = if (llamaSession != null) {
                             LlamaInferenceClient.Default.executeVisionChat(
                                 baseUrl = llamaSession.baseUrl,
@@ -674,7 +764,7 @@ class UnlimitedOcrRunner(
                                 logger = logger
                             )
                         } else {
-                            throw IllegalStateException("No Unlimited-OCR GGUF model or llama-server session is available.")
+                            throw IllegalStateException("No Unlimited-OCR / Qwen GGUF model or llama-server session is available.")
                         }
 
                         val regions = parseOcrOutput(rawOutput, imgW, imgH)

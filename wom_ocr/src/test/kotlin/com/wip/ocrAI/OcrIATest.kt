@@ -5,6 +5,7 @@ import com.wip.common.inference.llama.LlamaServerMode
 import com.wip.ocrAI.models.AIModel
 import com.wip.ocrAI.models.OcrDownloadModel
 import com.wip.ocrAI.models.OcrIASettings
+import com.wip.ocrAI.models.OcrQuantization
 import org.junit.Test
 import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.PluginContext
@@ -56,6 +57,16 @@ class OcrIATest {
         assertEquals("Unlimited-OCR-Q8_0", OcrDownloadModel.UNLIMITED_OCR_Q8_0.modelId)
         assertEquals("Unlimited-OCR-Q4_K_M", OcrDownloadModel.UNLIMITED_OCR_Q4_K_M.modelId)
         assertEquals("Unlimited-OCR-IQ2_M", OcrDownloadModel.UNLIMITED_OCR_IQ2_M.modelId)
+        assertEquals("Qwen3-VL-4B-Instruct-Q4_K_M", OcrDownloadModel.QWEN3_VL_4B_Q4_K_M.modelId)
+        assertEquals("Qwen3-VL-4B-Instruct-Q8_0", OcrDownloadModel.QWEN3_VL_4B_Q8_0.modelId)
+        assertEquals("Qwen3-VL-8B-Instruct-Q4_K_M", OcrDownloadModel.QWEN3_VL_8B_Q4_K_M.modelId)
+        assertEquals("Qwen3-VL-8B-Instruct-Q8_0", OcrDownloadModel.QWEN3_VL_8B_Q8_0.modelId)
+    }
+
+    @Test
+    fun testOcrQuantizationEnum() {
+        assertEquals("Q4_K_M", OcrQuantization.Q4_K_M.id)
+        assertEquals("Q8_0", OcrQuantization.Q8_0.id)
     }
 
     @Test
@@ -72,6 +83,8 @@ class OcrIATest {
         assertEquals("Unlimited-OCR-Q8_0", AIModel.UNLIMITED_OCR_Q8_0.id)
         assertEquals("Unlimited-OCR-Q4_K_M", AIModel.UNLIMITED_OCR_Q4_K_M.id)
         assertEquals("Unlimited-OCR-IQ2_M", AIModel.UNLIMITED_OCR_IQ2_M.id)
+        assertEquals("Qwen3-VL-4B-Instruct", AIModel.QWEN3_VL_4B.id)
+        assertEquals("Qwen3-VL-8B-Instruct", AIModel.QWEN3_VL_8B.id)
     }
 
     @Test
@@ -316,7 +329,9 @@ class OcrIATest {
             AIModel.UNLIMITED_OCR_BF16,
             AIModel.UNLIMITED_OCR_Q8_0,
             AIModel.UNLIMITED_OCR_Q4_K_M,
-            AIModel.UNLIMITED_OCR_IQ2_M
+            AIModel.UNLIMITED_OCR_IQ2_M,
+            AIModel.QWEN3_VL_4B,
+            AIModel.QWEN3_VL_8B
         )) {
             val res = plugin.ocr(
                 input = "non_existent_folder",
@@ -460,6 +475,33 @@ class OcrIATest {
         val merged = plugin.mergeSingleOcrWithVision(ocr, singleVision, context)
         assertEquals(1, merged.texts.size)
         assertEquals("Actual speech text", merged.texts[0])
+    }
+
+    @Test
+    fun testParseQwenOcrOutput() {
+        val context = io.mockk.mockk<PluginContext>(relaxed = true)
+        val hostFs = io.mockk.mockk<HostFileSystem>(relaxed = true)
+        val runner = UnlimitedOcrRunner(context, hostFs)
+
+        val rawOutput = """
+            {speech} [100, 200, 300, 400] Where are you going?!
+            {sfx} [500, 600, 700, 800] *BOOM*
+        """.trimIndent()
+
+        val regions = runner.parseOcrOutput(rawOutput, 1000.0, 1000.0)
+        assertEquals(2, regions.size)
+        assertEquals("Where are you going?!", regions[0].text)
+        assertEquals("speech", regions[0].category)
+        assertEquals(200.0, regions[0].ymin, 0.01)
+        assertEquals(100.0, regions[0].xmin, 0.01)
+        assertEquals(400.0, regions[0].ymax, 0.01)
+        assertEquals(300.0, regions[0].xmax, 0.01)
+        assertEquals("oval", regions[0].shape)
+
+        assertEquals("*BOOM*", regions[1].text)
+        assertEquals("sfx", regions[1].category)
+        assertEquals("rectangular", regions[1].shape)
+        assertEquals("screaming", regions[1].fontFamily)
     }
 }
 

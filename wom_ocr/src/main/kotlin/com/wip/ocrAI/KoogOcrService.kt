@@ -178,8 +178,8 @@ class KoogOcrService(
             MultiLLMPromptExecutor(wrapperClient)
         }
 
-        AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M -> {
-            throw UnsupportedOperationException("Unlimited-OCR GGUF models are handled via UnlimitedOcrRunner / llama-server.")
+        AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M, AIModel.QWEN3_VL_4B, AIModel.QWEN3_VL_8B -> {
+            throw UnsupportedOperationException("Local GGUF models are handled via UnlimitedOcrRunner / llama-server.")
         }
     }
 
@@ -188,7 +188,7 @@ class KoogOcrService(
             AIModel.GEMMA_26B, AIModel.GEMMA_31B, AIModel.GEMINI_1_5_PRO, AIModel.GEMINI_2_5_PRO, AIModel.GEMINI_3_1_FLASH_LITE -> LLMProvider.Google
             AIModel.CLAUDE_3_5_SONNET -> LLMProvider.Anthropic
             AIModel.GPT_4O, AIModel.LM_STUDIO -> LLMProvider.OpenAI
-            AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M -> LLMProvider.Google
+            AIModel.UNLIMITED_OCR_BF16, AIModel.UNLIMITED_OCR_Q8_0, AIModel.UNLIMITED_OCR_Q4_K_M, AIModel.UNLIMITED_OCR_IQ2_M, AIModel.QWEN3_VL_4B, AIModel.QWEN3_VL_8B -> LLMProvider.Google
         }
     }
 

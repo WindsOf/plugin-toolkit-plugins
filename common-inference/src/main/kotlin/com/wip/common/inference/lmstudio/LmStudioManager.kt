@@ -71,12 +71,17 @@ class LmStudioManager(
         fun getStandardModelDirectories(): List<File> {
             val userHome = System.getProperty("user.home", ".")
             val localAppData = System.getenv("LOCALAPPDATA") ?: "$userHome/AppData/Local"
-            return listOf(
+            val list = mutableListOf(
                 File(userHome, ".cache/lm-studio/models"),
                 File(userHome, ".lmstudio/models"),
                 File(userHome, ".lmstudio/models/sahilchachra/Unlimited-OCR-GGUF"),
-                File(localAppData, "lm-studio/models")
+                File(localAppData, "lm-studio/models"),
+                File("D:/Programmi/lmstudio/models"),
+                File("C:/Programmi/lmstudio/models")
             )
+            System.getenv("LMSTUDIO_MODELS_DIR")?.takeIf { it.isNotBlank() }?.let { list.add(File(it)) }
+            System.getProperty("lmstudio.models.dir")?.takeIf { it.isNotBlank() }?.let { list.add(File(it)) }
+            return list.distinct()
         }
     }
 
@@ -152,7 +157,7 @@ class LmStudioManager(
             configured.equals("auto", ignoreCase = true)
 
         if (!isGeneric) {
-            return configured!!
+            return configured
         }
 
         val status = checkStatus(baseUrl = baseUrl, apiKey = apiKey, logger = logger)
@@ -245,36 +250,96 @@ class LmStudioManager(
         for (dir in getStandardModelDirectories()) {
             if (dir.exists() && dir.isDirectory) {
                 dir.walkTopDown().maxDepth(5).filter { it.isFile && it.extension.equals("gguf", ignoreCase = true) }.forEach {
-                    candidates.add(it)
+                    if (!it.name.startsWith("mmproj", ignoreCase = true)) {
+                        candidates.add(it)
+                    }
                 }
             }
         }
 
-        return candidates.firstOrNull { file ->
-            val nameWithoutExt = file.nameWithoutExtension
+        // 1. Exact match by file name or nameWithoutExtension
+        val exact = candidates.firstOrNull { file ->
             file.name.equals("$targetName.gguf", ignoreCase = true) ||
-                nameWithoutExt.equals(targetName, ignoreCase = true) ||
-                (targetName.contains("bf16", ignoreCase = true) && nameWithoutExt.contains("bf16", ignoreCase = true)) ||
-                (targetName.contains("q8_0", ignoreCase = true) && nameWithoutExt.contains("q8_0", ignoreCase = true)) ||
-                (targetName.contains("q4_k_m", ignoreCase = true) && nameWithoutExt.contains("q4_k_m", ignoreCase = true)) ||
-                (targetName.contains("iq2_m", ignoreCase = true) && nameWithoutExt.contains("iq2_m", ignoreCase = true))
+                file.nameWithoutExtension.equals(targetName, ignoreCase = true)
+        }
+        if (exact != null) return exact
+
+        // 2. Token-based matching: architecture + size + quantization
+        val targetLower = targetName.lowercase()
+        val isQwen = targetLower.contains("qwen")
+        val is4B = targetLower.contains("4b")
+        val is8B = targetLower.contains("8b")
+        val isUnlimited = targetLower.contains("unlimited")
+
+        val targetQuant = listOf("q4_k_m", "q8_0", "bf16", "iq2_m", "q4", "q8").firstOrNull { targetLower.contains(it) }
+
+        return candidates.firstOrNull { file ->
+            val nameLower = file.nameWithoutExtension.lowercase()
+            val parentLower = file.parentFile?.name?.lowercase() ?: ""
+            val fullCandidate = "$parentLower/$nameLower"
+
+            val matchesFamily = when {
+                isQwen && is4B -> fullCandidate.contains("qwen") && fullCandidate.contains("4b")
+                isQwen && is8B -> fullCandidate.contains("qwen") && fullCandidate.contains("8b")
+                isQwen -> fullCandidate.contains("qwen")
+                isUnlimited -> fullCandidate.contains("unlimited")
+                else -> false
+            }
+
+            val matchesQuant = if (targetQuant != null) {
+                nameLower.contains(targetQuant) || (targetQuant == "q4" && nameLower.contains("q4_k_m")) || (targetQuant == "q8" && nameLower.contains("q8_0"))
+            } else true
+
+            matchesFamily && matchesQuant
         }
     }
 
     /**
      * Searches standard LM Studio directories for a multimodal projector (.gguf) file.
      */
-    fun findLmStudioMmprojFile(): File? {
+    fun findLmStudioMmprojFile(modelId: String? = null, modelFile: File? = null): File? {
+        // 1. If modelFile is known, check its parent folder first
+        if (modelFile != null && modelFile.parentFile != null && modelFile.parentFile.exists()) {
+            val siblingMmproj = modelFile.parentFile.walkTopDown().maxDepth(2).firstOrNull {
+                it.isFile && it.name.startsWith("mmproj", ignoreCase = true) && it.extension.equals("gguf", ignoreCase = true)
+            }
+            if (siblingMmproj != null) return siblingMmproj
+        }
+
+        // 2. Target matching by model identifier
+        val targetLower = modelId?.trim()?.lowercase() ?: ""
+        val isQwen = targetLower.contains("qwen")
+        val is4B = targetLower.contains("4b")
+        val is8B = targetLower.contains("8b")
+        val isUnlimited = targetLower.contains("unlimited")
+
+        val allMmprojCandidates = mutableListOf<File>()
         for (dir in getStandardModelDirectories()) {
             if (dir.exists() && dir.isDirectory) {
-                val direct = File(dir, "mmproj-Unlimited-OCR-F16.gguf")
-                if (direct.exists()) return direct
-                val found = dir.walkTopDown().maxDepth(5).firstOrNull {
+                dir.walkTopDown().maxDepth(5).filter {
                     it.isFile && it.name.startsWith("mmproj", ignoreCase = true) && it.extension.equals("gguf", ignoreCase = true)
-                }
-                if (found != null) return found
+                }.forEach { allMmprojCandidates.add(it) }
             }
         }
-        return null
+
+        if (targetLower.isNotBlank()) {
+            val matching = allMmprojCandidates.firstOrNull { file ->
+                val nameLower = file.nameWithoutExtension.lowercase()
+                val parentLower = file.parentFile?.name?.lowercase() ?: ""
+                val fullCandidate = "$parentLower/$nameLower"
+                when {
+                    isQwen && is4B -> fullCandidate.contains("qwen") && fullCandidate.contains("4b")
+                    isQwen && is8B -> fullCandidate.contains("qwen") && fullCandidate.contains("8b")
+                    isQwen -> fullCandidate.contains("qwen")
+                    isUnlimited -> fullCandidate.contains("unlimited")
+                    else -> false
+                }
+            }
+            if (matching != null) return matching
+        }
+
+        // 3. Fallback to default Unlimited-OCR or first found mmproj
+        return allMmprojCandidates.firstOrNull { it.name.contains("Unlimited-OCR", ignoreCase = true) }
+            ?: allMmprojCandidates.firstOrNull()
     }
 }
