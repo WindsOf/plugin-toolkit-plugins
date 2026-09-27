@@ -3,11 +3,14 @@ package com.wip.manhwaTranslatorAI
 import com.wip.common.inference.deepseek.DeepSeekManager
 import com.wip.common.inference.llm.ReasoningEffortLevel
 import com.wip.common.inference.lmstudio.LmStudioManager
+import com.wip.common.inference.zai.ZaiManager
 import com.wip.common.models.AdvancedOCRResult
 import com.wip.common.models.OCRResult
 import com.wip.common.models.OcrTextFilter
 import io.ktor.client.request.get
 import io.ktor.http.HttpStatusCode
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
 import org.wip.plugintoolkit.api.ConditionOperator
 import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.OS
@@ -71,6 +74,20 @@ data class TranslatorAISettings(
     val deepseekBaseUrl: String? = "https://api.deepseek.com",
 
     @PluginSetting(
+        description = "API Key for Z.AI (GLM) services",
+        required = false,
+        secret = true
+    )
+    val zaiApiKey: String? = "",
+
+    @PluginSetting(
+        description = "Base URL for Z.AI API (e.g. https://api.z.ai/api/paas/v4)",
+        defaultValue = "https://api.z.ai/api/paas/v4",
+        required = false
+    )
+    val zaiBaseUrl: String? = "https://api.z.ai/api/paas/v4",
+
+    @PluginSetting(
         description = "URL for LM Studio (e.g. http://localhost:1234/v1)",
         required = false
     )
@@ -105,14 +122,35 @@ enum class AIModel(val id: String) {
     @RequiresSetting(["deepseekApiKey"])
     DEEPSEEK_PRO("deepseek-v4-pro"),
 
+    @RequiresSetting(["zaiApiKey"])
+    GLM_5_3_FLASH("glm-5.3-flash"),
+
+    @RequiresSetting(["zaiApiKey"])
+    GLM_5_3_FLASHX("glm-5.3-flashx"),
+
+    @RequiresSetting(["zaiApiKey"])
+    GLM_4_7_FLASH("glm-4.7-flash"),
+
     @RequiresSetting(["lmStudioModelName", "lmStudioApiKey", "lmStudioUrl"])
-    LM_STUDIO("lm-studio")
+    LM_STUDIO("lm-studio");
+
+    companion object {
+        val ZAI_GLM_5_3_FLASH: AIModel get() = GLM_5_3_FLASH
+        val ZAI_GLM_5_3_FLASHX: AIModel get() = GLM_5_3_FLASHX
+        val ZAI_GLM_4_7_FLASH: AIModel get() = GLM_4_7_FLASH
+
+        fun fromId(id: String): AIModel? {
+            val clean = id.trim().lowercase()
+            return entries.firstOrNull { it.id.equals(clean, ignoreCase = true) }
+        }
+    }
 }
 
 enum class ApiProvider(val displayName: String) {
     DEEPSEEK("DeepSeek"),
     GOOGLE("Google Gemini"),
-    LM_STUDIO("LM Studio")
+    LM_STUDIO("LM Studio"),
+    ZAI("Z.AI")
 }
 
 enum class StructuredOutputMode(val displayName: String) {
@@ -124,15 +162,15 @@ enum class StructuredOutputMode(val displayName: String) {
 @PluginInfo(
     id = "com.wip.manhwa_translator_ai",
     name = "WOM Translator",
-    version = "1.6.0",
-    description = "Translate text from Manhwa/Manga into Italian using Google AI or DeepSeek via Koog",
+    version = "1.7.0",
+    description = "Translate text from Manhwa/Manga into Italian using Google AI, DeepSeek, or Z.AI via Koog",
     supportedOs = [OS.WINDOWS]
 )
 class TranslatorAI(val settings: TranslatorAISettings) {
 
     @PluginLoad
     fun onLoad(logger: PluginLogger): Result<Unit> {
-        logger.info("[TranslatorAI] onLoad: Initializing Manhwa Translator AI (has googleApiKey: ${settings.googleApiKey.isNotBlank()}, has deepseekApiKey: ${!settings.deepseekApiKey.isNullOrBlank()}, useStructuredOutput: ${settings.useStructuredOutput}, chunkSize: ${settings.chunkSize}, debugLogging: ${settings.debugLogging}, lmStudioUrl: ${settings.lmStudioUrl})")
+        logger.info("[TranslatorAI] onLoad: Initializing Manhwa Translator AI (has googleApiKey: ${settings.googleApiKey.isNotBlank()}, has deepseekApiKey: ${!settings.deepseekApiKey.isNullOrBlank()}, has zaiApiKey: ${!settings.zaiApiKey.isNullOrBlank()}, useStructuredOutput: ${settings.useStructuredOutput}, chunkSize: ${settings.chunkSize}, debugLogging: ${settings.debugLogging}, lmStudioUrl: ${settings.lmStudioUrl})")
         return Result.success(Unit)
     }
 
@@ -218,34 +256,29 @@ class TranslatorAI(val settings: TranslatorAISettings) {
                     context.showToast(msg)
                 }
             }
-        }
-    }
-
-    @Deprecated("Use testApiConnection instead", ReplaceWith("testApiConnection(ApiProvider.DEEPSEEK, context)"))
-    suspend fun testDeepSeekConnection(context: PluginContext) {
-        testApiConnection(ApiProvider.DEEPSEEK, context)
-    }
-
-    @PluginAction(
-        name = "Test LM Studio Connection",
-        description = "Checks connectivity to LM Studio and discovers active and available models"
-    )
-    suspend fun testLmStudioConnection(context: PluginContext) {
-        val logger = context.logger
-        val url = settings.lmStudioUrl?.ifBlank { "http://localhost:1234/v1" } ?: "http://localhost:1234/v1"
-        logger.info("[TranslatorAI] Testing LM Studio connection at: $url")
-        val status =
-            LmStudioManager.Default.checkStatus(baseUrl = url, apiKey = settings.lmStudioApiKey, logger = logger)
-        if (status.connected) {
-            val modelDesc = if (!status.activeModel.isNullOrBlank()) " (Active model: ${status.activeModel})" else ""
-            val msg = "Connected to LM Studio at $url successfully!$modelDesc"
-            logger.info("[TranslatorAI] $msg")
-            context.showToast(msg)
-        } else {
-            val err = status.errorMessage ?: "Connection refused or unreachable"
-            val msg = "Failed to connect to LM Studio at $url: $err"
-            logger.warn("[TranslatorAI] $msg")
-            context.showToast(msg)
+            ApiProvider.ZAI -> {
+                val key = settings.zaiApiKey?.ifBlank { System.getenv("ZAI_API_KEY") ?: "" } ?: ""
+                val url = settings.zaiBaseUrl?.ifBlank { ZaiManager.DEFAULT_BASE_URL } ?: ZaiManager.DEFAULT_BASE_URL
+                if (key.isBlank()) {
+                    val msg = "Z.AI API key is not configured. Please set zaiApiKey in settings or ZAI_API_KEY environment variable."
+                    logger.warn("[TranslatorAI] $msg")
+                    context.showToast(msg)
+                    return
+                }
+                logger.info("[TranslatorAI] Testing Z.AI connection at: $url")
+                val status = ZaiManager.Default.checkStatus(baseUrl = url, apiKey = key, logger = logger)
+                if (status.connected) {
+                    val modelsDesc = if (status.models.isNotEmpty()) " (Models: ${status.models.joinToString()})" else " (Models: glm-5.3-flash, glm-5.3-flashx, glm-4.7-flash)"
+                    val msg = "Connected to Z.AI at $url successfully!$modelsDesc"
+                    logger.info("[TranslatorAI] $msg")
+                    context.showToast(msg)
+                } else {
+                    val err = status.errorMessage ?: "Connection failed"
+                    val msg = "Failed to connect to Z.AI at $url: $err"
+                    logger.warn("[TranslatorAI] $msg")
+                    context.showToast(msg)
+                }
+            }
         }
     }
 
@@ -310,7 +343,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         @DependsOn(
             param = "model",
             operator = ConditionOperator.IN,
-            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO"]
+            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO", "GLM_5_3_FLASH", "GLM_5_3_FLASHX", "GLM_4_7_FLASH"]
         )
         enableThinking: Boolean? = true,
         @CapabilityParam(
@@ -321,7 +354,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         @DependsOn(
             param = "model",
             operator = ConditionOperator.IN,
-            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO"]
+            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO", "GLM_5_3_FLASH", "GLM_5_3_FLASHX", "GLM_4_7_FLASH"]
         )
         reasoningEffort: ReasoningEffortLevel? = ReasoningEffortLevel.DEFAULT,
         @CapabilityParam(
@@ -467,7 +500,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         @DependsOn(
             param = "model",
             operator = ConditionOperator.IN,
-            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO"]
+            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO", "GLM_5_3_FLASH", "GLM_5_3_FLASHX", "GLM_4_7_FLASH"]
         )
         enableThinking: Boolean? = true,
         @CapabilityParam(
@@ -478,7 +511,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         @DependsOn(
             param = "model",
             operator = ConditionOperator.IN,
-            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO"]
+            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO", "GLM_5_3_FLASH", "GLM_5_3_FLASHX", "GLM_4_7_FLASH"]
         )
         reasoningEffort: ReasoningEffortLevel? = ReasoningEffortLevel.DEFAULT,
         @CapabilityParam(
@@ -599,7 +632,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         @DependsOn(
             param = "model",
             operator = ConditionOperator.IN,
-            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO"]
+            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO", "GLM_5_3_FLASH", "GLM_5_3_FLASHX", "GLM_4_7_FLASH"]
         )
         enableThinking: Boolean? = true,
         @CapabilityParam(
@@ -610,7 +643,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         @DependsOn(
             param = "model",
             operator = ConditionOperator.IN,
-            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO"]
+            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO", "GLM_5_3_FLASH", "GLM_5_3_FLASHX", "GLM_4_7_FLASH"]
         )
         reasoningEffort: ReasoningEffortLevel? = ReasoningEffortLevel.DEFAULT,
         @CapabilityParam(
@@ -729,7 +762,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
             description = "Optional chapter number or title (e.g. '242' or 'Cap. 242')",
             defaultValue = ""
         )
-        chapterNumber: String? = "",
+        chapterNumber: JsonElement? = null,
         @CapabilityParam(
             description = "Optional original OCR text/dialogue strings from the new chapter",
             defaultValue = "[]"
@@ -774,7 +807,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         @DependsOn(
             param = "model",
             operator = ConditionOperator.IN,
-            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO"]
+            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO", "GLM_5_3_FLASH", "GLM_5_3_FLASHX", "GLM_4_7_FLASH"]
         )
         enableThinking: Boolean? = true,
         @CapabilityParam(
@@ -785,7 +818,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         @DependsOn(
             param = "model",
             operator = ConditionOperator.IN,
-            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO"]
+            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO", "GLM_5_3_FLASH", "GLM_5_3_FLASHX", "GLM_4_7_FLASH"]
         )
         reasoningEffort: ReasoningEffortLevel? = ReasoningEffortLevel.DEFAULT,
         context: PluginContext,
@@ -794,12 +827,17 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         val logger = context.logger
         logger.info("Manhwa Translator AI (update_dictionary) started with model: ${model.id}")
         val effectiveTrans = if (!translatedTexts.isNullOrEmpty()) translatedTexts else chapterTexts
+        val resolvedChapterNumber = when (chapterNumber) {
+            null -> null
+            is JsonPrimitive -> chapterNumber.content.trim().ifEmpty { null }
+            else -> chapterNumber.toString().trim().ifEmpty { null }
+        }
         return try {
             val service = KoogAITranslatorService(context, settings, hostFs)
             val result = service.updateDictionary(
                 currentDictionary = currentDictionary,
                 chapterSummary = chapterSummary,
-                chapterNumber = chapterNumber,
+                chapterNumber = resolvedChapterNumber,
                 originalTexts = originalTexts,
                 translatedTexts = effectiveTrans,
                 inputFolder = inputFolder,
@@ -821,6 +859,38 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         }
     }
 
+    suspend fun updateDictionary(
+        currentDictionary: String? = "",
+        chapterSummary: String? = "",
+        chapterNumber: String?,
+        originalTexts: List<String>? = emptyList(),
+        translatedTexts: List<String>? = emptyList(),
+        chapterTexts: List<String>? = emptyList(),
+        inputFolder: String? = "",
+        model: AIModel = AIModel.GEMINI_3_8_FLASH,
+        outputFile: Boolean? = true,
+        outputDir: String,
+        enableThinking: Boolean? = true,
+        reasoningEffort: ReasoningEffortLevel? = ReasoningEffortLevel.DEFAULT,
+        context: PluginContext,
+        hostFs: HostFileSystem
+    ): String = updateDictionary(
+        currentDictionary = currentDictionary,
+        chapterSummary = chapterSummary,
+        chapterNumber = chapterNumber?.let { JsonPrimitive(it) },
+        originalTexts = originalTexts,
+        translatedTexts = translatedTexts,
+        chapterTexts = chapterTexts,
+        inputFolder = inputFolder,
+        model = model,
+        outputFile = outputFile,
+        outputDir = outputDir,
+        enableThinking = enableThinking,
+        reasoningEffort = reasoningEffort,
+        context = context,
+        hostFs = hostFs
+    )
+
     @Capability(
         name = "update_dictionary_ocr",
         description = "Generates or updates a dictionary/lore context for a new chapter using original and/or translated OCRResult"
@@ -840,7 +910,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
             description = "Optional chapter number or title (e.g. '242' or 'Cap. 242')",
             defaultValue = ""
         )
-        chapterNumber: String? = "",
+        chapterNumber: JsonElement? = null,
         @CapabilityParam(
             description = "Original OCRResult containing raw source texts from the new chapter"
         )
@@ -878,7 +948,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         @DependsOn(
             param = "model",
             operator = ConditionOperator.IN,
-            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO"]
+            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO", "GLM_5_3_FLASH", "GLM_5_3_FLASHX", "GLM_4_7_FLASH"]
         )
         enableThinking: Boolean? = true,
         @CapabilityParam(
@@ -889,7 +959,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         @DependsOn(
             param = "model",
             operator = ConditionOperator.IN,
-            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO"]
+            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO", "GLM_5_3_FLASH", "GLM_5_3_FLASHX", "GLM_4_7_FLASH"]
         )
         reasoningEffort: ReasoningEffortLevel? = ReasoningEffortLevel.DEFAULT,
         @CapabilityParam(
@@ -906,12 +976,17 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         logger.info("Manhwa Translator AI (update_dictionary_ocr) started with model: ${model.id}")
         val origTexts = originalOcr?.texts?.filter { !isHallucination(it) } ?: emptyList()
         val transTexts = translatedOcr?.texts?.filter { !isHallucination(it) } ?: emptyList()
+        val resolvedChapterNumber = when (chapterNumber) {
+            null -> null
+            is JsonPrimitive -> chapterNumber.content.trim().ifEmpty { null }
+            else -> chapterNumber.toString().trim().ifEmpty { null }
+        }
         return try {
             val service = KoogAITranslatorService(context, settings, hostFs)
             val result = service.updateDictionary(
                 currentDictionary = currentDictionary,
                 chapterSummary = chapterSummary,
-                chapterNumber = chapterNumber,
+                chapterNumber = resolvedChapterNumber,
                 originalTexts = origTexts,
                 translatedTexts = transTexts,
                 inputFolder = inputFolder,
@@ -934,6 +1009,38 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         }
     }
 
+    suspend fun updateDictionaryOcr(
+        currentDictionary: String? = "",
+        chapterSummary: String? = "",
+        chapterNumber: String?,
+        originalOcr: OCRResult? = null,
+        translatedOcr: OCRResult? = null,
+        inputFolder: String? = "",
+        model: AIModel = AIModel.GEMINI_3_8_FLASH,
+        outputFile: Boolean? = true,
+        outputDir: String,
+        enableThinking: Boolean? = true,
+        reasoningEffort: ReasoningEffortLevel? = ReasoningEffortLevel.DEFAULT,
+        debugLogging: Boolean? = false,
+        context: PluginContext,
+        hostFs: HostFileSystem
+    ): String = updateDictionaryOcr(
+        currentDictionary = currentDictionary,
+        chapterSummary = chapterSummary,
+        chapterNumber = chapterNumber?.let { JsonPrimitive(it) },
+        originalOcr = originalOcr,
+        translatedOcr = translatedOcr,
+        inputFolder = inputFolder,
+        model = model,
+        outputFile = outputFile,
+        outputDir = outputDir,
+        enableThinking = enableThinking,
+        reasoningEffort = reasoningEffort,
+        debugLogging = debugLogging,
+        context = context,
+        hostFs = hostFs
+    )
+
     @Capability(
         name = "update_dictionary_advanced_ocr",
         description = "Generates or updates a dictionary/lore context for a new chapter using original and/or translated AdvancedOCRResult"
@@ -953,7 +1060,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
             description = "Optional chapter number or title (e.g. '242' or 'Cap. 242')",
             defaultValue = ""
         )
-        chapterNumber: String? = "",
+        chapterNumber: JsonElement? = null,
         @CapabilityParam(
             description = "Original AdvancedOCRResult containing raw source texts from the new chapter"
         )
@@ -991,7 +1098,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         @DependsOn(
             param = "model",
             operator = ConditionOperator.IN,
-            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO"]
+            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO", "GLM_5_3_FLASH", "GLM_5_3_FLASHX", "GLM_4_7_FLASH"]
         )
         enableThinking: Boolean? = true,
         @CapabilityParam(
@@ -1002,7 +1109,7 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         @DependsOn(
             param = "model",
             operator = ConditionOperator.IN,
-            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO"]
+            values = ["GEMINI_3_7_FLASH", "GEMINI_3_8_FLASH", "DEEPSEEK_FLASH", "DEEPSEEK_PRO", "LM_STUDIO", "GLM_5_3_FLASH", "GLM_5_3_FLASHX", "GLM_4_7_FLASH"]
         )
         reasoningEffort: ReasoningEffortLevel? = ReasoningEffortLevel.DEFAULT,
         @CapabilityParam(
@@ -1019,12 +1126,17 @@ class TranslatorAI(val settings: TranslatorAISettings) {
         logger.info("Manhwa Translator AI (update_dictionary_advanced_ocr) started with model: ${model.id}")
         val origTexts = originalOcr?.texts?.filter { !isHallucination(it) } ?: emptyList()
         val transTexts = translatedOcr?.texts?.filter { !isHallucination(it) } ?: emptyList()
+        val resolvedChapterNumber = when (chapterNumber) {
+            null -> null
+            is JsonPrimitive -> chapterNumber.content.trim().ifEmpty { null }
+            else -> chapterNumber.toString().trim().ifEmpty { null }
+        }
         return try {
             val service = KoogAITranslatorService(context, settings, hostFs)
             val result = service.updateDictionary(
                 currentDictionary = currentDictionary,
                 chapterSummary = chapterSummary,
-                chapterNumber = chapterNumber,
+                chapterNumber = resolvedChapterNumber,
                 originalTexts = origTexts,
                 translatedTexts = transTexts,
                 inputFolder = inputFolder,
@@ -1046,6 +1158,38 @@ class TranslatorAI(val settings: TranslatorAISettings) {
             throw RuntimeException(msg, e)
         }
     }
+
+    suspend fun updateDictionaryAdvancedOcr(
+        currentDictionary: String? = "",
+        chapterSummary: String? = "",
+        chapterNumber: String?,
+        originalOcr: AdvancedOCRResult? = null,
+        translatedOcr: AdvancedOCRResult? = null,
+        inputFolder: String? = "",
+        model: AIModel = AIModel.GEMINI_3_8_FLASH,
+        outputFile: Boolean? = true,
+        outputDir: String,
+        enableThinking: Boolean? = true,
+        reasoningEffort: ReasoningEffortLevel? = ReasoningEffortLevel.DEFAULT,
+        debugLogging: Boolean? = false,
+        context: PluginContext,
+        hostFs: HostFileSystem
+    ): String = updateDictionaryAdvancedOcr(
+        currentDictionary = currentDictionary,
+        chapterSummary = chapterSummary,
+        chapterNumber = chapterNumber?.let { JsonPrimitive(it) },
+        originalOcr = originalOcr,
+        translatedOcr = translatedOcr,
+        inputFolder = inputFolder,
+        model = model,
+        outputFile = outputFile,
+        outputDir = outputDir,
+        enableThinking = enableThinking,
+        reasoningEffort = reasoningEffort,
+        debugLogging = debugLogging,
+        context = context,
+        hostFs = hostFs
+    )
 
     @Capability(
         name = "save_translations",

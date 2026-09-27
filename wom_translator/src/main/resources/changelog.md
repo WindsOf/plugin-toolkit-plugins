@@ -1,3 +1,13 @@
+Version: 1.7.0
+Date: 2026-09-27
+Added:
+  - Added Z.AI (Zhipu AI) GLM translation support:
+  - GLM-5.3-Flash (`glm-5.3-flash`)
+  - GLM-5.3-FlashX (`glm-5.3-flashx`)
+  - GLM-4.7-Flash (`glm-4.7-flash`)
+Removed:
+  - Test LMStudio connection specific action
+-------------------------------------------------------------------------------------------------
 Version: 1.6.0
 Date: 2026-09-24
 Added:
@@ -13,6 +23,7 @@ Fixed:
   - Implemented robust balanced JSON object extractor that strips preambles, fences, and trailing commentary (such as reasoning verification remarks) regardless of whether structured output is enabled.
   - Pre-filtered OCR non-text tokens (`[Non-Text]`) and degenerate hallucination loops (`1.1.1.1.1...`) from translation requests while preserving exact 1:1 index-to-index mapping with empty string placeholders for downstream nodes.
   - Instructed translating LLM via prompt guidelines on identifying OCR artifacts and degenerate repeating sequences, directing the model to shrink them to an empty string (`""`) to prevent generation failure and output bloat while preserving the exact 1:1 element count.
+  - Fixed inputs in dictionary updater
 Planned:
   - Advanced toggle for server grounding
 -------------------------------------------------------------------------------------------------

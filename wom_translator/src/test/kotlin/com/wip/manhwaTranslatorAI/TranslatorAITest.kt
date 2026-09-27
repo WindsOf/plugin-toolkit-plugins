@@ -16,6 +16,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.decodeFromJsonElement
 
 class TranslatorAITest {
 
@@ -599,10 +600,30 @@ class TranslatorAITest {
     }
 
     @Test
+    fun testZaiModelIdentifiers() {
+        assertEquals("glm-5.3-flash", AIModel.GLM_5_3_FLASH.id)
+        assertEquals("glm-5.3-flashx", AIModel.GLM_5_3_FLASHX.id)
+        assertEquals("glm-4.7-flash", AIModel.GLM_4_7_FLASH.id)
+        assertEquals(AIModel.GLM_5_3_FLASH, AIModel.ZAI_GLM_5_3_FLASH)
+        assertEquals(AIModel.GLM_5_3_FLASHX, AIModel.ZAI_GLM_5_3_FLASHX)
+        assertEquals(AIModel.GLM_4_7_FLASH, AIModel.ZAI_GLM_4_7_FLASH)
+        assertEquals(AIModel.GLM_5_3_FLASH, AIModel.fromId("glm-5.3-flash"))
+        assertEquals(AIModel.GLM_5_3_FLASHX, AIModel.fromId("GLM-5.3-FLASHX"))
+        assertEquals(AIModel.GLM_4_7_FLASH, AIModel.fromId("glm-4.7-flash"))
+    }
+
+    @Test
     fun testTranslatorAISettingsDeepSeekDefaults() {
         val settings = TranslatorAISettings()
         assertEquals("", settings.deepseekApiKey)
         assertEquals("https://api.deepseek.com", settings.deepseekBaseUrl)
+    }
+
+    @Test
+    fun testTranslatorAISettingsZaiDefaults() {
+        val settings = TranslatorAISettings()
+        assertEquals("", settings.zaiApiKey)
+        assertEquals("https://api.z.ai/api/paas/v4", settings.zaiBaseUrl)
     }
 
     @Test
@@ -672,6 +693,64 @@ class TranslatorAITest {
     }
 
     @Test
+    fun testZaiMissingApiKeyValidation() = kotlinx.coroutines.runBlocking {
+        val plugin = TranslatorAI(TranslatorAISettings(zaiApiKey = ""))
+        val context = io.mockk.mockk<PluginContext>(relaxed = true)
+        val hostFs = io.mockk.mockk<HostFileSystem>(relaxed = true)
+
+        val exception = try {
+            plugin.translate(
+                input = listOf("Hello"),
+                model = AIModel.GLM_5_3_FLASH,
+                inputFolder = "dummy",
+                outputDir = "dummy/out",
+                tempSummaryDir = "dummy/temp",
+                context = context,
+                hostFs = hostFs
+            )
+            null
+        } catch (e: Exception) {
+            e
+        }
+        assertNotNull(exception)
+        assertTrue(
+            exception.message?.contains("Z.AI API Key") == true ||
+            exception.cause?.message?.contains("Z.AI API Key") == true,
+            "Expected error to mention Z.AI API Key, got: ${exception.message} / ${exception.cause?.message}"
+        )
+    }
+
+    @Test
+    fun testZaiDictionaryUpdateMissingApiKeyValidation() = kotlinx.coroutines.runBlocking {
+        val plugin = TranslatorAI(TranslatorAISettings(zaiApiKey = ""))
+        val context = io.mockk.mockk<PluginContext>(relaxed = true)
+        val hostFs = io.mockk.mockk<HostFileSystem>(relaxed = true)
+
+        val exception = try {
+            plugin.updateDictionary(
+                currentDictionary = "",
+                chapterSummary = "Sommario",
+                chapterNumber = "1",
+                originalTexts = listOf("Hello"),
+                model = AIModel.GLM_5_3_FLASHX,
+                outputFile = false,
+                outputDir = "build/test_dict",
+                context = context,
+                hostFs = hostFs
+            )
+            null
+        } catch (e: Exception) {
+            e
+        }
+        assertNotNull(exception)
+        assertTrue(
+            exception.message?.contains("Z.AI API Key") == true ||
+            exception.cause?.message?.contains("Z.AI API Key") == true,
+            "Expected error to mention Z.AI API Key, got: ${exception.message} / ${exception.cause?.message}"
+        )
+    }
+
+    @Test
     fun testParseDictionaryUpdateResponseStripsThinkTags() {
         val service = KoogAITranslatorService(
             io.mockk.mockk<PluginContext>(relaxed = true),
@@ -720,8 +799,16 @@ class TranslatorAITest {
         assertEquals(2, toasts.size)
         assertTrue(toasts.last().contains("LM Studio"))
 
-        plugin.testDeepSeekConnection(context)
+        plugin.testApiConnection(ApiProvider.ZAI, context)
         assertEquals(3, toasts.size)
+        assertTrue(toasts.last().contains("Z.AI"))
+
+        plugin.testZaiConnection(context)
+        assertEquals(4, toasts.size)
+        assertTrue(toasts.last().contains("Z.AI"))
+
+        plugin.testDeepSeekConnection(context)
+        assertEquals(5, toasts.size)
         assertTrue(toasts.last().contains("DeepSeek"))
     }
 
@@ -1019,6 +1106,94 @@ class TranslatorAITest {
         assertEquals(2, translations.size)
         assertTrue(translations[0].isNotBlank(), "Translation 1 should not be blank")
         assertTrue(translations[1].isNotBlank(), "Translation 2 should not be blank")
+    }
+
+    @Test
+    fun testLiveZaiSmallTranslation() = kotlinx.coroutines.runBlocking {
+        var apiKey = (System.getenv("ZAI_API_KEY") ?: "").trim()
+        if (apiKey.isBlank()) {
+            val envFile = listOf(File("../.env"), File(".env")).firstOrNull { it.exists() }
+            if (envFile != null) {
+                val props = java.util.Properties()
+                envFile.inputStream().use { props.load(it) }
+                apiKey = (props.getProperty("ZAI_API_KEY") ?: "").trim()
+            }
+        }
+
+        if (apiKey.isBlank()) {
+            println("[LiveTest] Skipping testLiveZaiSmallTranslation: ZAI_API_KEY is not set.")
+            return@runBlocking
+        }
+
+        println("[LiveTest] Executing live Z.AI test with GLM-4.7-Flash (2 strings, thinking disabled, structured output enabled)...")
+        val plugin = TranslatorAI(TranslatorAISettings(zaiApiKey = apiKey))
+        val context = io.mockk.mockk<PluginContext>(relaxed = true)
+        val hostFs = io.mockk.mockk<HostFileSystem>(relaxed = true)
+
+        val input = listOf("Hello world", "Good morning")
+        val translations = plugin.translate(
+            input = input,
+            model = AIModel.GLM_4_7_FLASH,
+            inputFolder = "dummy",
+            outputDir = "dummy/out",
+            tempSummaryDir = "dummy/temp",
+            enableThinking = false,
+            structuredOutput = StructuredOutputMode.ENABLED,
+            context = context,
+            hostFs = hostFs
+        )
+
+        println("[LiveTest] Live Z.AI translation response: $translations")
+        assertEquals(2, translations.size)
+        assertTrue(translations[0].isNotBlank(), "Translation 1 should not be blank")
+        assertTrue(translations[1].isNotBlank(), "Translation 2 should not be blank")
+    }
+
+    @Test
+    fun testUpdateDictionaryChapterNumberNumericPrimitive() = kotlinx.coroutines.runBlocking {
+        val plugin = TranslatorAI(TranslatorAISettings(googleApiKey = ""))
+        val context = io.mockk.mockk<PluginContext>(relaxed = true)
+        val hostFs = io.mockk.mockk<HostFileSystem>(relaxed = true)
+
+        val ocrResult = OCRResult(
+            texts = listOf("Test text"),
+            bb = emptyList(),
+            pageNumbers = emptyList(),
+            pageNames = emptyList(),
+            failedFiles = emptyList()
+        )
+
+        val ex1 = org.junit.Assert.assertThrows(RuntimeException::class.java) {
+            kotlinx.coroutines.runBlocking {
+                plugin.updateDictionaryOcr(
+                    currentDictionary = "",
+                    chapterSummary = "Sommario capitolo 52",
+                    chapterNumber = kotlinx.serialization.json.JsonPrimitive(52),
+                    originalOcr = ocrResult,
+                    translatedOcr = null,
+                    model = AIModel.GEMINI_3_8_FLASH,
+                    outputDir = "build/test_dict",
+                    context = context,
+                    hostFs = hostFs
+                )
+            }
+        }
+        assertFalse(ex1.message!!.contains("String literal for value of key 'primitive'"))
+
+        val ex2 = org.junit.Assert.assertThrows(RuntimeException::class.java) {
+            kotlinx.coroutines.runBlocking {
+                plugin.updateDictionary(
+                    currentDictionary = "",
+                    chapterSummary = "Sommario capitolo 52",
+                    chapterNumber = kotlinx.serialization.json.JsonPrimitive(52),
+                    model = AIModel.GEMINI_3_8_FLASH,
+                    outputDir = "build/test_dict",
+                    context = context,
+                    hostFs = hostFs
+                )
+            }
+        }
+        assertFalse(ex2.message!!.contains("String literal for value of key 'primitive'"))
     }
 }
 

@@ -11,6 +11,7 @@ import ai.koog.prompt.params.LLMParams
 import com.wip.common.inference.deepseek.DeepSeekManager
 import com.wip.common.inference.llm.ReasoningEffortLevel
 import com.wip.common.inference.lmstudio.LmStudioManager
+import com.wip.common.inference.zai.ZaiManager
 import com.wip.common.inference.retry.retryWithBackoff as commonRetryWithBackoff
 import com.wip.common.models.OcrTextFilter
 import com.wip.common.models.sortedNaturally
@@ -65,7 +66,7 @@ data class DictionaryUpdateResult(
 
 
 /**
- * Kotlin-native Translator service using Koog + Google AI or DeepSeek.
+ * Kotlin-native Translator service using Koog + Google AI, DeepSeek, or Z.AI.
  * Translates a list of strings to Italian following dictionary guidelines.
  */
 class KoogAITranslatorService(
@@ -77,6 +78,7 @@ class KoogAITranslatorService(
     private val progressReporter = context.progress
     private var isCancelled = false
 
+
     private fun getProvider(modelId: String): LLMProvider {
         return when (modelId) {
             AIModel.GEMMA_26B.id, AIModel.GEMMA_31B.id,
@@ -85,7 +87,9 @@ class KoogAITranslatorService(
             AIModel.GEMINI_3_1_FLASH_LITE.id -> LLMProvider.Google
             AIModel.LM_STUDIO.id,
             AIModel.DEEPSEEK_FLASH.id, AIModel.DEEPSEEK_PRO.id,
-            "deepseek-flash", "deepseek-v4-pro" -> LLMProvider.OpenAI
+            "deepseek-flash", "deepseek-v4-pro",
+            AIModel.GLM_5_3_FLASH.id, AIModel.GLM_5_3_FLASHX.id, AIModel.GLM_4_7_FLASH.id,
+            "glm-5.3-flash", "glm-5.3-flashx", "glm-4.7-flash" -> LLMProvider.OpenAI
             else -> LLMProvider.Google
         }
     }
@@ -103,10 +107,27 @@ class KoogAITranslatorService(
     private fun getExecutor(modelId: String) = when (modelId) {
         AIModel.DEEPSEEK_FLASH.id, AIModel.DEEPSEEK_PRO.id,
         "deepseek-flash", "deepseek-v4-pro" -> {
-            val key = (settings.deepseekApiKey ?: "").ifBlank { System.getenv("DEEPSEEK_API_KEY") ?: "" }
+            val key = (settings.deepseekApiKey ?: "").ifBlank {
+                System.getenv("DEEPSEEK_API_KEY") ?: ""
+            }
             if (key.isBlank()) throw IllegalArgumentException("DeepSeek API Key not found. Please set deepseekApiKey in settings.")
             val baseUrl = (settings.deepseekBaseUrl ?: DeepSeekManager.DEFAULT_BASE_URL).ifBlank { DeepSeekManager.DEFAULT_BASE_URL }.trim()
             val wrapperClient = DeepSeekManager.Default.createKoogClient(
+                apiKey = key,
+                baseUrl = baseUrl,
+                baseHttpClient = createKoogHttpClient()
+            )
+            MultiLLMPromptExecutor(wrapperClient)
+        }
+
+        AIModel.GLM_5_3_FLASH.id, AIModel.GLM_5_3_FLASHX.id, AIModel.GLM_4_7_FLASH.id,
+        "glm-5.3-flash", "glm-5.3-flashx", "glm-4.7-flash" -> {
+            val key = (settings.zaiApiKey ?: "").ifBlank {
+                System.getenv("ZAI_API_KEY") ?: ""
+            }
+            if (key.isBlank()) throw IllegalArgumentException("Z.AI API Key not found. Please set zaiApiKey in settings or ZAI_API_KEY environment variable.")
+            val baseUrl = (settings.zaiBaseUrl ?: ZaiManager.DEFAULT_BASE_URL).ifBlank { ZaiManager.DEFAULT_BASE_URL }.trim()
+            val wrapperClient = ZaiManager.Default.createKoogClient(
                 apiKey = key,
                 baseUrl = baseUrl,
                 baseHttpClient = createKoogHttpClient()
@@ -128,7 +149,9 @@ class KoogAITranslatorService(
         }
 
         else -> {
-            val key = (settings.googleApiKey ?: "").ifBlank { System.getenv("API_KEY") ?: "" }
+            val key = (settings.googleApiKey ?: "").ifBlank {
+                System.getenv("API_KEY") ?: ""
+            }
             if (key.isBlank()) throw IllegalArgumentException("Google API Key not found.")
             MultiLLMPromptExecutor(GoogleLLMClient(apiKey = key, baseClient = createKoogHttpClient()))
         }
@@ -200,14 +223,27 @@ class KoogAITranslatorService(
         // ── API Key ────────────────────────────────────────────────────
         val isDeepSeek = modelId == AIModel.DEEPSEEK_FLASH.id || modelId == AIModel.DEEPSEEK_PRO.id
             || modelId == "deepseek-flash" || modelId == "deepseek-v4-pro"
-        val effectiveApiKey = if (isDeepSeek) {
-            settings.deepseekApiKey?.trim().orEmpty().ifBlank { System.getenv("DEEPSEEK_API_KEY")?.trim() ?: "" }
-        } else {
-            apiKey.trim().ifBlank { System.getenv("API_KEY")?.trim() ?: "" }
+        val isZai = modelId == AIModel.GLM_5_3_FLASH.id || modelId == AIModel.GLM_5_3_FLASHX.id
+            || modelId == AIModel.GLM_4_7_FLASH.id || modelId == "glm-5.3-flash"
+            || modelId == "glm-5.3-flashx" || modelId == "glm-4.7-flash"
+        val effectiveApiKey = when {
+            isDeepSeek -> settings.deepseekApiKey?.trim().orEmpty().ifBlank {
+                System.getenv("DEEPSEEK_API_KEY")?.trim() ?: ""
+            }
+            isZai -> settings.zaiApiKey?.trim().orEmpty().ifBlank {
+                System.getenv("ZAI_API_KEY")?.trim() ?: ""
+            }
+            else -> apiKey.trim().ifBlank {
+                System.getenv("API_KEY")?.trim() ?: ""
+            }
         }
 
         if (effectiveApiKey.isBlank() && modelId != AIModel.LM_STUDIO.id) {
-            val keyName = if (isDeepSeek) "DeepSeek API Key (deepseekApiKey)" else "Google API Key (googleApiKey)"
+            val keyName = when {
+                isDeepSeek -> "DeepSeek API Key (deepseekApiKey)"
+                isZai -> "Z.AI API Key (zaiApiKey)"
+                else -> "Google API Key (googleApiKey)"
+            }
             val msg = "$keyName not found. Pass it via settings or environment variable."
             logger.error(msg)
             throw IllegalArgumentException(msg)
@@ -1174,13 +1210,26 @@ class KoogAITranslatorService(
     ): DictionaryUpdateResult {
         val isDeepSeek = modelId == AIModel.DEEPSEEK_FLASH.id || modelId == AIModel.DEEPSEEK_PRO.id
             || modelId == "deepseek-flash" || modelId == "deepseek-v4-pro"
-        val effectiveApiKey = if (isDeepSeek) {
-            settings.deepseekApiKey?.trim().orEmpty().ifBlank { System.getenv("DEEPSEEK_API_KEY")?.trim() ?: "" }
-        } else {
-            settings.googleApiKey.trim().ifBlank { System.getenv("API_KEY")?.trim() ?: "" }
+        val isZai = modelId == AIModel.GLM_5_3_FLASH.id || modelId == AIModel.GLM_5_3_FLASHX.id
+            || modelId == AIModel.GLM_4_7_FLASH.id || modelId == "glm-5.3-flash"
+            || modelId == "glm-5.3-flashx" || modelId == "glm-4.7-flash"
+        val effectiveApiKey = when {
+            isDeepSeek -> settings.deepseekApiKey?.trim().orEmpty().ifBlank {
+                System.getenv("DEEPSEEK_API_KEY")?.trim() ?: ""
+            }
+            isZai -> settings.zaiApiKey?.trim().orEmpty().ifBlank {
+                System.getenv("ZAI_API_KEY")?.trim() ?: ""
+            }
+            else -> settings.googleApiKey.trim().ifBlank {
+                System.getenv("API_KEY")?.trim() ?: ""
+            }
         }
         if (effectiveApiKey.isBlank() && modelId != AIModel.LM_STUDIO.id) {
-            val keyName = if (isDeepSeek) "DeepSeek API Key (deepseekApiKey)" else "Google API Key (googleApiKey)"
+            val keyName = when {
+                isDeepSeek -> "DeepSeek API Key (deepseekApiKey)"
+                isZai -> "Z.AI API Key (zaiApiKey)"
+                else -> "Google API Key (googleApiKey)"
+            }
             val msg = "API Key not found. Pass it via $keyName setting or set the corresponding environment variable."
             logger.error("[TranslatorAI] $msg")
             throw IllegalArgumentException(msg)
