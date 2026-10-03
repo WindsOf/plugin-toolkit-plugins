@@ -6,6 +6,8 @@ import com.wip.common.models.ChapterCleanerResult
 import com.wip.common.models.ChapterVisionResult
 import com.wip.common.models.CleanerResult
 import com.wip.common.models.OCRResult
+import com.wip.common.models.OcrCategory
+import com.wip.common.models.OcrTextFilter
 import com.wip.common.models.VisionResult
 import com.wip.common.models.sortedNaturally
 import com.wip.kpsd.Justification
@@ -150,7 +152,7 @@ data class PSDBuilderSettings(
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "WOM PSD Builder",
-    version = "5.3.3",
+    version = "5.4.1",
     description = "A plugin that builds layered PSD files natively in Kotlin.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
@@ -250,6 +252,13 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         ) desiredHeight: Int? = 0,
         @CapabilityParam(description = "Optional Cleaner result containing the cleaned image path") cleanResult: CleanerResult? = null,
         @CapabilityParam(description = "Optional Vision segmentation result for polygon-based balloon text centering") visionResult: VisionResult? = null,
+        @CapabilityParam(
+            description = "Default visible element classes in PSD translation group",
+            defaultValue = "[\"speech\", \"sfx\", \"none\"]"
+        )
+        default_visible_classes: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.none),
+        @CapabilityParam(description = "Element classifications (speech, sfx, non_text, none)") categories: List<String>? = null,
+        @CapabilityParam(description = "Optional list of cleaned crop patch image paths") cleanPatches: List<String>? = null,
         context: PluginContext,
         hostFs: HostFileSystem
     ): PSDBuildResult {
@@ -274,10 +283,12 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
         val resolvedCleanPath = cleanImagePath?.ifBlank { null } ?: cleanResult?.cleanedImagePath
         val resolvedVisionResult = visionResult ?: cleanResult?.segmentationData
+        val resolvedCleanPatches = cleanPatches ?: cleanResult?.clean
 
         val psd = buildPsdObject(
             imagePath = imagePath,
             cleanImagePath = resolvedCleanPath,
+            cleanPatches = resolvedCleanPatches,
             texts = texts,
             balloonBoxes = balloonBoxes,
             textBoxes = textBoxes,
@@ -290,7 +301,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             hasBorder = hasBorder,
             borderColors = borderColors,
             shapes = shapes,
-            visionResult = resolvedVisionResult
+            visionResult = resolvedVisionResult,
+            categories = categories,
+            defaultVisibleClasses = default_visible_classes
         )
         val psdBytes = withContext(Dispatchers.Default) {
             KPsd.write(psd, compress = false)
@@ -338,6 +351,12 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         ) leaveIntermediateFiles: Boolean? = false,
         @CapabilityParam(description = "Optional Cleaner result containing the cleaned image path") cleanResult: CleanerResult? = null,
         @CapabilityParam(description = "Optional Vision segmentation result for polygon-based balloon text centering") visionResult: VisionResult? = null,
+        @CapabilityParam(
+            description = "Default visible element classes in PSD translation group",
+            defaultValue = "[\"speech\", \"sfx\", \"none\"]"
+        )
+        default_visible_classes: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.none),
+        @CapabilityParam(description = "Optional list of cleaned crop patch image paths") cleanPatches: List<String>? = null,
         context: PluginContext,
         hostFs: HostFileSystem
     ): PSDBuildResult {
@@ -361,6 +380,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             shapes = ocrData.shapes,
             cleanResult = cleanResult,
             visionResult = resolvedVisionResult,
+            default_visible_classes = default_visible_classes,
+            categories = ocrData.categories,
+            cleanPatches = cleanPatches ?: cleanResult?.clean,
             context = context,
             hostFs = hostFs
         )
@@ -401,6 +423,12 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         ) leaveIntermediateFiles: Boolean? = false,
         @CapabilityParam(description = "Optional Cleaner result containing the cleaned image path") cleanResult: CleanerResult? = null,
         @CapabilityParam(description = "Optional Vision segmentation result for polygon-based balloon text centering") visionResult: VisionResult? = null,
+        @CapabilityParam(
+            description = "Default visible element classes in PSD translation group",
+            defaultValue = "[\"speech\", \"sfx\", \"none\"]"
+        )
+        default_visible_classes: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.none),
+        @CapabilityParam(description = "Optional list of cleaned crop patch image paths") cleanPatches: List<String>? = null,
         context: PluginContext,
         hostFs: HostFileSystem
     ): PSDBuildResult {
@@ -421,6 +449,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             leaveIntermediateFiles = leaveIntermediateFiles,
             cleanResult = cleanResult,
             visionResult = resolvedVisionResult,
+            default_visible_classes = default_visible_classes,
+            categories = ocrData.categories,
+            cleanPatches = cleanPatches ?: cleanResult?.clean,
             context = context,
             hostFs = hostFs
         )
@@ -482,6 +513,13 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         ) desiredHeight: Int? = 0,
         @CapabilityParam(description = "Optional Chapter Cleaner result containing cleaned image paths") cleanChapterResult: ChapterCleanerResult? = null,
         @CapabilityParam(description = "Optional Chapter Vision segmentation result for polygon-based balloon text centering") chapterVisionResult: ChapterVisionResult? = null,
+        @CapabilityParam(
+            description = "Default visible element classes in PSD translation group",
+            defaultValue = "[\"speech\", \"sfx\", \"none\"]"
+        )
+        default_visible_classes: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.none),
+        @CapabilityParam(description = "Element classifications") categories: List<String>? = null,
+        @CapabilityParam(description = "Optional list of cleaned crop patch image paths across pages") cleanPatches: List<String>? = null,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterPSDBuildResult {
@@ -516,6 +554,8 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         val safeHasBorder = hasBorder?.let { bList -> List(maxTexts) { i -> if (i < bList.size) bList[i] else false } }
         val safeBorderColors =
             borderColors?.let { cList -> List(maxTexts) { i -> if (i < cList.size) cList[i] else "" } }
+        val safeCategories =
+            categories?.let { catList -> List(maxTexts) { i -> if (i < catList.size) catList[i] else "none" } }
 
         val groupedData = (0 until maxTexts).groupBy { safePageNames[it] }
 
@@ -615,6 +655,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                         val pageHasBorder = mutableListOf<Boolean>()
                         val pageBorderColors = mutableListOf<String>()
                         val pageShapes = mutableListOf<String>()
+                        val pageCategories = mutableListOf<String>()
 
                         var currentYOffset = 0
                         var mergedBmp: java.awt.image.BufferedImage? = null
@@ -724,6 +765,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                                 if (safeHasBorder != null) pageHasBorder.add(safeHasBorder[idx])
                                 if (safeBorderColors != null) pageBorderColors.add(safeBorderColors[idx])
                                 if (shapes != null) pageShapes.add(shapes[idx])
+                                if (safeCategories != null) pageCategories.add(safeCategories[idx])
                             }
                             currentYOffset += imgH
                         }
@@ -748,11 +790,18 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                                     r.pageName.equals(group.files.first().name, ignoreCase = true)
                         }
 
+                        val allPatches = (cleanPatches ?: cleanChapterResult?.clean ?: emptyList()).map { File(it) }
+                        val isOnlyGroupInChapter = imageGroups.size == 1
+                        val pagePatches = allPatches.filter { f ->
+                            patchMatchesGroup(f, group.files, isOnlyGroupInChapter)
+                        }.map { it.absolutePath }
+
                         val psd = buildPsdObject(
                             imagePath = if (mergedBmp == null) group.files.first().absolutePath else null,
                             baseImageBmp = mergedBmp,
                             cleanImagePath = if (mergedCleanBmp == null) singleCleanFilePath else null,
                             cleanImageBmp = mergedCleanBmp,
+                            cleanPatches = if (mergedCleanBmp == null && pagePatches.isNotEmpty()) pagePatches else null,
                             texts = pageTexts,
                             balloonBoxes = pageBalloonBoxes,
                             textBoxes = if (safeTextBoxes != null) pageTextBoxes else null,
@@ -765,7 +814,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                             textColors = if (safeTextColors != null) pageTextColors else null,
                             hasBorder = if (safeHasBorder != null) pageHasBorder else null,
                             borderColors = if (safeBorderColors != null) pageBorderColors else null,
-                            visionResult = pageVisionResult
+                            visionResult = pageVisionResult,
+                            categories = if (safeCategories != null) pageCategories else null,
+                            defaultVisibleClasses = default_visible_classes
                         )
                         mergedBmp?.flush()
                         mergedCleanBmp?.flush()
@@ -831,6 +882,12 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         ) desiredHeight: Int? = 0,
         @CapabilityParam(description = "Optional Chapter Cleaner result containing cleaned image paths") cleanChapterResult: ChapterCleanerResult? = null,
         @CapabilityParam(description = "Optional Chapter Vision segmentation result for polygon-based balloon text centering") chapterVisionResult: ChapterVisionResult? = null,
+        @CapabilityParam(
+            description = "Default visible element classes in PSD translation group",
+            defaultValue = "[\"speech\", \"sfx\", \"none\"]"
+        )
+        default_visible_classes: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.none),
+        @CapabilityParam(description = "Optional list of cleaned crop patch image paths across pages") cleanPatches: List<String>? = null,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterPSDBuildResult {
@@ -855,6 +912,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             cleanFolder = cleanFolder,
             cleanChapterResult = cleanChapterResult,
             chapterVisionResult = resolvedChapterVision,
+            default_visible_classes = default_visible_classes,
+            categories = ocrData.categories,
+            cleanPatches = cleanPatches ?: cleanChapterResult?.clean,
             context = context,
             hostFs = hostFs
         )
@@ -899,6 +959,12 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         ) desiredHeight: Int? = 0,
         @CapabilityParam(description = "Optional Chapter Cleaner result containing cleaned image paths") cleanChapterResult: ChapterCleanerResult? = null,
         @CapabilityParam(description = "Optional Chapter Vision segmentation result for polygon-based balloon text centering") chapterVisionResult: ChapterVisionResult? = null,
+        @CapabilityParam(
+            description = "Default visible element classes in PSD translation group",
+            defaultValue = "[\"speech\", \"sfx\", \"none\"]"
+        )
+        default_visible_classes: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.none),
+        @CapabilityParam(description = "Optional list of cleaned crop patch image paths across pages") cleanPatches: List<String>? = null,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterPSDBuildResult {
@@ -920,52 +986,44 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             cleanFolder = cleanFolder,
             cleanChapterResult = cleanChapterResult,
             chapterVisionResult = resolvedChapterVision,
+            default_visible_classes = default_visible_classes,
+            categories = ocrData.categories,
+            cleanPatches = cleanPatches ?: cleanChapterResult?.clean,
             context = context,
             hostFs = hostFs
         )
     }
 
-    fun isHallucinationOrEmpty(rawText: String?): Boolean {
-        if (rawText.isNullOrBlank()) return true
-        val clean = rawText.trim()
-            .replace(Regex("(?i)<\\|/?(?:ref|box|det|quad|grounding|image|text)[^>]*\\|>"), "")
-            .replace(
-                Regex("(?i)\\b(?:image|figure|table|header|footer|background|watermark)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]"),
-                ""
-            )
-            .replace(
-                Regex("(?i)^\\s*(?:text|balloon|speech|dialogue|caption|title|paragraph|line)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]\\s*"),
-                ""
-            )
-            .trim()
-        if (clean.isBlank()) return true
-        if (!clean.any { it.isLetterOrDigit() }) return true
+    private fun patchMatchesGroup(patchFile: File, groupFiles: List<File>, isOnlyGroupInChapter: Boolean): Boolean {
+        if (!patchFile.exists()) return false
+        val parentName = patchFile.parentFile?.name ?: ""
+        val patchBaseName = patchFile.nameWithoutExtension
 
-        val lower = clean.lowercase()
-        val directMatches = setOf(
-            "(no text)", "no text", "none", "n/a", "na", "empty", "nothing",
-            "no dialogue", "no speech", "no speech bubble", "no speech bubbles",
-            "no text detected", "no text found", "no visible text",
-            "(nessun testo)", "nessun testo", "nessun dialogo",
-            "1", "0", "null", "undefined"
-        )
-        if (lower in directMatches) return true
-
-        val hallucinationRegexes = listOf(
-            Regex("""(?i)^\s*\(?(?:no\s+text|nessun\s+testo|none|empty|nothing|no\s+dialogue|no\s+speech(?:\s+bubbles?)?)\)?\.?\s*$"""),
-            Regex("""(?i)\b(?:the\s+image\s+contains\s+no\s+text|image\s+contains\s+no\s+visible\s+text|there\s+is\s+no\s+text\s+in\s+this\s+image|no\s+text\s+(?:found|detected|visible)\s+in\s+the\s+image)\b"""),
-            Regex("""(?i)\b(?:the\s+ocr\s+result.*is\s+a\s+hallucination|does\s+not\s+correspond\s+to\s+any\s+content|absence\s+of\s+any\s+visible\s+text)\b"""),
-            Regex("""(?i)\b(?:correct\s+ocr\s+output\s+must\s+reflect\s+the\s+absence\s+of|cannot\s+find\s+any\s+text\s+to\s+transcribe|no\s+transcription\s+available)\b""")
-        )
-
-        for (regex in hallucinationRegexes) {
-            if (regex.containsMatchIn(lower)) {
+        for (file in groupFiles) {
+            val pageBaseName = file.nameWithoutExtension
+            // Exact folder match: e.g. "page_01_patches" or "page_01"
+            if (parentName.equals("${pageBaseName}_patches", ignoreCase = true) ||
+                parentName.equals(pageBaseName, ignoreCase = true)) {
+                return true
+            }
+            // Exact filename match: e.g. "page_01_patches.png" or "page_01.png"
+            if (patchBaseName.equals("${pageBaseName}_patches", ignoreCase = true) ||
+                patchBaseName.equals(pageBaseName, ignoreCase = true)) {
+                return true
+            }
+            // Prefix / boundary match: e.g. "page_01_patch_1.png", "page_01_patch.png"
+            val escapedBase = Regex.escape(pageBaseName)
+            val boundaryRegex = Regex("""(?i)(?:^|[^a-zA-Z0-9])$escapedBase(?:$|[^a-zA-Z0-9])""")
+            if (boundaryRegex.containsMatchIn(parentName) || boundaryRegex.containsMatchIn(patchBaseName)) {
                 return true
             }
         }
 
-        return false
+        // Only fallback to matching all patches if the entire chapter has only 1 group AND 1 file
+        return isOnlyGroupInChapter && groupFiles.size == 1
     }
+
+    fun isHallucinationOrEmpty(rawText: String?): Boolean = OcrTextFilter.isHallucinationOrEmpty(rawText)
 
     val json = Json { ignoreUnknownKeys = true }
 
@@ -1453,7 +1511,10 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         hasBorder: List<Boolean?>? = null,
         borderColors: List<String?>? = null,
         customBoundaries: List<com.wip.kpsd.TextBoundary>? = null,
-        visionResult: VisionResult? = null
+        visionResult: VisionResult? = null,
+        categories: List<String>? = null,
+        defaultVisibleClasses: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.none),
+        cleanPatches: List<String>? = null
     ): Psd {
         val originalBaseImage = if (baseImageBmp != null) {
             baseImageBmp
@@ -1522,7 +1583,8 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             val shapes: List<String?>,
             val textColors: List<String?>,
             val hasBorder: List<Boolean?>,
-            val borderColors: List<String?>
+            val borderColors: List<String?>,
+            val categories: List<String>
         )
 
         val validIndices = texts.indices.filter { !isHallucinationOrEmpty(texts[it]) }
@@ -1538,6 +1600,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         val safeInputHasBorder = hasBorder?.let { hb -> validIndices.map { hb.getOrNull(it) } }
         val safeInputBorderColors = borderColors?.let { bc -> validIndices.map { bc.getOrNull(it) } }
         val safeInputBoundaries = customBoundaries?.let { cb -> validIndices.map { cb.getOrNull(it) } }
+        val safeInputCategories = categories?.let { catList -> validIndices.map { catList.getOrNull(it) ?: "none" } } ?: List(safeInputTexts.size) { "none" }
 
         val processedData: ProcessedTextData =
             if (effectiveVisionResult != null && effectiveVisionResult.objects.isNotEmpty() && safeInputTexts.size > 1) {
@@ -1556,6 +1619,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                     hasBorder = safeInputHasBorder?.map { it ?: false } ?: List(safeInputTexts.size) { false },
                     borderColors = safeInputBorderColors?.map { it ?: "#FFFFFF" }
                         ?: List(safeInputTexts.size) { "#FFFFFF" },
+                    categories = safeInputCategories,
                     pageNumbers = List(safeInputTexts.size) { 1 },
                     pageNames = List(safeInputTexts.size) { "" },
                     failedFiles = emptyList()
@@ -1578,7 +1642,8 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                     shapes = mergedAdv.shapes,
                     textColors = mergedAdv.textColors,
                     hasBorder = mergedAdv.hasBorder,
-                    borderColors = mergedAdv.borderColors
+                    borderColors = mergedAdv.borderColors,
+                    categories = mergedAdv.categories
                 )
             } else {
                 ProcessedTextData(
@@ -1592,7 +1657,8 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                     shapes = safeInputShapes ?: List(safeInputTexts.size) { "oval" },
                     textColors = safeInputTextColors ?: List(safeInputTexts.size) { "#000000" },
                     hasBorder = safeInputHasBorder ?: List(safeInputTexts.size) { false },
-                    borderColors = safeInputBorderColors ?: List(safeInputTexts.size) { "#FFFFFF" }
+                    borderColors = safeInputBorderColors ?: List(safeInputTexts.size) { "#FFFFFF" },
+                    categories = safeInputCategories
                 )
             }
 
@@ -1774,6 +1840,78 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             }
         }
 
+        data class PreparedCleanPatch(
+            val name: String,
+            val top: Int,
+            val left: Int,
+            val bottom: Int,
+            val right: Int,
+            val pixelData: PixelData,
+            val hidden: Boolean = false
+        )
+
+        val preparedCleanPatches = mutableListOf<PreparedCleanPatch>()
+        if (!cleanPatches.isNullOrEmpty()) {
+            val allowedClassNames = defaultVisibleClasses.map { it.name.lowercase() }.toSet()
+            for ((pIdx, patchPath) in cleanPatches.withIndex()) {
+                val pFile = File(patchPath)
+                if (pFile.exists()) {
+                    val pImg = withContext(Dispatchers.IO) { ImageIO.read(pFile) }
+                    if (pImg != null) {
+                        val pData = bufferedImageToPixelData(pImg)
+                        val pW = pImg.width
+                        val pH = pImg.height
+                        if (pW == width && pH == height) {
+                            preparedCleanPatches.add(
+                                PreparedCleanPatch("clean_patch_${pIdx + 1}", 0, 0, height, width, pData, hidden = false)
+                            )
+                        } else {
+                            val idxMatch = Regex("patch_(\\d+)").find(pFile.nameWithoutExtension)?.groupValues?.get(1)?.toIntOrNull()
+                            val obj = if (idxMatch != null && effectiveVisionResult != null && idxMatch < effectiveVisionResult.objects.size) {
+                                effectiveVisionResult.objects[idxMatch]
+                            } else if (effectiveVisionResult != null) {
+                                effectiveVisionResult.objects.firstOrNull { o ->
+                                    val oW = ((o.box.xmax - o.box.xmin) * width).toInt()
+                                    val oH = ((o.box.ymax - o.box.ymin) * height).toInt()
+                                    kotlin.math.abs(oW - pW) <= 2 && kotlin.math.abs(oH - pH) <= 2
+                                }
+                            } else null
+                            val topPx = if (obj != null) (obj.box.ymin * height).toInt().coerceIn(0, maxOf(0, height - pH)) else 0
+                            val leftPx = if (obj != null) (obj.box.xmin * width).toInt().coerceIn(0, maxOf(0, width - pW)) else 0
+
+                            val objLabel = obj?.label?.trim()?.lowercase() ?: "none"
+                            val matchedOcr = matchedResults?.firstOrNull { it?.matchedBalloon == obj }
+                            val ocrCat = if (matchedOcr != null) {
+                                processedData.categories.getOrNull(matchedOcr.textIndex)?.trim()?.lowercase()
+                            } else null
+
+                            val patchCategory = when {
+                                ocrCat != null && ocrCat in setOf("speech", "sfx", "non_text", "none") -> ocrCat
+                                objLabel == "sfx" -> "sfx"
+                                objLabel in setOf("speech", "balloon", "dialogue") -> "speech"
+                                pFile.nameWithoutExtension.contains("sfx", ignoreCase = true) -> "sfx"
+                                else -> if (allowedClassNames.contains(objLabel)) objLabel else "speech"
+                            }
+
+                            val isPatchVisible = allowedClassNames.contains(patchCategory) || allowedClassNames.contains(objLabel)
+
+                            preparedCleanPatches.add(
+                                PreparedCleanPatch(
+                                    name = "clean_patch_${pIdx + 1}",
+                                    top = topPx,
+                                    left = leftPx,
+                                    bottom = topPx + pH,
+                                    right = leftPx + pW,
+                                    pixelData = pData,
+                                    hidden = !isPatchVisible
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         return psd(width = width, height = height) {
             imageData = bgPixelData
 
@@ -1788,12 +1926,26 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
             // 2. Clean folder containing the clean image / inpainting patches
             group(name = "clean") {
-                layer(name = "clean_image") {
-                    top = 0
-                    left = 0
-                    bottom = height
-                    right = width
-                    imageData = cleanPixelData
+                if (cleanBmp != null || preparedCleanPatches.isEmpty()) {
+                    layer(name = "clean_image") {
+                        top = 0
+                        left = 0
+                        bottom = height
+                        right = width
+                        imageData = cleanPixelData
+                    }
+                }
+                for (patch in preparedCleanPatches) {
+                    layer(name = patch.name) {
+                        if (patch.hidden) {
+                            hidden = true
+                        }
+                        top = patch.top
+                        left = patch.left
+                        bottom = patch.bottom
+                        right = patch.right
+                        imageData = patch.pixelData
+                    }
                 }
             }
 
@@ -1835,9 +1987,12 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
             // 4. Translation folder containing all formatted text layers
             if (effTexts.isNotEmpty()) {
+                val allowedClassNames = defaultVisibleClasses.map { it.name.lowercase() }.toSet()
                 group(name = "translation") {
                     for ((index, text) in effTexts.withIndex()) {
                         if (isHallucinationOrEmpty(text)) continue
+                        val itemCategory = processedData.categories.getOrNull(index)?.trim()?.lowercase() ?: "none"
+                        val isClassVisible = allowedClassNames.contains(itemCategory)
                         val box = boxDataList[index]
                         val matched = matchedResults?.getOrNull(index)
 
@@ -1881,6 +2036,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                         val textName = if (text.length > 20) text.substring(0, 20) else text.ifEmpty { "Testo $index" }
 
                         textLayer(name = textName, textValue = text) {
+                            if (!isClassVisible) {
+                                hidden = true
+                            }
                             top = ibTop
                             left = ibLeft
                             bottom = ibBottom

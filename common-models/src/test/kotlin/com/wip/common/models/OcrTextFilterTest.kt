@@ -70,11 +70,22 @@ class OcrTextFilterTest {
     }
 
     @Test
-    fun testPunctuationOnlyIsFiltered() {
-        assertTrue(OcrTextFilter.isHallucinationOrEmpty("..."))
-        assertTrue(OcrTextFilter.isHallucinationOrEmpty("?!"))
+    fun testPunctuationAndNoiseFiltering() {
+        // Legitimate comic dialogue punctuation must NOT be treated as hallucinations
+        assertFalse(OcrTextFilter.isHallucinationOrEmpty("..."))
+        assertFalse(OcrTextFilter.isHallucinationOrEmpty("?!"))
+        assertFalse(OcrTextFilter.isHallucinationOrEmpty("!?"))
+        assertFalse(OcrTextFilter.isHallucinationOrEmpty("?"))
+        assertFalse(OcrTextFilter.isHallucinationOrEmpty("!"))
+        assertFalse(OcrTextFilter.isHallucinationOrEmpty("...?!"))
+        assertFalse(OcrTextFilter.isHallucinationOrEmpty("—"))
+
+        // Pure punctuation noise/artifacts MUST be filtered
         assertTrue(OcrTextFilter.isHallucinationOrEmpty("---"))
-        assertTrue(OcrTextFilter.isHallucinationOrEmpty("...?!"))
+        assertTrue(OcrTextFilter.isHallucinationOrEmpty("--"))
+        assertTrue(OcrTextFilter.isHallucinationOrEmpty("."))
+        assertTrue(OcrTextFilter.isHallucinationOrEmpty(","))
+        assertTrue(OcrTextFilter.isHallucinationOrEmpty(":"))
     }
 
     @Test
@@ -82,5 +93,9 @@ class OcrTextFilterTest {
         assertEquals("Hello world", OcrTextFilter.cleanExtractedText("<|ref|>Hello world<|/ref|>"))
         assertEquals("Hello world", OcrTextFilter.cleanExtractedText("text [0, 250, 792, 301]Hello world"))
         assertEquals("", OcrTextFilter.cleanExtractedText("image [0, 0, 999, 999]"))
+        assertEquals("?!", OcrTextFilter.cleanExtractedText("{sfx} [200, 400, 700, 800] ?!"))
+        assertEquals("?!", OcrTextFilter.cleanExtractedText("{speech} [400, 300, 600, 600] ?!"))
+        assertEquals("Hello", OcrTextFilter.cleanExtractedText("{speech} [400, 300, 600, 600]: Hello"))
+        assertEquals("BOOM", OcrTextFilter.cleanExtractedText("[200, 400, 700, 800] {sfx} BOOM"))
     }
 }

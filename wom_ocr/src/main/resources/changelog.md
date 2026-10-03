@@ -1,3 +1,21 @@
+Version: 2.9.1
+Date: 2026-10-03
+Fixed:
+  - Enhanced Qwen OCR parsing to robustly extract tagged category instances (`{speech}` and `{sfx}`) with optional delimiters/colons and inverted coordinate orders.
+  - Fixed false-positive hallucination filtering for legitimate standalone comic punctuation dialogue (e.g. `?!`, `...`, `?`, `!`, `—`), preventing Qwen and local OCR models from leaking raw `{category} [coords]` prefixes into extracted dialogue texts.
+  - Implemented category and rectangular shape inference in fallback plain text extraction when model output contains SFX indicators.
+-------------------------------------------------------------------------------------------------
+Version: 2.9.0
+Date: 2026-10-03
+Added:
+  - Integrated automatic bounding box merging into 'ocr' and 'advanced_ocr' via 'merge_nearby_with_vision' (default: true when Vision segmentation is provided).
+  - Added classification categories ('speech', 'sfx', 'non_text', 'none') across OCRResult and AdvancedOCRResult.
+  - Standardized coordinate normalization to float [0.0, 1.0] across all models and crops.
+  - Added AdvancedAIModel enum for 'advanced_ocr', filtering out incompatible Unlimited-OCR models.
+  - Added specialized ROI crop system prompts with edge text filtering when Vision cutout data is provided.
+Removed:
+  - Removed deprecated standalone merger capabilities ('merge_ocr_with_vision', 'merge_advanced_ocr_with_vision', 'merge_single_ocr_with_vision', 'merge_single_advanced_ocr_with_vision').
+-------------------------------------------------------------------------------------------------
 Version: 2.8.1
 Date: 2026-09-27
 Added:

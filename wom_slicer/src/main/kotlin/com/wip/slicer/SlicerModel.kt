@@ -29,3 +29,13 @@ enum class SlicerDownloadModel(val modelId: String, val displayName: String) {
         }
     }
 }
+
+/**
+ * Detection classes supported by YOLO for slicer cut-prevention filtering.
+ */
+enum class SlicerDetectionClass {
+    balloon,
+    text,
+    watermark
+}
+

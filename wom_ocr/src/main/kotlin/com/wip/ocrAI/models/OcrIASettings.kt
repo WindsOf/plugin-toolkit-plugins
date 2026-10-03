@@ -144,6 +144,31 @@ enum class AIModel(val id: String) {
     QWEN3_VL_8B("Qwen3-VL-8B-Instruct")
 }
 
+enum class AdvancedAIModel(val id: String) {
+    GEMMA_26B("gemma-4-26b-a4b-it"),
+    GEMMA_31B("gemma-4-31b-it"),
+    GEMINI_1_5_PRO("gemini-1.5-pro"),
+    GEMINI_2_5_PRO("gemini-2.5-pro"),
+    GEMINI_3_1_FLASH_LITE("gemini-3.1-flash-lite"),
+
+    @RequiresSetting(["anthropicApiKey"])
+    CLAUDE_3_5_SONNET("claude-3-5-sonnet-20241022"),
+
+    @RequiresSetting(["openAIApiKey"])
+    GPT_4O("gpt-4o"),
+
+    @RequiresSetting(["lmStudioModelName", "lmStudioApiKey", "lmStudioUrl"])
+    LM_STUDIO("lm-studio"),
+
+    @RequiresLock(locks = ["model:Qwen3-VL-4B-Instruct", "model:qwen3-vl-4b-instruct", "Qwen3-VL-4B-Instruct", "qwen3-vl-4b-instruct"])
+    QWEN3_VL_4B("Qwen3-VL-4B-Instruct"),
+
+    @RequiresLock(locks = ["model:Qwen3-VL-8B-Instruct", "model:qwen3-vl-8b-instruct", "Qwen3-VL-8B-Instruct", "qwen3-vl-8b-instruct"])
+    QWEN3_VL_8B("Qwen3-VL-8B-Instruct");
+
+    fun toAIModel(): AIModel = AIModel.valueOf(this.name)
+}
+
 enum class OcrDownloadModel(val modelId: String) {
     UNLIMITED_OCR_BF16("Unlimited-OCR-BF16"),
     UNLIMITED_OCR_Q8_0("Unlimited-OCR-Q8_0"),

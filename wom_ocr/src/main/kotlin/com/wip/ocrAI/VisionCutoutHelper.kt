@@ -154,7 +154,7 @@ object VisionCutoutHelper {
 
     /**
      * Remaps a local bounding box [ymin, xmin, ymax, xmax] relative to a crop region
-     * back to absolute pixel coordinates on the full image.
+     * back to normalized float coordinates [0.0, 1.0] on the full image.
      */
     fun remapBoxToGlobal(
         localBox: List<Double>,
@@ -164,10 +164,38 @@ object VisionCutoutHelper {
     ): List<Double> {
         if (localBox.size < 4) return localBox
 
-        val ymin = (crop.ymin + localBox[0]).coerceIn(0.0, fullHeight)
-        val xmin = (crop.xmin + localBox[1]).coerceIn(0.0, fullWidth)
-        val ymax = (crop.ymin + localBox[2]).coerceIn(0.0, fullHeight)
-        val xmax = (crop.xmin + localBox[3]).coerceIn(0.0, fullWidth)
+        val effectiveH = if (fullHeight > 0.0) fullHeight else 1.0
+        val effectiveW = if (fullWidth > 0.0) fullWidth else 1.0
+
+        val ymin = ((crop.ymin + localBox[0]) / effectiveH).coerceIn(0.0, 1.0)
+        val xmin = ((crop.xmin + localBox[1]) / effectiveW).coerceIn(0.0, 1.0)
+        val ymax = ((crop.ymin + localBox[2]) / effectiveH).coerceIn(0.0, 1.0)
+        val xmax = ((crop.xmin + localBox[3]) / effectiveW).coerceIn(0.0, 1.0)
+
+        return listOf(
+            min(ymin, ymax),
+            min(xmin, xmax),
+            max(ymin, ymax),
+            max(xmin, xmax)
+        )
+    }
+
+    /**
+     * Normalizes absolute pixel coordinates [ymin, xmin, ymax, xmax] to [0.0, 1.0] float range.
+     */
+    fun normalizeBoxToGlobal(
+        box: List<Double>,
+        fullWidth: Double,
+        fullHeight: Double
+    ): List<Double> {
+        if (box.size < 4) return box
+        val effectiveH = if (fullHeight > 0.0) fullHeight else 1.0
+        val effectiveW = if (fullWidth > 0.0) fullWidth else 1.0
+
+        val ymin = (box[0] / effectiveH).coerceIn(0.0, 1.0)
+        val xmin = (box[1] / effectiveW).coerceIn(0.0, 1.0)
+        val ymax = (box[2] / effectiveH).coerceIn(0.0, 1.0)
+        val xmax = (box[3] / effectiveW).coerceIn(0.0, 1.0)
 
         return listOf(
             min(ymin, ymax),

@@ -36,7 +36,12 @@ data class OCRResult(
         name = "failed files",
         description = "a list of strings representing the filenames that failed to process"
     )
-    val failedFiles: List<String>
+    val failedFiles: List<String>,
+    @CapabilityResult(
+        name = "categories",
+        description = "Classification of each extracted text element: 'speech', 'sfx', 'non_text', or 'none'"
+    )
+    val categories: List<String> = emptyList()
 )
 
 @ComplexObject(
@@ -118,8 +123,37 @@ data class AdvancedOCRResult(
         name = "failed files",
         description = "a list of strings representing the filenames that failed to process"
     )
-    val failedFiles: List<String>
+    val failedFiles: List<String>,
+    @CapabilityResult(
+        name = "categories",
+        description = "Classification of each extracted text element: 'speech', 'sfx', 'non_text', or 'none'"
+    )
+    val categories: List<String> = emptyList()
 )
+
+fun AdvancedOCRResult.toOCRResult(): OCRResult = OCRResult(
+    texts = texts,
+    bb = if (textBoxes.isNotEmpty()) textBoxes else balloonBoxes,
+    pageNumbers = pageNumbers,
+    pageNames = pageNames,
+    failedFiles = failedFiles,
+    categories = categories
+)
+
+enum class OcrCategory {
+    speech,
+    sfx,
+    non_text,
+    none;
+
+    companion object {
+        fun fromString(value: String?): OcrCategory {
+            if (value == null) return none
+            val clean = value.trim().lowercase()
+            return entries.firstOrNull { it.name.equals(clean, ignoreCase = true) } ?: none
+        }
+    }
+}
 
 @Serializable
 data class Balloon(
@@ -127,7 +161,8 @@ data class Balloon(
     val ymin: Double,
     val xmax: Double,
     val ymax: Double,
-    val text: String
+    val text: String,
+    val category: String = "none"
 )
 
 @Serializable
@@ -147,7 +182,8 @@ data class AdvancedBalloon(
     val textColor: String,
     val hasBorder: Boolean,
     val borderColor: String,
-    val text: String
+    val text: String,
+    val category: String = "none"
 )
 
 @Serializable
@@ -160,7 +196,8 @@ data class OcrServiceResult(
     val bb: List<List<Double>>,
     val pageNumbers: List<Int>,
     val pageNames: List<String>,
-    val failedFiles: List<String>
+    val failedFiles: List<String>,
+    val categories: List<String> = emptyList()
 )
 
 data class AdvancedOcrServiceResult(
@@ -177,5 +214,6 @@ data class AdvancedOcrServiceResult(
     val borderColors: List<String>,
     val pageNumbers: List<Int>,
     val pageNames: List<String>,
-    val failedFiles: List<String>
+    val failedFiles: List<String>,
+    val categories: List<String> = emptyList()
 )

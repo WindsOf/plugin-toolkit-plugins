@@ -140,4 +140,49 @@ class OcrModelsTest {
         assertEquals("P1 Text", merged.texts[0])
         assertEquals("P2 Text", merged.texts[1])
     }
+
+    @Test
+    fun testAdvancedOcrToOcrResultConversion() {
+        val advanced = AdvancedOCRResult(
+            texts = listOf("Speech balloon", "SFX sound"),
+            balloonBoxes = listOf(listOf(0.1, 0.1, 0.4, 0.4), listOf(0.5, 0.5, 0.6, 0.6)),
+            textBoxes = listOf(listOf(0.15, 0.15, 0.35, 0.35), listOf(0.51, 0.51, 0.59, 0.59)),
+            shapes = listOf("oval", "none"),
+            fontStyles = listOf("regular", "bold"),
+            fontFamilies = listOf("sans-serif", "impact"),
+            textAngles = listOf(0.0, 15.0),
+            isSparse = listOf(false, false),
+            textColors = listOf("#000000", "#FF0000"),
+            hasBorder = listOf(false, true),
+            borderColors = listOf("#FFFFFF", "#000000"),
+            pageNumbers = listOf(1, 1),
+            pageNames = listOf("p1.png", "p1.png"),
+            categories = listOf("speech", "sfx"),
+            failedFiles = emptyList()
+        )
+
+        val ocr = advanced.toOCRResult()
+        assertEquals(2, ocr.texts.size)
+        assertEquals(listOf("Speech balloon", "SFX sound"), ocr.texts)
+        assertEquals(advanced.textBoxes, ocr.bb)
+        assertEquals(listOf("speech", "sfx"), ocr.categories)
+        assertEquals(listOf(1, 1), ocr.pageNumbers)
+        assertEquals(listOf("p1.png", "p1.png"), ocr.pageNames)
+    }
+
+    @Test
+    fun testChapterCleanerResultCleanCompatibility() {
+        val cleanerResult = ChapterCleanerResult(
+            clean = listOf("patch1.png", "patch2.png"),
+            totalCleanedPages = 2
+        )
+        assertEquals(listOf("patch1.png", "patch2.png"), cleanerResult.clean)
+        assertEquals(listOf("patch1.png", "patch2.png"), cleanerResult.cleanedImagePaths)
+
+        val jsonStr = json.encodeToString(ChapterCleanerResult.serializer(), cleanerResult)
+        val decoded = json.decodeFromString(ChapterCleanerResult.serializer(), jsonStr)
+        assertEquals(cleanerResult.clean, decoded.clean)
+        assertEquals(cleanerResult.cleanedImagePaths, decoded.cleanedImagePaths)
+    }
 }
+

@@ -9,10 +9,14 @@ import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.onDownload
 import io.ktor.client.request.get
+import io.ktor.client.request.prepareGet
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
-import io.ktor.client.statement.readRawBytes
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -67,8 +71,11 @@ class ModelManager(
             return "$MODELS_DIR/$fileName".toRelativePath().getOrThrow()
         }
         fun getModelDirectoryName(catalogEntry: ModelCatalogEntry): String {
-            val remoteFolder = catalogEntry.yamlUrl.substringAfter("/models/").substringBeforeLast('/', "").takeIf { it.isNotEmpty() }
-            if (remoteFolder != null) return remoteFolder
+            if (catalogEntry.yamlUrl.contains("/models/")) {
+                val after = catalogEntry.yamlUrl.substringAfter("/models/")
+                val remoteFolder = after.substringBeforeLast('/', "").takeIf { it.isNotEmpty() }
+                if (remoteFolder != null && !remoteFolder.contains(':')) return remoteFolder
+            }
             if (catalogEntry.id.startsWith("Unlimited-OCR", ignoreCase = true)) return "Unlimited-OCR"
             return catalogEntry.id
         }
@@ -597,14 +604,29 @@ class ModelManager(
         val yamlFileName = catalogEntry.yamlUrl.substringAfterLast('/')
 
         val folderYamlRel = "$MODELS_DIR/$targetFolderName/$yamlFileName".toRelativePath().getOrNull()
+        val basePath = fileSystem.getBasePath().trimEnd('/', '\\')
         if (folderYamlRel != null) {
             fileSystem.writeTextFile(folderYamlRel, yamlText).getOrElse {
                 return Result.failure(it)
+            }
+            if (basePath.isNotBlank()) {
+                val f = File(basePath, folderYamlRel.value)
+                f.parentFile?.mkdirs()
+                if (!f.exists()) {
+                    f.writeText(yamlText)
+                }
             }
         }
         val yamlRelPath = getModelYamlRelativePath(catalogEntry.id)
         if (yamlRelPath != folderYamlRel) {
             fileSystem.writeTextFile(yamlRelPath, yamlText)
+            if (basePath.isNotBlank()) {
+                val f = File(basePath, yamlRelPath.value)
+                f.parentFile?.mkdirs()
+                if (!f.exists()) {
+                    f.writeText(yamlText)
+                }
+            }
         }
         progress.report(0.15f)
 
@@ -636,33 +658,95 @@ class ModelManager(
             val fileBaseProgress = 0.15f + (fileIdx.toFloat() / totalFiles.toFloat()) * 0.80f
             val fileProgressRange = 0.80f / totalFiles.toFloat()
 
-            val fileBytes = try {
-                val response: HttpResponse = httpClient.get(fileUrl) {
-                    onDownload { bytesSentTotal, contentLength ->
-                        if (contentLength != null && contentLength > 0) {
-                            val fileFrac = bytesSentTotal.toFloat() / contentLength.toFloat()
-                            val overall = fileBaseProgress + fileFrac * fileProgressRange
-                            progress.report(overall.coerceIn(0.15f, 0.95f))
+            val effectiveRelPath = "$MODELS_DIR/$targetFolderName/$fileName"
+            val fileRelPath = effectiveRelPath.toRelativePath().getOrElse {
+                return Result.failure(it)
+            }
+            var downloadedBytesForFile: Long = 0L
+
+            val downloadResult: Result<Unit> = try {
+                httpClient.prepareGet(fileUrl).execute { response ->
+                    if (response.status != HttpStatusCode.OK) {
+                        return@execute Result.failure(
+                            IllegalStateException("Failed to download $fileName: HTTP ${response.status.value}")
+                        )
+                    }
+
+                    val contentLength = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+                    val channel: ByteReadChannel = response.bodyAsChannel()
+
+                    if (basePath.isNotBlank()) {
+                        val targetFile = File(basePath, effectiveRelPath)
+                        val parentDir = targetFile.parentFile
+                        if (parentDir != null && !parentDir.exists()) {
+                            parentDir.mkdirs()
                         }
+                        val tempFile = File(parentDir ?: File(basePath), "$fileName.download.tmp")
+                        try {
+                            tempFile.outputStream().buffered().use { output ->
+                                val buffer = ByteArray(128 * 1024)
+                                while (!channel.isClosedForRead) {
+                                    val read = channel.readAvailable(buffer, 0, buffer.size)
+                                    if (read <= 0) break
+                                    output.write(buffer, 0, read)
+                                    downloadedBytesForFile += read
+                                    if (contentLength != null && contentLength > 0L) {
+                                        val fileFrac = downloadedBytesForFile.toDouble() / contentLength.toDouble()
+                                        val overall = fileBaseProgress + fileFrac * fileProgressRange
+                                        progress.report(overall.toFloat().coerceIn(0.15f, 0.95f))
+                                    }
+                                }
+                                output.flush()
+                            }
+
+                            if (targetFile.exists()) {
+                                targetFile.delete()
+                            }
+                            try {
+                                Files.move(tempFile.toPath(), targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                            } catch (_: Exception) {
+                                if (!tempFile.renameTo(targetFile)) {
+                                    tempFile.copyTo(targetFile, overwrite = true)
+                                    tempFile.delete()
+                                }
+                            }
+                            Result.success(Unit)
+                        } catch (e: Exception) {
+                            if (tempFile.exists()) {
+                                tempFile.delete()
+                            }
+                            throw e
+                        }
+                    } else {
+                        // Fallback when basePath is blank (e.g. purely in-memory test mocks)
+                        val buffer = ByteArray(128 * 1024)
+                        val baos = java.io.ByteArrayOutputStream()
+                        while (!channel.isClosedForRead) {
+                            val read = channel.readAvailable(buffer, 0, buffer.size)
+                            if (read <= 0) break
+                            baos.write(buffer, 0, read)
+                            downloadedBytesForFile += read
+                            if (contentLength != null && contentLength > 0L) {
+                                val fileFrac = downloadedBytesForFile.toDouble() / contentLength.toDouble()
+                                val overall = fileBaseProgress + fileFrac * fileProgressRange
+                                progress.report(overall.toFloat().coerceIn(0.15f, 0.95f))
+                            }
+                        }
+                        fileSystem.writeFile(fileRelPath, baos.toByteArray())
                     }
                 }
-                if (response.status != HttpStatusCode.OK) {
-                    return Result.failure(IllegalStateException("Failed to download $fileName: HTTP ${response.status.value}"))
-                }
-                response.readRawBytes()
             } catch (e: Exception) {
                 logger.error("Error downloading file '$fileName': ${e.message}", e)
                 return Result.failure(e)
             }
 
-            totalBytesDownloaded += fileBytes.size
-            val effectiveRelPath = "$MODELS_DIR/$targetFolderName/$fileName"
-            val fileRelPath = effectiveRelPath.toRelativePath().getOrElse {
-                return Result.failure(it)
+            if (downloadResult.isFailure) {
+                val ex = downloadResult.exceptionOrNull() ?: IllegalStateException("Failed to download $fileName")
+                logger.error("Error downloading file '$fileName': ${ex.message}", ex)
+                return Result.failure(ex)
             }
-            fileSystem.writeFile(fileRelPath, fileBytes).getOrElse {
-                return Result.failure(it)
-            }
+
+            totalBytesDownloaded += downloadedBytesForFile
         }
 
         // 3. Record installation in PluginStorage

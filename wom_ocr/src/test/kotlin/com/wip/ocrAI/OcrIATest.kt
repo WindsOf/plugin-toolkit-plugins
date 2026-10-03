@@ -3,6 +3,7 @@ package com.wip.ocrAI
 import com.wip.common.inference.llama.LlamaBackend
 import com.wip.common.inference.llama.LlamaServerMode
 import com.wip.ocrAI.models.AIModel
+import com.wip.ocrAI.models.AdvancedAIModel
 import com.wip.ocrAI.models.OcrDownloadModel
 import com.wip.ocrAI.models.OcrIASettings
 import com.wip.ocrAI.models.OcrQuantization
@@ -85,6 +86,22 @@ class OcrIATest {
         assertEquals("Unlimited-OCR-IQ2_M", AIModel.UNLIMITED_OCR_IQ2_M.id)
         assertEquals("Qwen3-VL-4B-Instruct", AIModel.QWEN3_VL_4B.id)
         assertEquals("Qwen3-VL-8B-Instruct", AIModel.QWEN3_VL_8B.id)
+    }
+
+    @Test
+    fun testAdvancedAIModelEnumIdentifiers() {
+        assertEquals("gemma-4-26b-a4b-it", AdvancedAIModel.GEMMA_26B.id)
+        assertEquals("gemma-4-31b-it", AdvancedAIModel.GEMMA_31B.id)
+        assertEquals("gemini-1.5-pro", AdvancedAIModel.GEMINI_1_5_PRO.id)
+        assertEquals("gemini-2.5-pro", AdvancedAIModel.GEMINI_2_5_PRO.id)
+        assertEquals("gemini-3.1-flash-lite", AdvancedAIModel.GEMINI_3_1_FLASH_LITE.id)
+        assertEquals("claude-3-5-sonnet-20241022", AdvancedAIModel.CLAUDE_3_5_SONNET.id)
+        assertEquals("gpt-4o", AdvancedAIModel.GPT_4O.id)
+        assertEquals("lm-studio", AdvancedAIModel.LM_STUDIO.id)
+        assertEquals("Qwen3-VL-4B-Instruct", AdvancedAIModel.QWEN3_VL_4B.id)
+        assertEquals("Qwen3-VL-8B-Instruct", AdvancedAIModel.QWEN3_VL_8B.id)
+        val names = AdvancedAIModel.entries.map { it.name }
+        assertTrue(names.none { it.startsWith("UNLIMITED_OCR") })
     }
 
     @Test
@@ -243,13 +260,21 @@ class OcrIATest {
         assertEquals(700, crops[1].xmax)
         assertEquals(8100, crops[1].ymax)
 
-        // Test coordinate remapping
+        // Test coordinate remapping (normalized to [0.0, 1.0])
         val localBox = listOf(50.0, 20.0, 150.0, 120.0) // [ymin, xmin, ymax, xmax] relative to crop
         val globalBox = VisionCutoutHelper.remapBoxToGlobal(localBox, crops[0], imageW.toDouble(), imageH.toDouble())
-        assertEquals(950.0, globalBox[0])  // 900 + 50
-        assertEquals(20.0, globalBox[1])   // 0 + 20
-        assertEquals(1050.0, globalBox[2]) // 900 + 150
-        assertEquals(120.0, globalBox[3])  // 0 + 120
+        assertEquals(0.095, globalBox[0], 0.0001)  // (900 + 50) / 10000
+        assertEquals(0.02, globalBox[1], 0.0001)   // (0 + 20) / 1000
+        assertEquals(0.105, globalBox[2], 0.0001)  // (900 + 150) / 1000
+        assertEquals(0.12, globalBox[3], 0.0001)   // (0 + 120) / 1000
+
+        // Test normalizeBoxToGlobal
+        val unnormalized = listOf(950.0, 20.0, 1050.0, 120.0)
+        val normalized = VisionCutoutHelper.normalizeBoxToGlobal(unnormalized, imageW.toDouble(), imageH.toDouble())
+        assertEquals(0.095, normalized[0], 0.0001)
+        assertEquals(0.02, normalized[1], 0.0001)
+        assertEquals(0.105, normalized[2], 0.0001)
+        assertEquals(0.12, normalized[3], 0.0001)
     }
 
     @Test
@@ -315,7 +340,7 @@ class OcrIATest {
             outputDir = "",
             useStructuredOutput = false,
             saveThinking = false,
-            model = AIModel.UNLIMITED_OCR_Q4_K_M,
+            model = AdvancedAIModel.QWEN3_VL_4B,
             chapterVisionResult = null,
             cropPadding = 100,
             context = context,
@@ -391,11 +416,11 @@ class OcrIATest {
             totalObjectsDetected = 1
         )
 
-        val mergedChapter = plugin.mergeOcrWithVision(ocr, chapterVision, context)
+        val mergedChapter = com.wip.common.models.OcrVisionMerger.mergeChapterOcrResult(ocr, chapterVision)
         assertEquals(1, mergedChapter.texts.size)
         assertEquals("Line 1 Line 2", mergedChapter.texts[0])
 
-        val mergedSingle = plugin.mergeSingleOcrWithVision(ocr, singleVision, context)
+        val mergedSingle = com.wip.common.models.OcrVisionMerger.mergeOcrResult(ocr, singleVision)
         assertEquals(1, mergedSingle.texts.size)
         assertEquals("Line 1 Line 2", mergedSingle.texts[0])
 
@@ -422,11 +447,11 @@ class OcrIATest {
             failedFiles = emptyList()
         )
 
-        val mergedAdvChapter = plugin.mergeAdvancedOcrWithVision(advOcr, chapterVision, context)
+        val mergedAdvChapter = com.wip.common.models.OcrVisionMerger.mergeChapterAdvancedOcrResult(advOcr, chapterVision)
         assertEquals(1, mergedAdvChapter.texts.size)
         assertEquals("Adv Line 1 Adv Line 2", mergedAdvChapter.texts[0])
 
-        val mergedAdvSingle = plugin.mergeSingleAdvancedOcrWithVision(advOcr, singleVision, context)
+        val mergedAdvSingle = com.wip.common.models.OcrVisionMerger.mergeAdvancedOcrResult(advOcr, singleVision)
         assertEquals(1, mergedAdvSingle.texts.size)
         assertEquals("Adv Line 1 Adv Line 2", mergedAdvSingle.texts[0])
     }
@@ -472,7 +497,7 @@ class OcrIATest {
             pageName = "p1.png"
         )
 
-        val merged = plugin.mergeSingleOcrWithVision(ocr, singleVision, context)
+        val merged = com.wip.common.models.OcrVisionMerger.mergeOcrResult(ocr, singleVision)
         assertEquals(1, merged.texts.size)
         assertEquals("Actual speech text", merged.texts[0])
     }
@@ -540,6 +565,54 @@ class OcrIATest {
 
         val updateResult = plugin.update(context)
         assertTrue(updateResult.isSuccess)
+    }
+
+    @Test
+    fun testQwenOcrPunctuationAndTaggedOutputs() {
+        val runner = UnlimitedOcrRunner(
+            io.mockk.mockk(relaxed = true),
+            io.mockk.mockk(relaxed = true),
+            OcrIASettings()
+        )
+
+        // 1. User sample: {sfx} [200, 400, 700, 800] ?!
+        val sfxPunctuation = "{sfx} [200, 400, 700, 800] ?!"
+        val sfxRegions = runner.parseOcrOutput(sfxPunctuation, 1000.0, 1000.0)
+        assertEquals(1, sfxRegions.size)
+        assertEquals("?!", sfxRegions[0].text)
+        assertEquals("sfx", sfxRegions[0].category)
+        assertEquals("rectangular", sfxRegions[0].shape)
+        assertEquals("screaming", sfxRegions[0].fontFamily)
+        assertEquals(400.0, sfxRegions[0].ymin)
+        assertEquals(200.0, sfxRegions[0].xmin)
+        assertEquals(800.0, sfxRegions[0].ymax)
+        assertEquals(700.0, sfxRegions[0].xmax)
+
+        // 2. User sample: {speech} [400, 300, 600, 600] ?!
+        val speechPunctuation = "{speech} [400, 300, 600, 600] ?!"
+        val speechRegions = runner.parseOcrOutput(speechPunctuation, 1000.0, 1000.0)
+        assertEquals(1, speechRegions.size)
+        assertEquals("?!", speechRegions[0].text)
+        assertEquals("speech", speechRegions[0].category)
+        assertEquals("oval", speechRegions[0].shape)
+        assertEquals(300.0, speechRegions[0].ymin)
+        assertEquals(400.0, speechRegions[0].xmin)
+        assertEquals(600.0, speechRegions[0].ymax)
+        assertEquals(600.0, speechRegions[0].xmax)
+
+        // 3. Coordinate-first format: [200, 400, 700, 800] {sfx} ...
+        val coordFirst = "[200, 400, 700, 800] {sfx} ..."
+        val coordFirstRegions = runner.parseOcrOutput(coordFirst, 1000.0, 1000.0)
+        assertEquals(1, coordFirstRegions.size)
+        assertEquals("...", coordFirstRegions[0].text)
+        assertEquals("sfx", coordFirstRegions[0].category)
+
+        // 4. Bracketed/colon variant: [speech] [100, 200, 300, 400]: dialogue text
+        val bracketedColon = "[speech] [100, 200, 300, 400]: dialogue text"
+        val bracketedRegions = runner.parseOcrOutput(bracketedColon, 1000.0, 1000.0)
+        assertEquals(1, bracketedRegions.size)
+        assertEquals("dialogue text", bracketedRegions[0].text)
+        assertEquals("speech", bracketedRegions[0].category)
     }
 }
 

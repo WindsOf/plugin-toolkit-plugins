@@ -69,6 +69,10 @@ class VisionPluginTest {
             val locks = vision.checkLocks(context)
             assertTrue(locks.containsKey("model:yolo-det-x-best-v3"))
             assertTrue(locks.containsKey("model:rfdetr-seg-2xlarge-ema-v3"))
+            assertTrue(locks.containsKey("model:qwen"))
+            assertTrue(locks.containsKey("qwen"))
+            assertTrue(locks.containsKey("model:qwen3-vl"))
+            assertEquals(true, locks["model:qwen"])
         }
 
         val missingFs = mockk<PluginFileSystem>(relaxed = true) {
@@ -80,6 +84,9 @@ class VisionPluginTest {
         }
         runBlocking {
             kotlin.test.assertFalse(vision.validate(missingContext).isSuccess)
+            val locks = vision.checkLocks(missingContext)
+            assertEquals(false, locks["model:qwen"])
+            assertEquals(false, locks["model:yolo-det-x-best-v3"])
         }
     }
 
@@ -357,8 +364,66 @@ class VisionPluginTest {
             vision.downloadModel(VisionDownloadModel.YOLO_DET_X, context)
             assertTrue(toastMessages.any { it.contains("Downloaded model: YOLO_DET_X") })
 
+            vision.downloadModel(VisionDownloadModel.QWEN3_VL_4B_Q4_K_M, context)
+            assertTrue(toastMessages.any { it.contains("Downloaded model: QWEN3_VL_4B_Q4_K_M") })
+
             vision.downloadAllModels(context)
             assertTrue(toastMessages.any { it.contains("All vision models downloaded successfully") })
         }
+
+        // Test model filtering & entries
+        val coreModels = VisionModel.entries.filter { it.isCore }
+        assertEquals(listOf(VisionModel.YOLO_DET_X, VisionModel.RFDETR_SEG_2XLARGE), coreModels)
+
+        assertEquals(VisionDownloadModel.QWEN3_VL_4B_Q4_K_M, VisionDownloadModel.fromModelId("Qwen3-VL-4B-Instruct-Q4_K_M"))
+        assertEquals(VisionDownloadModel.QWEN3_VL_4B_Q8_0, VisionDownloadModel.fromModelId("Qwen3-VL-4B-Instruct-Q8_0"))
+        assertEquals(VisionDownloadModel.QWEN3_VL_8B_Q4_K_M, VisionDownloadModel.fromModelId("Qwen3-VL-8B-Instruct-Q4_K_M"))
+        assertEquals(VisionDownloadModel.QWEN3_VL_8B_Q8_0, VisionDownloadModel.fromModelId("Qwen3-VL-8B-Instruct-Q8_0"))
+        assertEquals(VisionModel.QWEN3_VL_4B_Q4_K_M, VisionModel.fromModelId("Qwen3-VL-4B-Instruct-Q4_K_M"))
+    }
+
+    @Test
+    fun testVisionReclassificationModeLockAnnotation() {
+        val manifestStream = javaClass.classLoader.getResourceAsStream("META-INF/manifest.json")
+            ?: File("build/generated/ksp/main/resources/META-INF/manifest.json").inputStream()
+        val manifest = manifestStream.bufferedReader().use { it.readText() }
+        assertTrue(manifest.contains("\"com.wip.vision.VisionReclassificationMode\""), "Manifest must describe VisionReclassificationMode")
+        assertTrue(manifest.contains("\"model:qwen\""), "Manifest must require lock model:qwen for QWEN option")
+        assertTrue(manifest.contains("\"optionLockRequirements\""), "Manifest must specify optionLockRequirements")
+    }
+
+    @Test
+    fun testVisionTextReclassifierParsing() {
+        val speechJson = """{"category": "speech"}"""
+        assertEquals("speech", VisionTextReclassifier.parseCategoryFromResponse(speechJson))
+
+        val sfxJson = """```json
+{"category": "sfx"}
+```"""
+        assertEquals("sfx", VisionTextReclassifier.parseCategoryFromResponse(sfxJson))
+
+        val nonTextJson = """{"category": "non_text"}"""
+        assertEquals("non_text", VisionTextReclassifier.parseCategoryFromResponse(nonTextJson))
+
+        val rawText = "The classification is sfx."
+        assertEquals("sfx", VisionTextReclassifier.parseCategoryFromResponse(rawText))
+
+        val invalid = "random output without category"
+        assertEquals(null, VisionTextReclassifier.parseCategoryFromResponse(invalid))
+    }
+
+    @Test
+    fun testVisionTextReclassifierNoneMode() = runBlocking {
+        val img = BufferedImage(100, 100, BufferedImage.TYPE_INT_RGB)
+        val objects = listOf(
+            com.wip.common.models.SegmentedObject(
+                label = "text",
+                confidence = 0.9,
+                box = com.wip.common.models.DetectionBox(ymin = 0.1, xmin = 0.1, ymax = 0.5, xmax = 0.5)
+            )
+        )
+        val context = mockk<PluginContext>(relaxed = true)
+        val result = VisionTextReclassifier.reclassifyTextElements(img, objects, VisionReclassificationMode.NONE, context)
+        assertEquals(objects, result)
     }
 }

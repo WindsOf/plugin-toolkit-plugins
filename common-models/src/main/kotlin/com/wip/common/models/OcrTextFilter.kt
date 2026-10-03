@@ -29,20 +29,58 @@ object OcrTextFilter {
     private val tagRegex1 = Regex("(?i)<\\|/?(?:ref|box|det|quad|grounding|image|text)[^>]*\\|>")
     private val tagRegex2 = Regex("(?i)\\b(?:image|figure|table|header|footer|background|watermark)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]")
     private val tagRegex3 = Regex("(?i)^\\s*(?:text|balloon|speech|dialogue|caption|title|paragraph|line)\\s*\\[\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*,\\s*\\d+\\s*\\]\\s*")
+    private val tagRegex4 = Regex("(?i)^\\s*[{(\\[]\\s*(?:speech|sfx|text|balloon|caption|none)\\s*[})\\]]\\s*(?:\\[?\\s*[\\d.]+\\s*,\\s*[\\d.]+\\s*,\\s*[\\d.]+\\s*,\\s*[\\d.]+\\s*\\]?)?\\s*:?\\s*")
+    private val tagRegex5 = Regex("(?i)^\\s*\\[?\\s*[\\d.]+\\s*,\\s*[\\d.]+\\s*,\\s*[\\d.]+\\s*,\\s*[\\d.]+\\s*\\]?\\s*(?:[{(\\[]\\s*(?:speech|sfx|text|balloon|caption|none)\\s*[})\\]])?\\s*:?\\s*")
+    private val tagRegex6 = Regex("(?i)^\\s*[{(\\[]\\s*(?:speech|sfx|text|balloon|caption|none)\\s*[})\\]]\\s*:?\\s*")
 
     fun cleanExtractedText(raw: String): String {
-        return raw
+        var text = raw
             .replace(tagRegex1, "")
             .replace(tagRegex2, "")
             .replace(tagRegex3, "")
+            .replace(tagRegex4, "")
+            .replace(tagRegex5, "")
+            .replace(tagRegex6, "")
             .trim()
+        if (text.startsWith(":") || text.startsWith("-")) {
+            text = text.substring(1).trim()
+        }
+        return text
+    }
+
+    /**
+     * Determines whether the given text is valid comic dialogue punctuation (e.g. "?!", "...", "!", "?", "—").
+     */
+    fun isValidComicPunctuation(text: String): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return false
+        val comicPuncChars = setOf('?', '!', '…', '—', '-', '~', '.')
+        if (trimmed.all { it in comicPuncChars || it.isWhitespace() }) {
+            // Disallow single punctuation noise like ".", ",", ":", ";", "-", "--"
+            if (trimmed in setOf(".", ",", ":", ";", "-", "--", "~")) {
+                return false
+            }
+            // Allow dialogue punctuation like "?", "!", "?!", "!?", "...", "…", "—", etc.
+            return trimmed.any { it == '?' || it == '!' || it == '…' || it == '—' } || trimmed.count { it == '.' } >= 2
+        }
+        return false
     }
 
     fun isHallucinationOrEmpty(rawText: String?): Boolean {
         if (rawText.isNullOrBlank()) return true
         val clean = cleanExtractedText(rawText.trim())
         if (clean.isBlank()) return true
-        if (!clean.any { it.isLetterOrDigit() }) return true
+
+        if (isDegenerateRepetition(clean)) {
+            return true
+        }
+
+        if (!clean.any { it.isLetterOrDigit() }) {
+            if (clean.length <= 7 && isValidComicPunctuation(clean)) {
+                return false
+            }
+            return true
+        }
 
         val lower = clean.lowercase().trim()
         if (lower in directMatches) return true
@@ -51,10 +89,6 @@ object OcrTextFilter {
             if (regex.containsMatchIn(lower)) {
                 return true
             }
-        }
-
-        if (isDegenerateRepetition(clean)) {
-            return true
         }
 
         return false

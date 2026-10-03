@@ -39,7 +39,7 @@ import kotlin.math.min
 @PluginInfo(
     id = "com.wip.slicer",
     name = "WOM Slicer",
-    version = "1.4.4",
+    version = "1.5.0",
     description = "A plugin that provides vertical images sliding capabilities for manhwa.",
     supportedOs = [OS.WINDOWS]
 )
@@ -176,6 +176,15 @@ class Slicer {
             defaultValue = "0.25",
             isAdvanced = true
         ) scoreThreshold: Double,
+        @CapabilityParam(
+            description = "Object detection classes that forbid slicing across them",
+            defaultValue = "[\"balloon\", \"text\", \"watermark\"]"
+        )
+        no_cut_classes: List<SlicerDetectionClass> = listOf(
+            SlicerDetectionClass.balloon,
+            SlicerDetectionClass.text,
+            SlicerDetectionClass.watermark
+        ),
         context: PluginContext,
         hostFs: HostFileSystem
     ) {
@@ -255,7 +264,8 @@ class Slicer {
                     detections = detections.boxes,
                     imageHeight = img.height,
                     yOffset = imgSource.globalYStart,
-                    detectionMargin = detectionMargin
+                    detectionMargin = detectionMargin,
+                    noCutClasses = no_cut_classes
                 )
 
                 logger.info("Smart Slicer: Image [${index + 1}/$totalImages] (${img.width}x${img.height}) detected ${detections.boxes.size} objects.")
@@ -654,10 +664,20 @@ class Slicer {
         detections: List<DetectionBox>,
         imageHeight: Int,
         yOffset: Int,
-        detectionMargin: Int
+        detectionMargin: Int,
+        noCutClasses: List<SlicerDetectionClass> = listOf(
+            SlicerDetectionClass.balloon,
+            SlicerDetectionClass.text,
+            SlicerDetectionClass.watermark
+        )
     ) {
+        val allowedClassNames = noCutClasses.map { it.name.lowercase() }.toSet()
         val totalHeight = usefulRowVarianceList.size
         for (box in detections) {
+            val label = box.label.trim().lowercase()
+            if (label !in allowedClassNames) {
+                continue
+            }
             val boxYminPx = (box.ymin * imageHeight).toInt()
             val boxYmaxPx = (box.ymax * imageHeight).toInt()
 

@@ -165,7 +165,7 @@ class TranslatorAITest {
         io.mockk.every { context.showToast(any()) } answers {
             toasts.add(firstArg())
         }
-        plugin.testLmStudioConnection(context)
+        plugin.testApiConnection(ApiProvider.LM_STUDIO, context)
         assertTrue(toasts.isNotEmpty())
         assertTrue(toasts.first().contains("LM Studio"))
     }
@@ -802,14 +802,6 @@ class TranslatorAITest {
         plugin.testApiConnection(ApiProvider.ZAI, context)
         assertEquals(3, toasts.size)
         assertTrue(toasts.last().contains("Z.AI"))
-
-        plugin.testZaiConnection(context)
-        assertEquals(4, toasts.size)
-        assertTrue(toasts.last().contains("Z.AI"))
-
-        plugin.testDeepSeekConnection(context)
-        assertEquals(5, toasts.size)
-        assertTrue(toasts.last().contains("DeepSeek"))
     }
 
     @Test
@@ -1194,6 +1186,39 @@ class TranslatorAITest {
             }
         }
         assertFalse(ex2.message!!.contains("String literal for value of key 'primitive'"))
+    }
+
+    @Test
+    fun testTargetClassesFilteringPreservesUntranslatedItems() = kotlinx.coroutines.runBlocking {
+        val plugin = TranslatorAI(TranslatorAISettings(googleApiKey = ""))
+        val context = io.mockk.mockk<PluginContext>(relaxed = true)
+        val hostFs = io.mockk.mockk<HostFileSystem>(relaxed = true)
+
+        val ocr = OCRResult(
+            texts = listOf("Non matching text"),
+            bb = listOf(listOf(0.1, 0.1, 0.2, 0.2)),
+            pageNumbers = listOf(1),
+            pageNames = listOf("p1.png"),
+            failedFiles = emptyList(),
+            categories = listOf("none")
+        )
+
+        // When target_classes only has speech and sfx, an item with category "none" should be skipped and returned untranslated without calling the AI
+        val result = plugin.translateOcr(
+            inputOcr = ocr,
+            dictionary = "",
+            model = AIModel.GEMMA_31B,
+            inputFolder = "",
+            outputDir = "build/test_out",
+            tempSummaryDir = "build/test_temp",
+            target_classes = listOf(TranslationTargetClass.speech, TranslationTargetClass.sfx),
+            context = context,
+            hostFs = hostFs
+        )
+
+        assertEquals(1, result.texts.size)
+        assertEquals("Non matching text", result.texts[0])
+        assertEquals("none", result.categories[0])
     }
 }
 

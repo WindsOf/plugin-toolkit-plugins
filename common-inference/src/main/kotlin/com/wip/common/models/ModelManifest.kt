@@ -543,9 +543,21 @@ object ModelCatalog {
         QWEN3_VL_8B_Q8_0
     )
 
+    private val customEntries = mutableListOf<ModelCatalogEntry>()
+
+    fun registerCustomEntry(entry: ModelCatalogEntry) {
+        customEntries.removeAll { it.id.equals(entry.id, ignoreCase = true) }
+        customEntries.add(entry)
+    }
+
+    fun clearCustomEntries() {
+        customEntries.clear()
+    }
+
     fun findById(id: String): ModelCatalogEntry? {
         val clean = id.trim().lowercase()
-        return ALL_MODELS.firstOrNull {
+        return customEntries.firstOrNull { it.id.equals(clean, ignoreCase = true) }
+            ?: ALL_MODELS.firstOrNull {
             it.id.equals(clean, ignoreCase = true) ||
             (clean == "lama" && it.id == LAMA_ID) ||
             (clean == "manga" && it.id == MANGA_ID) ||

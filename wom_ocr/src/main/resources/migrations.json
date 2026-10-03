@@ -1,0 +1,10 @@
+{
+  "fromVersion": "2.8.0",
+  "toVersion": "2.9.0",
+  "capabilities": {
+    "merge_ocr_with_vision": null,
+    "merge_advanced_ocr_with_vision": null,
+    "merge_single_ocr_with_vision": null,
+    "merge_single_advanced_ocr_with_vision": null
+  }
+}

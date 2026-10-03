@@ -1,3 +1,17 @@
+Version: 5.4.1
+Date: 2026-10-03
+Fixed:
+  - Fixed patch association in chapter PSD builds: clean patches are now strictly partitioned to their corresponding page using page base name and directory boundaries, preventing all patches from leaking across every PSD in the chapter.
+  - Added visibility filtering for clean patch layers: patches corresponding to excluded classes in `default_visible_classes` now default to `hidden = true` in the PSD `clean` group.
+  - Eliminated redundant `clean_image` duplicate layer when generating PSDs solely with crop patches.
+  - Delegated hallucination checking to shared `OcrTextFilter` to preserve comic dialogue punctuation.
+-------------------------------------------------------------------------------------------------
+Version: 5.4.0
+Date: 2026-10-03
+Added:
+  - Added multi-select dropdown parameter `default_visible_classes: List<OcrCategory>` (`speech`, `sfx`, `none`) to PSD generation capabilities; text layers whose classification is excluded will have `hidden = true` in the PSD translation group.
+  - Added support for importing individual clean crop patch images (`cleanPatches` / `clean`) directly into the PSD `clean` layer group (strictly never into `translation`).
+-------------------------------------------------------------------------------------------------
 Version: 5.3.3
 Date: 2026-09-10
 Changes:

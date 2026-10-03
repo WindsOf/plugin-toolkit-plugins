@@ -146,6 +146,57 @@ class SlicerTest {
     }
 
     @Test
+    fun testMaskForbiddenDetectionRowsWithClassFilter() {
+        val slicer = Slicer()
+        val rowVariances = MutableList(1000) { true }
+
+        val detections = listOf(
+            com.wip.common.models.DetectionBox(
+                label = "balloon",
+                confidence = 0.95,
+                ymin = 0.10,
+                xmin = 0.10,
+                ymax = 0.20,
+                xmax = 0.90
+            ),
+            com.wip.common.models.DetectionBox(
+                label = "text",
+                confidence = 0.95,
+                ymin = 0.40,
+                xmin = 0.10,
+                ymax = 0.50,
+                xmax = 0.90
+            ),
+            com.wip.common.models.DetectionBox(
+                label = "watermark",
+                confidence = 0.95,
+                ymin = 0.70,
+                xmin = 0.10,
+                ymax = 0.80,
+                xmax = 0.90
+            )
+        )
+
+        // Only filter balloon
+        slicer.maskForbiddenDetectionRows(
+            usefulRowVarianceList = rowVariances,
+            detections = detections,
+            imageHeight = 1000,
+            yOffset = 0,
+            detectionMargin = 0,
+            noCutClasses = listOf(SlicerDetectionClass.balloon)
+        )
+
+        // Balloon zone (100..200) should be forbidden
+        for (y in 100..200) {
+            kotlin.test.assertFalse(rowVariances[y])
+        }
+        // Text zone (400..500) and watermark zone (700..800) should remain allowed (true)
+        assertTrue(rowVariances[450])
+        assertTrue(rowVariances[750])
+    }
+
+    @Test
     fun testFindOptimalCutsPerformanceOnLargeChapter() {
         val slicer = Slicer()
         val totalHeight = 150_000 // 150k pixels (~50 webtoon pages)

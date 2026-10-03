@@ -1,3 +1,8 @@
+Version: 1.5.0
+Date: 2026-10-03
+Added:
+  - Added multi-select `no_cut_classes` parameter to `smartSlicer` capability allowing users to configure which detected classes (balloon, text, watermark) prevent cutting.
+-------------------------------------------------------------------------------------------------
 Version: 1.4.5
 Date: 2026-09-27
 Added:

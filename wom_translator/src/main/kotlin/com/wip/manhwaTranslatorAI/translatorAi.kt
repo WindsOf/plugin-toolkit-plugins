@@ -159,10 +159,19 @@ enum class StructuredOutputMode(val displayName: String) {
     DISABLED("Disabled")
 }
 
+/**
+ * Text element categories targeted for translation.
+ */
+enum class TranslationTargetClass {
+    speech,
+    sfx,
+    none
+}
+
 @PluginInfo(
     id = "com.wip.manhwa_translator_ai",
     name = "WOM Translator",
-    version = "1.7.0",
+    version = "1.8.0",
     description = "Translate text from Manhwa/Manga into Italian using Google AI, DeepSeek, or Z.AI via Koog",
     supportedOs = [OS.WINDOWS]
 )
@@ -369,6 +378,14 @@ class TranslatorAI(val settings: TranslatorAISettings) {
             isAdvanced = true
         )
         debugLogging: Boolean? = false,
+        @CapabilityParam(
+            description = "Element categories to include in translation",
+            defaultValue = "[\"speech\", \"sfx\"]"
+        )
+        target_classes: List<TranslationTargetClass> = listOf(
+            TranslationTargetClass.speech,
+            TranslationTargetClass.sfx
+        ),
         context: PluginContext,
         hostFs: HostFileSystem
     ): OCRResult {
@@ -390,30 +407,47 @@ class TranslatorAI(val settings: TranslatorAISettings) {
                 texts = emptyList(),
                 bb = emptyList(),
                 pageNumbers = emptyList(),
-                pageNames = emptyList()
+                pageNames = emptyList(),
+                categories = emptyList()
             )
         }
+
+        val cleanCategories = validIndices.map { inputOcr.categories.getOrElse(it) { "none" } }
 
         val cleanOcr = OCRResult(
             texts = validIndices.map { inputOcr.texts[it] },
             bb = validIndices.map { inputOcr.bb.getOrElse(it) { emptyList() } },
             pageNumbers = validIndices.map { inputOcr.pageNumbers.getOrElse(it) { 1 } },
             pageNames = validIndices.map { inputOcr.pageNames.getOrElse(it) { "" } },
-            failedFiles = inputOcr.failedFiles
+            failedFiles = inputOcr.failedFiles,
+            categories = cleanCategories
         )
 
+        val allowedCategoryNames = target_classes.map { it.name.lowercase() }.toSet()
+        val translationIndices = cleanOcr.texts.indices.filter { idx ->
+            cleanCategories.getOrElse(idx) { "none" }.lowercase() in allowedCategoryNames
+        }
+
+        if (translationIndices.isEmpty()) {
+            logger.info("Basic OCR Translation: No texts match target_classes filter ($target_classes). Skipping translation.")
+            return cleanOcr
+        }
+
+        val textsToTranslate = translationIndices.map { cleanOcr.texts[it] }
+        val pagesToTranslate = translationIndices.map { cleanOcr.pageNames[it] }
+
         logger.info("Manhwa Translator AI (Basic OCRResult) started. Model: ${model.id}")
-        logger.info("Input size: ${cleanOcr.texts.size} (filtered from ${inputOcr.texts.size}) | Dictionary size: ${effectiveDict.length} | Context Images: $effectiveContextImages | Global Summary: $effectiveSummary")
+        logger.info("Input size: ${textsToTranslate.size} to translate (total: ${cleanOcr.texts.size}, raw: ${inputOcr.texts.size}) | Dictionary size: ${effectiveDict.length} | Context Images: $effectiveContextImages | Global Summary: $effectiveSummary")
 
         return try {
             val service = KoogAITranslatorService(context, settings, hostFs)
-            val translatedTexts = service.performTranslation(
-                input = cleanOcr.texts,
+            val translatedSubTexts = service.performTranslation(
+                input = textsToTranslate,
                 dictionary = effectiveDict,
                 apiKey = settings.googleApiKey,
                 useStructuredOutput = effectiveStructuredOutput,
                 modelId = model.id,
-                pageNames = cleanOcr.pageNames,
+                pageNames = pagesToTranslate,
                 inputFolder = inputFolder,
                 outputDir = outputDir,
                 tempSummaryDir = tempSummaryDir,
@@ -425,7 +459,13 @@ class TranslatorAI(val settings: TranslatorAISettings) {
                 debugLogging = effectiveDebug
             )
             logger.info("Basic OCR Translation completed.")
-            cleanOcr.copy(texts = translatedTexts)
+            val finalTexts = cleanOcr.texts.toMutableList()
+            for ((subIdx, origIdx) in translationIndices.withIndex()) {
+                if (subIdx < translatedSubTexts.size) {
+                    finalTexts[origIdx] = translatedSubTexts[subIdx]
+                }
+            }
+            cleanOcr.copy(texts = finalTexts, categories = cleanCategories)
         } catch (e: Throwable) {
             val msg = "Basic OCR Translation failed: ${e::class.simpleName}: ${e.message}"
             logger.error(msg)
@@ -658,6 +698,14 @@ class TranslatorAI(val settings: TranslatorAISettings) {
             isAdvanced = true
         )
         debugLogging: Boolean? = false,
+        @CapabilityParam(
+            description = "Element categories to include in translation",
+            defaultValue = "[\"speech\", \"sfx\"]"
+        )
+        target_classes: List<TranslationTargetClass> = listOf(
+            TranslationTargetClass.speech,
+            TranslationTargetClass.sfx
+        ),
         context: PluginContext,
         hostFs: HostFileSystem
     ): AdvancedOCRResult {
@@ -688,9 +736,12 @@ class TranslatorAI(val settings: TranslatorAISettings) {
                 hasBorder = emptyList(),
                 borderColors = emptyList(),
                 pageNumbers = emptyList(),
-                pageNames = emptyList()
+                pageNames = emptyList(),
+                categories = emptyList()
             )
         }
+
+        val cleanCategories = validIndices.map { inputOcr.categories.getOrElse(it) { "none" } }
 
         val cleanOcr = AdvancedOCRResult(
             texts = validIndices.map { inputOcr.texts[it] },
@@ -706,21 +757,35 @@ class TranslatorAI(val settings: TranslatorAISettings) {
             borderColors = validIndices.map { inputOcr.borderColors.getOrElse(it) { "#FFFFFF" } },
             pageNumbers = validIndices.map { inputOcr.pageNumbers.getOrElse(it) { 1 } },
             pageNames = validIndices.map { inputOcr.pageNames.getOrElse(it) { "" } },
-            failedFiles = inputOcr.failedFiles
+            failedFiles = inputOcr.failedFiles,
+            categories = cleanCategories
         )
 
+        val allowedCategoryNames = target_classes.map { it.name.lowercase() }.toSet()
+        val translationIndices = cleanOcr.texts.indices.filter { idx ->
+            cleanCategories.getOrElse(idx) { "none" }.lowercase() in allowedCategoryNames
+        }
+
+        if (translationIndices.isEmpty()) {
+            logger.info("Advanced OCR Translation: No texts match target_classes filter ($target_classes). Skipping translation.")
+            return cleanOcr
+        }
+
+        val textsToTranslate = translationIndices.map { cleanOcr.texts[it] }
+        val pagesToTranslate = translationIndices.map { cleanOcr.pageNames[it] }
+
         logger.info("Manhwa Translator AI (Advanced OCR) started. Model: ${model.id}")
-        logger.info("Input size: ${cleanOcr.texts.size} (filtered from ${inputOcr.texts.size}) | Dictionary size: ${effectiveDict.length} | Context Images: $effectiveContextImages | Global Summary: $effectiveSummary")
+        logger.info("Input size: ${textsToTranslate.size} to translate (total: ${cleanOcr.texts.size}, raw: ${inputOcr.texts.size}) | Dictionary size: ${effectiveDict.length} | Context Images: $effectiveContextImages | Global Summary: $effectiveSummary")
 
         return try {
             val service = KoogAITranslatorService(context, settings, hostFs)
-            val translatedTexts = service.performTranslation(
-                input = cleanOcr.texts,
+            val translatedSubTexts = service.performTranslation(
+                input = textsToTranslate,
                 dictionary = effectiveDict,
                 apiKey = settings.googleApiKey,
                 useStructuredOutput = effectiveStructuredOutput,
                 modelId = model.id,
-                pageNames = cleanOcr.pageNames,
+                pageNames = pagesToTranslate,
                 inputFolder = inputFolder,
                 outputDir = outputDir,
                 tempSummaryDir = tempSummaryDir,
@@ -732,7 +797,13 @@ class TranslatorAI(val settings: TranslatorAISettings) {
                 debugLogging = effectiveDebug
             )
             logger.info("Advanced OCR Translation completed.")
-            cleanOcr.copy(texts = translatedTexts)
+            val finalTexts = cleanOcr.texts.toMutableList()
+            for ((subIdx, origIdx) in translationIndices.withIndex()) {
+                if (subIdx < translatedSubTexts.size) {
+                    finalTexts[origIdx] = translatedSubTexts[subIdx]
+                }
+            }
+            cleanOcr.copy(texts = finalTexts, categories = cleanCategories)
         } catch (e: Throwable) {
             val msg = "Advanced OCR Translation failed: ${e::class.simpleName}: ${e.message}"
             logger.error(msg)

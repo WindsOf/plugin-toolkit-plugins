@@ -1,3 +1,10 @@
+Version: 1.1.0
+Date: 2026-10-03
+Added:
+  - Added optional 2nd-stage crop-based text reclassification supporting Qwen3-VL to classify detected text into speech, sfx, or non_text.
+  - Added Qwen3-VL models to VisionDownloadModel action for downloading vision LLMs directly from Vision plugin.
+  - Added @RequiresLock constraint on VisionReclassificationMode.QWEN locked behind Qwen model presence in checkLocks.
+-------------------------------------------------------------------------------------------------
 Version: 1.0.4
 Date: 2026-09-27
 Added:

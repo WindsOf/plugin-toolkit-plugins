@@ -1,3 +1,8 @@
+Version: 1.8.0
+Date: 2026-10-03
+Added:
+  - Added multi-select `target_classes` parameter (`speech`, `sfx`, `none`) to `translate_ocr` and `translate_advanced_ocr` to selectively translate specific text categories while preserving untranslated items and categories.
+-------------------------------------------------------------------------------------------------
 Version: 1.7.0
 Date: 2026-09-27
 Added:

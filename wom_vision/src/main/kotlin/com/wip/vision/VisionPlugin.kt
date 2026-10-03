@@ -43,7 +43,7 @@ import kotlin.math.max
 @PluginInfo(
     id = "com.wip.vision",
     name = "WOM Vision",
-    version = "1.0.3",
+    version = "1.1.0",
     description = "Object detection and instance segmentation plugin using YOLO and RF-DETR.",
     supportedOs = [OS.WINDOWS, OS.LINUX]
 )
@@ -81,14 +81,37 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
             logger.info("[Vision] checkLocks: VisionModel ${model.name} (${model.modelId}) installed: $installed")
             locks["model:${model.modelId}"] = installed
             locks[model.modelId] = installed
+            locks["model:${model.modelId.lowercase()}"] = installed
+            locks[model.modelId.lowercase()] = installed
         }
-        logger.info("[Vision] checkLocks: Completed vision locks check: $locks")
+
+        val candidateGgufIds = listOf(
+            ModelCatalog.QWEN3_VL_4B_Q4_K_M_ID,
+            ModelCatalog.QWEN3_VL_4B_Q8_0_ID,
+            ModelCatalog.QWEN3_VL_8B_Q4_K_M_ID,
+            ModelCatalog.QWEN3_VL_8B_Q8_0_ID,
+            ModelCatalog.QWEN3_VL_4B_ID,
+            ModelCatalog.QWEN3_VL_8B_ID
+        )
+        val qwenInstalled = candidateGgufIds.any { id ->
+            locks["model:$id"] == true ||
+                locks[id] == true ||
+                ModelManager.Default.isModelInstalled(id, context.fileSystem, logger)
+        }
+        locks["model:qwen"] = qwenInstalled
+        locks["model:qwen-vl"] = qwenInstalled
+        locks["model:qwen3-vl"] = qwenInstalled
+        locks["qwen"] = qwenInstalled
+        locks["qwen-vl"] = qwenInstalled
+        locks["qwen3-vl"] = qwenInstalled
+
+        logger.info("[Vision] checkLocks: Completed vision locks check (qwenInstalled=$qwenInstalled): $locks")
         return locks
     }
 
     @PluginAction(
         name = "Download Model",
-        description = "Downloads a specific ONNX model and descriptor to local plugin storage"
+        description = "Downloads a specific vision model (ONNX or VLM) and descriptor to local plugin storage"
     )
     suspend fun downloadModel(
         @CapabilityParam(description = "Select vision model to download", defaultValue = "\"YOLO_DET_X\"")
@@ -116,7 +139,7 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
     suspend fun downloadAllModels(context: PluginContext) {
         val logger = context.logger
         logger.info("[Vision] downloadAllModels action triggered")
-        val visionIds = VisionModel.entries.map { it.modelId }
+        val visionIds = VisionModel.entries.filter { it.isCore }.map { it.modelId }
         val result = ModelManager.Default.downloadModels(visionIds, context)
         if (result.isFailure) {
             val err = result.exceptionOrNull()?.message ?: "Unknown error"
@@ -281,6 +304,11 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
             isAdvanced = true
         )
         drawSegmentationRois: Boolean = false,
+        @CapabilityParam(
+            description = "Try to reclassify detected text elements into speech, sfx, or non_text using vision LLM",
+            defaultValue = "\"NONE\""
+        )
+        try_to_reclassify_elements: VisionReclassificationMode = VisionReclassificationMode.NONE,
         context: PluginContext,
         hostFs: HostFileSystem
     ): VisionResult {
@@ -631,6 +659,14 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
             iosThreshold = iosThreshold
         )
 
+        // Stage 3: Optional Text Reclassification (speech / sfx / non_text) via Vision LLM crop analysis
+        val reclassifiedObjects = VisionTextReclassifier.reclassifyTextElements(
+            image = baseImage,
+            objects = deduplicatedObjects,
+            mode = try_to_reclassify_elements,
+            context = context
+        )
+
         var savedMaskPath: String? = null
         if (saveMask && outputDir.isNotBlank()) {
             val outFolder = File(outputDir)
@@ -639,10 +675,10 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
             val maskName = "${inputFile.nameWithoutExtension}_mask.png"
             val maskFile = File(outFolder, maskName)
             val maskImg = InpaintingUtils.renderMaskFromObjects(
-                objects = deduplicatedObjects,
+                objects = reclassifiedObjects,
                 imageWidth = imgW,
                 imageHeight = imgH,
-                targetClasses = setOf("text"),
+                targetClasses = setOf("text", "speech", "sfx"),
                 dilationPx = 3
             )
             withContext(Dispatchers.IO) {
@@ -661,7 +697,7 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
             val debugFile = File(outFolder, debugName)
             val debugImg = InpaintingUtils.renderDebugVisualization(
                 baseImage = baseImage,
-                objects = deduplicatedObjects,
+                objects = reclassifiedObjects,
                 candidateBoxes = candidateBoxes,
                 slices = if (drawTileGrid) detectSlices else emptyList(),
                 segmentationRois = if (drawSegmentationRois) segmentationRois else emptyList()
@@ -673,10 +709,10 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
             logger.info("Saved visual debug image to: $savedDebugPath")
         }
 
-        logger.info("Vision complete for $imagePath. Detected ${deduplicatedObjects.size} segmented objects (suppressed ${finalObjects.size - deduplicatedObjects.size} duplicates).")
+        logger.info("Vision complete for $imagePath. Detected ${reclassifiedObjects.size} segmented objects (suppressed ${finalObjects.size - deduplicatedObjects.size} duplicates).")
 
         return VisionResult(
-            objects = deduplicatedObjects,
+            objects = reclassifiedObjects,
             imageWidth = imgW,
             imageHeight = imgH,
             pageName = inputFile.name,
@@ -766,6 +802,11 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
             isAdvanced = true
         )
         drawSegmentationRois: Boolean = false,
+        @CapabilityParam(
+            description = "Try to reclassify detected text elements into speech, sfx, or non_text using vision LLM",
+            defaultValue = "\"NONE\""
+        )
+        try_to_reclassify_elements: VisionReclassificationMode = VisionReclassificationMode.NONE,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterVisionResult {
@@ -806,6 +847,7 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
                 saveDebugImage = saveDebugImages,
                 drawTileGrid = drawTileGrid,
                 drawSegmentationRois = drawSegmentationRois,
+                try_to_reclassify_elements = try_to_reclassify_elements,
                 outputDir = outputDir,
                 context = context,
                 hostFs = hostFs

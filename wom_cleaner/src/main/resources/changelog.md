@@ -1,3 +1,9 @@
+Version: 1.4.0
+Date: 2026-10-03
+Added:
+  - Added multi-select `clean_classes` parameter (`speech`, `sfx`, `non_text`, `none`) to filter inpainting to specific categories.
+  - Added `outputCropPatches: Boolean = false` parameter to output individual cropped clean PNG patches in `ChapterCleanerResult.clean`.
+-------------------------------------------------------------------------------------------------
 Version: 1.3.1
 Date: 2026-09-27
 Added:

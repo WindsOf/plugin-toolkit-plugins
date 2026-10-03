@@ -11,11 +11,13 @@ import com.wip.common.models.InpaintingUtils
 import com.wip.common.models.ModelCatalog
 import com.wip.common.models.ModelManager
 import com.wip.common.models.ModelSpec
+import com.wip.common.models.OcrCategory
 import com.wip.common.models.OnnxInferenceSession
 import com.wip.common.models.VisionResult
 import com.wip.common.models.sortedNaturally
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.max
 import org.wip.plugintoolkit.api.ConditionOperator
 import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.OS
@@ -41,7 +43,7 @@ import javax.imageio.spi.IIORegistry
 @PluginInfo(
     id = "com.wip.cleaner",
     name = "WOM Cleaner",
-    version = "1.3.0",
+    version = "1.4.0",
     description = "Inpaints and erases segmented text and artifacts from images using segmentation maps.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
@@ -268,6 +270,32 @@ class CleanerPlugin {
         }
     }
 
+    fun resolveEffectiveTargetLabels(
+        cleanClasses: List<OcrCategory>,
+        targetClasses: List<String>
+    ): Set<String> {
+        val result = mutableSetOf<String>()
+        for (cat in cleanClasses) {
+            when (cat) {
+                OcrCategory.speech -> {
+                    result.add("speech")
+                    result.add("text")
+                    result.add("balloon")
+                }
+                OcrCategory.sfx -> result.add("sfx")
+                OcrCategory.non_text -> result.add("non_text")
+                OcrCategory.none -> result.add("none")
+            }
+        }
+        for (tc in targetClasses) {
+            val cleanTc = tc.trim().lowercase()
+            if (cleanTc.isNotBlank()) {
+                result.add(cleanTc)
+            }
+        }
+        return result
+    }
+
     private suspend fun cleanImageInternal(
         imagePath: String,
         segmentationData: VisionResult,
@@ -275,6 +303,8 @@ class CleanerPlugin {
         model: InpaintingModel,
         sessionBundle: InpaintingSessionBundle?,
         targetClasses: List<String>,
+        cleanClasses: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.non_text, OcrCategory.none),
+        outputCropPatches: Boolean = false,
         dilationRadius: Int,
         saveMask: Boolean,
         isolatedRegionsOnly: Boolean,
@@ -295,7 +325,7 @@ class CleanerPlugin {
             ImageIO.read(inputFile)
         } ?: throw IllegalArgumentException("Failed to decode image from path: $imagePath")
 
-        val targetSet = targetClasses.map { it.trim().lowercase() }.toSet()
+        val targetSet = resolveEffectiveTargetLabels(cleanClasses, targetClasses)
         val textObjects = segmentationData.objects.filter { it.label.trim().lowercase() in targetSet }
 
         val mask = InpaintingUtils.renderMaskFromObjects(
@@ -357,12 +387,36 @@ class CleanerPlugin {
             ImageIO.write(cleanedImage, outputFormat, outputFile)
         }
 
-        logger.info("Cleaning complete for $imagePath with ${model.displayName} (isolatedRegionsOnly=$isolatedRegionsOnly). Cleaned ${textObjects.size} text instances -> ${outputFile.absolutePath}")
+        val patchPaths = mutableListOf<String>()
+        if (isolatedRegionsOnly && outputCropPatches && textObjects.isNotEmpty()) {
+            val patchesSubdir = File(outDir, "${inputFile.nameWithoutExtension}_patches")
+            if (!patchesSubdir.exists()) patchesSubdir.mkdirs()
+            val imgW = cleanedImage.width
+            val imgH = cleanedImage.height
+            for ((idx, obj) in textObjects.withIndex()) {
+                val box = obj.box
+                val xminPx = (box.xmin * imgW).toInt().coerceIn(0, imgW - 1)
+                val yminPx = (box.ymin * imgH).toInt().coerceIn(0, imgH - 1)
+                val xmaxPx = (box.xmax * imgW).toInt().coerceIn(0, imgW)
+                val ymaxPx = (box.ymax * imgH).toInt().coerceIn(0, imgH)
+                val w = max(1, xmaxPx - xminPx)
+                val h = max(1, ymaxPx - yminPx)
+                val patchCrop = cleanedImage.getSubimage(xminPx, yminPx, w, h)
+                val patchFile = File(patchesSubdir, "patch_${idx}.png")
+                withContext(Dispatchers.IO) {
+                    ImageIO.write(patchCrop, "png", patchFile)
+                }
+                patchPaths.add(patchFile.absolutePath)
+            }
+        }
+
+        logger.info("Cleaning complete for $imagePath with ${model.displayName} (isolatedRegionsOnly=$isolatedRegionsOnly, patches=${patchPaths.size}). Cleaned ${textObjects.size} text instances -> ${outputFile.absolutePath}")
 
         return CleanerResult(
             cleanedImagePath = outputFile.absolutePath,
             maskPath = maskPath,
-            cleanedObjectsCount = textObjects.size
+            cleanedObjectsCount = textObjects.size,
+            clean = patchPaths
         )
     }
 
@@ -374,6 +428,8 @@ class CleanerPlugin {
         strategy: CleaningStrategy,
         sessionBundle: InpaintingSessionBundle?,
         targetClasses: List<String>,
+        cleanClasses: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.non_text, OcrCategory.none),
+        outputCropPatches: Boolean = false,
         dilationRadius: Int,
         adaptivePadding: Boolean,
         saveMask: Boolean,
@@ -395,7 +451,7 @@ class CleanerPlugin {
             ImageIO.read(inputFile)
         } ?: throw IllegalArgumentException("Failed to decode image from path: $imagePath")
 
-        val targetSet = targetClasses.map { it.trim().lowercase() }.toSet()
+        val targetSet = resolveEffectiveTargetLabels(cleanClasses, targetClasses)
         val textObjects = segmentationData.objects.filter { it.label.trim().lowercase() in targetSet }
 
         val mask = InpaintingUtils.renderMaskFromObjects(
@@ -461,12 +517,36 @@ class CleanerPlugin {
             ImageIO.write(cleanedImage, outputFormat, outputFile)
         }
 
-        logger.info("Hybrid cleaning complete for $imagePath with ${model.displayName} [${strategy.displayName}] (isolatedRegionsOnly=$isolatedRegionsOnly). Cleaned ${textObjects.size} text instances -> ${outputFile.absolutePath}")
+        val patchPaths = mutableListOf<String>()
+        if (isolatedRegionsOnly && outputCropPatches && textObjects.isNotEmpty()) {
+            val patchesSubdir = File(outDir, "${inputFile.nameWithoutExtension}_patches")
+            if (!patchesSubdir.exists()) patchesSubdir.mkdirs()
+            val imgW = cleanedImage.width
+            val imgH = cleanedImage.height
+            for ((idx, obj) in textObjects.withIndex()) {
+                val box = obj.box
+                val xminPx = (box.xmin * imgW).toInt().coerceIn(0, imgW - 1)
+                val yminPx = (box.ymin * imgH).toInt().coerceIn(0, imgH - 1)
+                val xmaxPx = (box.xmax * imgW).toInt().coerceIn(0, imgW)
+                val ymaxPx = (box.ymax * imgH).toInt().coerceIn(0, imgH)
+                val w = max(1, xmaxPx - xminPx)
+                val h = max(1, ymaxPx - yminPx)
+                val patchCrop = cleanedImage.getSubimage(xminPx, yminPx, w, h)
+                val patchFile = File(patchesSubdir, "patch_${idx}.png")
+                withContext(Dispatchers.IO) {
+                    ImageIO.write(patchCrop, "png", patchFile)
+                }
+                patchPaths.add(patchFile.absolutePath)
+            }
+        }
+
+        logger.info("Hybrid cleaning complete for $imagePath with ${model.displayName} [${strategy.displayName}] (isolatedRegionsOnly=$isolatedRegionsOnly, patches=${patchPaths.size}). Cleaned ${textObjects.size} text instances -> ${outputFile.absolutePath}")
 
         return CleanerResult(
             cleanedImagePath = outputFile.absolutePath,
             maskPath = maskPath,
-            cleanedObjectsCount = textObjects.size
+            cleanedObjectsCount = textObjects.size,
+            clean = patchPaths
         )
     }
 
@@ -493,6 +573,16 @@ class CleanerPlugin {
         model: InpaintingModel = InpaintingModel.LAMA,
         @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
         targetClasses: List<String> = listOf("text"),
+        @CapabilityParam(
+            description = "Element categories to clean/inpaint",
+            defaultValue = "[\"speech\", \"sfx\", \"non_text\", \"none\"]"
+        )
+        clean_classes: List<OcrCategory> = listOf(
+            OcrCategory.speech,
+            OcrCategory.sfx,
+            OcrCategory.non_text,
+            OcrCategory.none
+        ),
         @CapabilityParam(description = "Mask dilation radius in pixels for contour coverage", defaultValue = "3")
         dilationRadius: Int = 3,
         @CapabilityParam(
@@ -597,6 +687,7 @@ class CleanerPlugin {
                 model = model,
                 sessionBundle = sessionBundle,
                 targetClasses = targetClasses,
+                cleanClasses = clean_classes,
                 dilationRadius = dilationRadius,
                 saveMask = saveMask,
                 isolatedRegionsOnly = isolatedRegionsOnly,
@@ -631,6 +722,16 @@ class CleanerPlugin {
         strategy: CleaningStrategy = CleaningStrategy.AUTO_HYBRID,
         @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
         targetClasses: List<String> = listOf("text"),
+        @CapabilityParam(
+            description = "Element categories to clean/inpaint",
+            defaultValue = "[\"speech\", \"sfx\", \"non_text\", \"none\"]"
+        )
+        clean_classes: List<OcrCategory> = listOf(
+            OcrCategory.speech,
+            OcrCategory.sfx,
+            OcrCategory.non_text,
+            OcrCategory.none
+        ),
         @CapabilityParam(description = "Mask dilation radius in pixels for contour coverage", defaultValue = "3")
         dilationRadius: Int = 3,
         @CapabilityParam(
@@ -742,6 +843,7 @@ class CleanerPlugin {
                 strategy = strategy,
                 sessionBundle = sessionBundle,
                 targetClasses = targetClasses,
+                cleanClasses = clean_classes,
                 dilationRadius = dilationRadius,
                 adaptivePadding = adaptivePadding,
                 saveMask = saveMask,
@@ -778,6 +880,16 @@ class CleanerPlugin {
         model: InpaintingModel = InpaintingModel.LAMA,
         @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
         targetClasses: List<String> = listOf("text"),
+        @CapabilityParam(
+            description = "Element categories to clean/inpaint",
+            defaultValue = "[\"speech\", \"sfx\", \"non_text\", \"none\"]"
+        )
+        clean_classes: List<OcrCategory> = listOf(
+            OcrCategory.speech,
+            OcrCategory.sfx,
+            OcrCategory.non_text,
+            OcrCategory.none
+        ),
         @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
         dilationRadius: Int = 3,
         @CapabilityParam(
@@ -856,6 +968,7 @@ class CleanerPlugin {
             outputDir = outputDir,
             model = model,
             targetClasses = targetClasses,
+            clean_classes = clean_classes,
             dilationRadius = dilationRadius,
             saveMask = false,
             isolatedRegionsOnly = true,
@@ -1022,6 +1135,16 @@ class CleanerPlugin {
         model: InpaintingModel = InpaintingModel.LAMA,
         @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
         targetClasses: List<String> = listOf("text"),
+        @CapabilityParam(
+            description = "Element categories to clean/inpaint",
+            defaultValue = "[\"speech\", \"sfx\", \"non_text\", \"none\"]"
+        )
+        clean_classes: List<OcrCategory> = listOf(
+            OcrCategory.speech,
+            OcrCategory.sfx,
+            OcrCategory.non_text,
+            OcrCategory.none
+        ),
         @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
         dilationRadius: Int = 3,
         @CapabilityParam(description = "Save generated binary masks", defaultValue = "false")
@@ -1031,6 +1154,12 @@ class CleanerPlugin {
             defaultValue = "false"
         )
         isolatedRegionsOnly: Boolean = false,
+        @CapabilityParam(
+            description = "Output individual clean cropped patch images for each cleaned element",
+            defaultValue = "false"
+        )
+        @DependsOn(param = "isolatedRegionsOnly", operator = ConditionOperator.EQUALS, values = ["true"])
+        outputCropPatches: Boolean = false,
         @CapabilityParam(
             description = "Boundary feathering radius (px) for smooth alpha blending",
             defaultValue = "2",
@@ -1156,6 +1285,8 @@ class CleanerPlugin {
                     model = model,
                     sessionBundle = sessionBundle,
                     targetClasses = targetClasses,
+                    cleanClasses = clean_classes,
+                    outputCropPatches = outputCropPatches,
                     dilationRadius = dilationRadius,
                     saveMask = saveMasks,
                     isolatedRegionsOnly = isolatedRegionsOnly,
@@ -1172,13 +1303,16 @@ class CleanerPlugin {
 
         val cleanedPaths = results.map { it.cleanedImagePath }
         val maskPaths = results.mapNotNull { it.maskPath }
+        val allCleanPatches = results.flatMap { it.clean }
 
         logger.info("Chapter Cleaner complete. Cleaned $totalImages pages.")
 
         return ChapterCleanerResult(
             cleanedImagePaths = cleanedPaths,
             maskPaths = maskPaths,
-            totalCleanedPages = totalImages
+            totalCleanedPages = totalImages,
+            chapterVisionResult = chapterVisionResult,
+            clean = if (outputCropPatches) allCleanPatches else cleanedPaths
         )
     }
 
@@ -1207,6 +1341,16 @@ class CleanerPlugin {
         strategy: CleaningStrategy = CleaningStrategy.AUTO_HYBRID,
         @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
         targetClasses: List<String> = listOf("text"),
+        @CapabilityParam(
+            description = "Element categories to clean/inpaint",
+            defaultValue = "[\"speech\", \"sfx\", \"non_text\", \"none\"]"
+        )
+        clean_classes: List<OcrCategory> = listOf(
+            OcrCategory.speech,
+            OcrCategory.sfx,
+            OcrCategory.non_text,
+            OcrCategory.none
+        ),
         @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
         dilationRadius: Int = 3,
         @CapabilityParam(
@@ -1221,6 +1365,12 @@ class CleanerPlugin {
             defaultValue = "false"
         )
         isolatedRegionsOnly: Boolean = false,
+        @CapabilityParam(
+            description = "Output individual clean cropped patch images for each cleaned element",
+            defaultValue = "false"
+        )
+        @DependsOn(param = "isolatedRegionsOnly", operator = ConditionOperator.EQUALS, values = ["true"])
+        outputCropPatches: Boolean = false,
         @CapabilityParam(
             description = "Boundary feathering radius (px) for smooth alpha blending",
             defaultValue = "2",
@@ -1348,6 +1498,8 @@ class CleanerPlugin {
                     strategy = strategy,
                     sessionBundle = sessionBundle,
                     targetClasses = targetClasses,
+                    cleanClasses = clean_classes,
+                    outputCropPatches = outputCropPatches,
                     dilationRadius = dilationRadius,
                     adaptivePadding = adaptivePadding,
                     saveMask = saveMasks,
@@ -1365,13 +1517,16 @@ class CleanerPlugin {
 
         val cleanedPaths = results.map { it.cleanedImagePath }
         val maskPaths = results.mapNotNull { it.maskPath }
+        val allCleanPatches = results.flatMap { it.clean }
 
         logger.info("Chapter Hybrid Cleaner complete. Cleaned $totalImages pages.")
 
         return ChapterCleanerResult(
             cleanedImagePaths = cleanedPaths,
             maskPaths = maskPaths,
-            totalCleanedPages = totalImages
+            totalCleanedPages = totalImages,
+            chapterVisionResult = chapterVisionResult,
+            clean = if (outputCropPatches) allCleanPatches else cleanedPaths
         )
     }
 

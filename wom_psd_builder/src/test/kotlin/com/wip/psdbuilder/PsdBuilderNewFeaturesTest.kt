@@ -1,6 +1,7 @@
 package com.wip.psdbuilder
 
 import com.wip.common.models.DetectionBox
+import com.wip.common.models.OcrCategory
 import com.wip.common.models.PolygonPoint
 import com.wip.common.models.SegmentedObject
 import com.wip.common.models.VisionResult
@@ -332,6 +333,202 @@ class PsdBuilderNewFeaturesTest {
             tempInputDir.deleteRecursively()
             tempOutputDir.deleteRecursively()
             tempMergeDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testDefaultVisibleClassesHidesNonTargetTextLayers() {
+        runBlocking {
+            val plugin = PSDBuilderPlugin()
+            val ctx = mockk<PluginContext>(relaxed = true)
+
+            val baseImg = BufferedImage(200, 200, BufferedImage.TYPE_INT_RGB)
+            val psd = plugin.buildPsdObject(
+                baseImageBmp = baseImg,
+                texts = listOf("Speech text", "SFX boom"),
+                balloonBoxes = listOf(listOf(0.1, 0.1, 0.4, 0.4), listOf(0.5, 0.5, 0.8, 0.8)),
+                categories = listOf("speech", "sfx"),
+                defaultVisibleClasses = listOf(OcrCategory.speech),
+                context = ctx
+            )
+
+            val translationGroup = psd.children.firstOrNull { it.name == "translation" }
+            assertNotNull(translationGroup)
+            val layers = translationGroup.children ?: emptyList()
+            assertEquals(2, layers.size)
+            assertEquals(false, layers[0].hidden, "Speech layer should be visible")
+            assertEquals(true, layers[1].hidden, "SFX layer should be hidden when defaultVisibleClasses only contains speech")
+        }
+    }
+
+    @Test
+    fun testCleanPatchesImportedIntoCleanGroupOnly() {
+        runBlocking {
+            val plugin = PSDBuilderPlugin()
+            val ctx = mockk<PluginContext>(relaxed = true)
+
+            val tempDir = File("build/tmp/test_psd_patches").apply {
+                if (exists()) deleteRecursively()
+                mkdirs()
+            }
+            val patchImg = BufferedImage(50, 50, BufferedImage.TYPE_INT_ARGB)
+            val patchFile = File(tempDir, "patch_0.png")
+            ImageIO.write(patchImg, "png", patchFile)
+
+            val baseImg = BufferedImage(200, 200, BufferedImage.TYPE_INT_RGB)
+            val psd = plugin.buildPsdObject(
+                baseImageBmp = baseImg,
+                texts = listOf("Dialogue"),
+                balloonBoxes = listOf(listOf(0.1, 0.1, 0.4, 0.4)),
+                cleanPatches = listOf(patchFile.absolutePath),
+                context = ctx
+            )
+
+            val cleanGroup = psd.children.firstOrNull { it.name == "clean" }
+            assertNotNull(cleanGroup, "Clean group must exist")
+            val cleanPatchLayer = cleanGroup.children?.firstOrNull { it.name == "clean_patch_1" }
+            assertNotNull(cleanPatchLayer, "clean_patch_1 must be inside clean group")
+
+            val translationGroup = psd.children.firstOrNull { it.name == "translation" }
+            assertNotNull(translationGroup, "Translation group must exist")
+            val translationPatches = translationGroup.children?.filter { it.name?.startsWith("clean_patch") == true } ?: emptyList()
+            assertTrue(translationPatches.isEmpty(), "Clean patches must NEVER be imported into translation group")
+
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testCleanPatchesFilteredByVisibilityClasses() {
+        runBlocking {
+            val plugin = PSDBuilderPlugin()
+            val ctx = mockk<PluginContext>(relaxed = true)
+
+            val tempDir = File("build/tmp/test_psd_patch_vis").apply {
+                if (exists()) deleteRecursively()
+                mkdirs()
+            }
+            val patchImg1 = BufferedImage(50, 50, BufferedImage.TYPE_INT_ARGB)
+            val patchFile1 = File(tempDir, "patch_0.png") // Speech patch
+            ImageIO.write(patchImg1, "png", patchFile1)
+
+            val patchImg2 = BufferedImage(40, 40, BufferedImage.TYPE_INT_ARGB)
+            val patchFile2 = File(tempDir, "patch_1.png") // SFX patch
+            ImageIO.write(patchImg2, "png", patchFile2)
+
+            val baseImg = BufferedImage(200, 200, BufferedImage.TYPE_INT_RGB)
+            val visionResult = VisionResult(
+                objects = listOf(
+                    SegmentedObject(
+                        label = "speech",
+                        confidence = 0.95,
+                        box = DetectionBox(label = "speech", confidence = 0.95, ymin = 0.1, xmin = 0.1, ymax = 0.35, xmax = 0.35)
+                    ),
+                    SegmentedObject(
+                        label = "sfx",
+                        confidence = 0.90,
+                        box = DetectionBox(label = "sfx", confidence = 0.90, ymin = 0.5, xmin = 0.5, ymax = 0.7, xmax = 0.7)
+                    )
+                ),
+                imageWidth = 200,
+                imageHeight = 200,
+                pageName = "page_01.png"
+            )
+
+            val psd = plugin.buildPsdObject(
+                baseImageBmp = baseImg,
+                texts = listOf("Dialogue", "BOOM"),
+                balloonBoxes = listOf(listOf(0.1, 0.1, 0.35, 0.35), listOf(0.5, 0.5, 0.7, 0.7)),
+                categories = listOf("speech", "sfx"),
+                cleanPatches = listOf(patchFile1.absolutePath, patchFile2.absolutePath),
+                visionResult = visionResult,
+                defaultVisibleClasses = listOf(OcrCategory.speech), // SFX is excluded
+                context = ctx
+            )
+
+            val cleanGroup = psd.children.firstOrNull { it.name == "clean" }
+            assertNotNull(cleanGroup, "Clean group must exist")
+
+            val speechPatch = cleanGroup.children?.firstOrNull { it.name == "clean_patch_1" }
+            assertNotNull(speechPatch, "clean_patch_1 must exist")
+            assertEquals(false, speechPatch.hidden, "Speech patch must be visible when speech is included")
+
+            val sfxPatch = cleanGroup.children?.firstOrNull { it.name == "clean_patch_2" }
+            assertNotNull(sfxPatch, "clean_patch_2 must exist")
+            assertEquals(true, sfxPatch.hidden, "SFX patch must be hidden when sfx is excluded from defaultVisibleClasses")
+
+            // Redundant clean_image must be omitted when working solely with crop patches
+            val cleanImageLayer = cleanGroup.children?.firstOrNull { it.name == "clean_image" }
+            kotlin.test.assertNull(cleanImageLayer, "clean_image must be omitted when only crop patches are supplied")
+
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testChapterPsdPatchesNotLeakedAcrossPages() {
+        runBlocking {
+            val plugin = PSDBuilderPlugin()
+            val ctx = mockk<PluginContext>(relaxed = true)
+
+            val tempDir = File("build/tmp/test_psd_chapter_patches").apply {
+                if (exists()) deleteRecursively()
+                mkdirs()
+            }
+            val inputDir = File(tempDir, "input").apply { mkdirs() }
+            val outDir = File(tempDir, "output").apply { mkdirs() }
+
+            val p1 = File(inputDir, "page_01.png")
+            val p2 = File(inputDir, "page_02.png")
+            ImageIO.write(BufferedImage(100, 100, BufferedImage.TYPE_INT_RGB), "png", p1)
+            ImageIO.write(BufferedImage(100, 100, BufferedImage.TYPE_INT_RGB), "png", p2)
+
+            val p1PatchesDir = File(tempDir, "page_01_patches").apply { mkdirs() }
+            val p1Patch = File(p1PatchesDir, "patch_0.png")
+            ImageIO.write(BufferedImage(20, 20, BufferedImage.TYPE_INT_ARGB), "png", p1Patch)
+
+            val p2PatchesDir = File(tempDir, "page_02_patches").apply { mkdirs() }
+            val p2Patch = File(p2PatchesDir, "patch_0.png")
+            ImageIO.write(BufferedImage(20, 20, BufferedImage.TYPE_INT_ARGB), "png", p2Patch)
+
+            val ocrData = com.wip.common.models.OCRResult(
+                texts = listOf("Text 1", "Text 2"),
+                bb = listOf(listOf(0.1, 0.1, 0.3, 0.3), listOf(0.1, 0.1, 0.3, 0.3)),
+                pageNumbers = listOf(1, 2),
+                pageNames = listOf("page_01.png", "page_02.png"),
+                failedFiles = emptyList(),
+                categories = listOf("speech", "speech")
+            )
+
+            val result = plugin.buildPsdForChapter(
+                inputFolder = inputDir.absolutePath,
+                texts = ocrData.texts,
+                balloonBoxes = ocrData.bb,
+                pageNames = ocrData.pageNames,
+                outputDir = outDir.absolutePath,
+                cleanPatches = listOf(p1Patch.absolutePath, p2Patch.absolutePath),
+                categories = ocrData.categories,
+                context = ctx,
+                hostFs = mockk(relaxed = true)
+            )
+
+            assertEquals(2, result.psdPaths.size)
+
+            val psd1Bytes = File(result.psdPaths[0]).readBytes()
+            val psd1 = KPsd.read(psd1Bytes)
+            val cleanGroup1 = psd1.children.firstOrNull { it.name == "clean" }
+            assertNotNull(cleanGroup1)
+            val patchesIn1 = cleanGroup1.children?.filter { it.name?.startsWith("clean_patch") == true } ?: emptyList()
+            assertEquals(1, patchesIn1.size, "page_01 must contain only its own patch, never page_02's patch")
+
+            val psd2Bytes = File(result.psdPaths[1]).readBytes()
+            val psd2 = KPsd.read(psd2Bytes)
+            val cleanGroup2 = psd2.children.firstOrNull { it.name == "clean" }
+            assertNotNull(cleanGroup2)
+            val patchesIn2 = cleanGroup2.children?.filter { it.name?.startsWith("clean_patch") == true } ?: emptyList()
+            assertEquals(1, patchesIn2.size, "page_02 must contain only its own patch, never page_01's patch")
+
+            tempDir.deleteRecursively()
         }
     }
 }

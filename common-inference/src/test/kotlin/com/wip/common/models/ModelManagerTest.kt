@@ -1,9 +1,18 @@
 package com.wip.common.models
 
+import java.io.File
+import java.net.InetSocketAddress
+import java.nio.file.Files
+import com.sun.net.httpserver.HttpServer
+import io.mockk.every
+import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonElement
+import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.PluginFileSystem
+import org.wip.plugintoolkit.api.PluginLogger
 import org.wip.plugintoolkit.api.PluginStorage
+import org.wip.plugintoolkit.api.ProgressReporter
 import org.wip.plugintoolkit.api.RelativePath
 import org.wip.plugintoolkit.api.toRelativePath
 import kotlin.test.Test
@@ -17,24 +26,53 @@ class FakePluginFileSystem : PluginFileSystem {
     val files = mutableMapOf<String, ByteArray>()
     var rootPath: String = "C:/tmp/test-plugin"
 
-    override suspend fun readFile(relativePath: RelativePath): ByteArray? = files[relativePath.value]
-    override suspend fun readTextFile(relativePath: RelativePath): String? = files[relativePath.value]?.decodeToString()
+    override suspend fun readFile(relativePath: RelativePath): ByteArray? =
+        files[relativePath.value] ?: (if (rootPath.isNotBlank()) {
+            val f = File(rootPath, relativePath.value)
+            if (f.exists()) f.readBytes() else null
+        } else null)
+
+    override suspend fun readTextFile(relativePath: RelativePath): String? =
+        files[relativePath.value]?.decodeToString() ?: (if (rootPath.isNotBlank()) {
+            val f = File(rootPath, relativePath.value)
+            if (f.exists()) f.readText() else null
+        } else null)
+
     override suspend fun writeFile(relativePath: RelativePath, data: ByteArray): Result<Unit> {
         files[relativePath.value] = data
         return Result.success(Unit)
     }
+
     override suspend fun writeTextFile(relativePath: RelativePath, text: String): Result<Unit> {
         files[relativePath.value] = text.encodeToByteArray()
         return Result.success(Unit)
     }
-    override suspend fun exists(relativePath: RelativePath): Boolean = files.containsKey(relativePath.value)
-    override suspend fun listFiles(relativePath: RelativePath): List<String> = files.keys.filter { it.startsWith(relativePath.value) }
+
+    override suspend fun exists(relativePath: RelativePath): Boolean =
+        files.containsKey(relativePath.value) || (rootPath.isNotBlank() && File(rootPath, relativePath.value).exists())
+
+    override suspend fun listFiles(relativePath: RelativePath): List<String> =
+        files.keys.filter { it.startsWith(relativePath.value) }
+
     override suspend fun deleteFile(relativePath: RelativePath): Result<Unit> {
         files.remove(relativePath.value)
+        if (rootPath.isNotBlank()) {
+            val f = File(rootPath, relativePath.value)
+            if (f.exists()) f.delete()
+        }
         return Result.success(Unit)
     }
+
     override fun getBasePath(): String = rootPath
     override suspend fun extractResource(resourcePath: String, targetRelativePath: RelativePath): Result<Unit> = Result.success(Unit)
+}
+
+class FakeProgress(val onReport: (Float) -> Unit = {}) : ProgressReporter {
+    val reports = mutableListOf<Float>()
+    override fun report(progress: Float) {
+        reports.add(progress)
+        onReport(progress)
+    }
 }
 
 class FakePluginStorage : PluginStorage {
@@ -270,5 +308,177 @@ class ModelManagerTest {
         )
         assertNotNull(found)
         assertEquals(subfolderPath, found)
+    }
+
+    @Test
+    fun testDownloadModelStreamsDirectlyToDisk() = runBlocking {
+        val tempDir = Files.createTempDirectory("model-stream-test").toFile()
+        val fs = FakePluginFileSystem().apply { rootPath = tempDir.absolutePath }
+        val storage = FakePluginStorage()
+        val reportedProgress = mutableListOf<Float>()
+        val logger = mockk<PluginLogger>(relaxed = true)
+
+        val fakeProgress = FakeProgress { reportedProgress.add(it) }
+
+        val context = mockk<PluginContext>(relaxed = true) {
+            every { fileSystem } returns fs
+            every { this@mockk.storage } returns storage
+            every { progress } returns fakeProgress
+            every { this@mockk.logger } returns logger
+        }
+
+        val testYaml = """
+            type: yolov10
+            name: test-streaming-model
+            display_name: Test Streaming Model
+            model_path: test-model.onnx
+            input_width: 640
+            input_height: 640
+            classes:
+            - text
+        """.trimIndent()
+
+        // Generate 256KB of dummy model binary weights
+        val dummyWeights = ByteArray(256 * 1024) { (it % 256).toByte() }
+
+        val server = HttpServer.create(InetSocketAddress(0), 0)
+        server.createContext("/model.yaml") { exchange ->
+            val responseBytes = testYaml.toByteArray()
+            exchange.sendResponseHeaders(200, responseBytes.size.toLong())
+            exchange.responseBody.use { it.write(responseBytes) }
+        }
+        server.createContext("/test-model.onnx") { exchange ->
+            exchange.sendResponseHeaders(200, dummyWeights.size.toLong())
+            exchange.responseBody.use { out ->
+                // Write in small chunks to verify streaming
+                val chunk = 32 * 1024
+                var offset = 0
+                while (offset < dummyWeights.size) {
+                    val len = minOf(chunk, dummyWeights.size - offset)
+                    out.write(dummyWeights, offset, len)
+                    out.flush()
+                    offset += len
+                }
+            }
+        }
+        server.start()
+
+        val port = server.address.port
+        val modelId = "test-streaming-model"
+        val catalogEntry = ModelCatalogEntry(
+            id = modelId,
+            displayName = "Test Streaming Model",
+            yamlUrl = "http://127.0.0.1:$port/model.yaml",
+            onnxUrl = "http://127.0.0.1:$port/test-model.onnx",
+            lockKey = "model:$modelId",
+            description = "Test model for streaming verification",
+            type = ModelType.YOLO_V10
+        )
+        ModelCatalog.registerCustomEntry(catalogEntry)
+
+        try {
+            val manager = ModelManager.Default
+            val result = manager.downloadModel(modelId, context)
+
+            assertTrue(result.isSuccess, "Download should succeed: ${result.exceptionOrNull()}")
+            val spec = result.getOrThrow()
+            assertEquals("test-streaming-model", spec.name)
+
+            val destinationFolder = File(tempDir, "models/$modelId")
+            val targetWeightFile = File(destinationFolder, "test-model.onnx")
+            assertTrue(targetWeightFile.exists(), "Target weight file must exist on disk")
+            assertEquals(dummyWeights.size.toLong(), targetWeightFile.length())
+            assertTrue(dummyWeights.contentEquals(targetWeightFile.readBytes()))
+
+            // Verify no leftover .tmp files
+            val tmpFiles = destinationFolder.listFiles { _, name -> name.endsWith(".tmp") }
+            assertTrue(tmpFiles == null || tmpFiles.isEmpty(), "No temporary download files should be left behind")
+
+            // Verify storage metadata recorded
+            val storageEntry = storage.get("installed_model_$modelId")
+            assertNotNull(storageEntry)
+
+            // Verify progress was reported
+            assertTrue(reportedProgress.isNotEmpty())
+            assertEquals(1.0f, reportedProgress.last())
+
+            // Verify isModelInstalled returns true
+            assertTrue(manager.isModelInstalled(modelId, fs))
+        } finally {
+            server.stop(0)
+            ModelCatalog.clearCustomEntries()
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testDownloadModelFailureCleansUpTempFile() = runBlocking {
+        val tempDir = Files.createTempDirectory("model-fail-test").toFile()
+        val fs = FakePluginFileSystem().apply { rootPath = tempDir.absolutePath }
+        val storage = FakePluginStorage()
+        val logger = mockk<PluginLogger>(relaxed = true)
+
+        val context = mockk<PluginContext>(relaxed = true) {
+            every { fileSystem } returns fs
+            every { this@mockk.storage } returns storage
+            every { progress } returns FakeProgress()
+            every { this@mockk.logger } returns logger
+        }
+
+        val testYaml = """
+            type: yolov10
+            name: test-fail-model
+            display_name: Test Fail Model
+            model_path: fail.onnx
+            input_width: 640
+            input_height: 640
+            classes:
+            - text
+        """.trimIndent()
+
+        val server = HttpServer.create(InetSocketAddress(0), 0)
+        server.createContext("/fail.yaml") { exchange ->
+            val responseBytes = testYaml.toByteArray()
+            exchange.sendResponseHeaders(200, responseBytes.size.toLong())
+            exchange.responseBody.use { it.write(responseBytes) }
+        }
+        server.createContext("/fail.onnx") { exchange ->
+            // Intentionally fail with 500 error
+            exchange.sendResponseHeaders(500, 0)
+            exchange.responseBody.close()
+        }
+        server.start()
+
+        val port = server.address.port
+        val modelId = "test-fail-model"
+        val catalogEntry = ModelCatalogEntry(
+            id = modelId,
+            displayName = "Test Fail Model",
+            yamlUrl = "http://127.0.0.1:$port/fail.yaml",
+            onnxUrl = "http://127.0.0.1:$port/fail.onnx",
+            lockKey = "model:$modelId",
+            description = "Test fail model",
+            type = ModelType.YOLO_V10
+        )
+        ModelCatalog.registerCustomEntry(catalogEntry)
+
+        try {
+            val manager = ModelManager.Default
+            val result = manager.downloadModel(modelId, context)
+
+            assertTrue(result.isFailure, "Download should fail on HTTP 500")
+
+            val destinationFolder = File(tempDir, "models/$modelId")
+            if (destinationFolder.exists()) {
+                val tmpFiles = destinationFolder.listFiles { _, name -> name.endsWith(".tmp") }
+                assertTrue(tmpFiles == null || tmpFiles.isEmpty(), "Temp files must be cleaned up on failure")
+                val finalFile = File(destinationFolder, "fail.onnx")
+                assertFalse(finalFile.exists(), "Final file should not exist if download failed")
+            }
+        } finally {
+            server.stop(0)
+            ModelCatalog.clearCustomEntries()
+            tempDir.deleteRecursively()
+        }
     }
 }

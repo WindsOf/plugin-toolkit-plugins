@@ -216,7 +216,8 @@ object OcrVisionMerger {
             bb = validIndices.map { ocrData.bb.getOrElse(it) { listOf(0.0, 0.0, 0.0, 0.0) } },
             pageNumbers = validIndices.map { ocrData.pageNumbers.getOrElse(it) { 1 } },
             pageNames = validIndices.map { ocrData.pageNames.getOrElse(it) { "" } },
-            failedFiles = ocrData.failedFiles
+            failedFiles = ocrData.failedFiles,
+            categories = validIndices.map { ocrData.categories.getOrElse(it) { "none" } }
         )
 
         val n = cleanOcr.texts.size
@@ -261,7 +262,8 @@ object OcrVisionMerger {
             val text: String,
             val box: List<Double>,
             val pageNumber: Int,
-            val pageName: String
+            val pageName: String,
+            val category: String
         )
 
         val mergedItems = mutableListOf<MergedItem>()
@@ -311,7 +313,15 @@ object OcrVisionMerger {
             val pageNum = if (firstIdx < cleanOcr.pageNumbers.size) cleanOcr.pageNumbers[firstIdx] else 1
             val pageName = if (firstIdx < cleanOcr.pageNames.size) cleanOcr.pageNames[firstIdx] else ""
 
-            mergedItems.add(MergedItem(mergedText, mergedBox, pageNum, pageName))
+            val groupCategories = groupIndices.map { cleanOcr.categories.getOrElse(it) { "none" } }
+            val resolvedCategory = when {
+                groupCategories.any { it.equals("speech", ignoreCase = true) } -> "speech"
+                groupCategories.any { it.equals("sfx", ignoreCase = true) } -> "sfx"
+                groupCategories.any { it.equals("non_text", ignoreCase = true) } -> "non_text"
+                else -> groupCategories.firstOrNull() ?: "none"
+            }
+
+            mergedItems.add(MergedItem(mergedText, mergedBox, pageNum, pageName, resolvedCategory))
         }
 
         // Sort all merged balloons top-to-bottom for reading order
@@ -321,7 +331,8 @@ object OcrVisionMerger {
             texts = mergedItems.map { it.text },
             bb = mergedItems.map { it.box },
             pageNumbers = mergedItems.map { it.pageNumber },
-            pageNames = mergedItems.map { it.pageName }
+            pageNames = mergedItems.map { it.pageName },
+            categories = mergedItems.map { it.category }
         )
     }
 
@@ -365,7 +376,8 @@ object OcrVisionMerger {
             borderColors = validIndices.map { ocrData.borderColors.getOrElse(it) { "#FFFFFF" } },
             pageNumbers = validIndices.map { ocrData.pageNumbers.getOrElse(it) { 1 } },
             pageNames = validIndices.map { ocrData.pageNames.getOrElse(it) { "" } },
-            failedFiles = ocrData.failedFiles
+            failedFiles = ocrData.failedFiles,
+            categories = validIndices.map { ocrData.categories.getOrElse(it) { "none" } }
         )
 
         val n = cleanOcr.texts.size
@@ -422,7 +434,8 @@ object OcrVisionMerger {
             val hasBorder: Boolean,
             val borderColor: String,
             val pageNumber: Int,
-            val pageName: String
+            val pageName: String,
+            val category: String
         )
 
         val mergedItems = mutableListOf<MergedAdvItem>()
@@ -456,7 +469,7 @@ object OcrVisionMerger {
                     minBY = min(minBY, min(bBox[0], bBox[2]))
                     minBX = min(minBX, min(bBox[1], bBox[3]))
                     maxBY = max(maxBY, max(bBox[0], bBox[2]))
-                    maxBX = max(maxBX, max(bBox[1], bBox[3]))
+                    maxBX = max(maxBY, max(bBox[1], bBox[3]))
                 }
                 val tBox = cleanOcr.textBoxes.getOrNull(idx)
                 if (tBox != null && tBox.size >= 4) {
@@ -471,6 +484,14 @@ object OcrVisionMerger {
             val mergedTextBox = if (minTY != Double.MAX_VALUE) listOf(minTY, minTX, maxTY, maxTX) else (cleanOcr.textBoxes.getOrNull(groupIndices[0]) ?: mergedBalloonBox)
 
             val firstIdx = groupIndices[0]
+            val groupCategories = groupIndices.map { cleanOcr.categories.getOrElse(it) { "none" } }
+            val resolvedCategory = when {
+                groupCategories.any { it.equals("speech", ignoreCase = true) } -> "speech"
+                groupCategories.any { it.equals("sfx", ignoreCase = true) } -> "sfx"
+                groupCategories.any { it.equals("non_text", ignoreCase = true) } -> "non_text"
+                else -> groupCategories.firstOrNull() ?: "none"
+            }
+
             mergedItems.add(
                 MergedAdvItem(
                     text = mergedText,
@@ -485,7 +506,8 @@ object OcrVisionMerger {
                     hasBorder = if (firstIdx < cleanOcr.hasBorder.size) cleanOcr.hasBorder[firstIdx] else false,
                     borderColor = if (firstIdx < cleanOcr.borderColors.size) cleanOcr.borderColors[firstIdx] else "#FFFFFF",
                     pageNumber = if (firstIdx < cleanOcr.pageNumbers.size) cleanOcr.pageNumbers[firstIdx] else 1,
-                    pageName = if (firstIdx < cleanOcr.pageNames.size) cleanOcr.pageNames[firstIdx] else ""
+                    pageName = if (firstIdx < cleanOcr.pageNames.size) cleanOcr.pageNames[firstIdx] else "",
+                    category = resolvedCategory
                 )
             )
         }
@@ -506,7 +528,8 @@ object OcrVisionMerger {
             hasBorder = mergedItems.map { it.hasBorder },
             borderColors = mergedItems.map { it.borderColor },
             pageNumbers = mergedItems.map { it.pageNumber },
-            pageNames = mergedItems.map { it.pageName }
+            pageNames = mergedItems.map { it.pageName },
+            categories = mergedItems.map { it.category }
         )
     }
 
@@ -578,6 +601,7 @@ object OcrVisionMerger {
         val allMergedBb = mutableListOf<List<Double>>()
         val allMergedPageNumbers = mutableListOf<Int>()
         val allMergedPageNames = mutableListOf<String>()
+        val allMergedCategories = mutableListOf<String>()
 
         for ((pageName, indices) in pageGroups) {
             val pageNum = indices.firstOrNull()?.let { ocrData.pageNumbers.getOrNull(it) } ?: 1
@@ -588,7 +612,8 @@ object OcrVisionMerger {
                 bb = indices.map { ocrData.bb.getOrElse(it) { listOf(0.0, 0.0, 0.0, 0.0) } },
                 pageNumbers = indices.map { ocrData.pageNumbers.getOrElse(it) { pageNum } },
                 pageNames = indices.map { ocrData.pageNames.getOrElse(it) { pageName } },
-                failedFiles = emptyList()
+                failedFiles = emptyList(),
+                categories = indices.map { ocrData.categories.getOrElse(it) { "none" } }
             )
 
             val mergedPageOcr = if (visionResult != null) {
@@ -601,13 +626,15 @@ object OcrVisionMerger {
             allMergedBb.addAll(mergedPageOcr.bb)
             allMergedPageNumbers.addAll(mergedPageOcr.pageNumbers)
             allMergedPageNames.addAll(mergedPageOcr.pageNames)
+            allMergedCategories.addAll(mergedPageOcr.categories)
         }
 
         return ocrData.copy(
             texts = allMergedTexts,
             bb = allMergedBb,
             pageNumbers = allMergedPageNumbers,
-            pageNames = allMergedPageNames
+            pageNames = allMergedPageNames,
+            categories = allMergedCategories
         )
     }
 
@@ -658,6 +685,7 @@ object OcrVisionMerger {
         val allBorderColors = mutableListOf<String>()
         val allPageNumbers = mutableListOf<Int>()
         val allPageNames = mutableListOf<String>()
+        val allCategories = mutableListOf<String>()
 
         for ((pageName, indices) in pageGroups) {
             val pageNum = indices.firstOrNull()?.let { ocrData.pageNumbers.getOrNull(it) } ?: 1
@@ -677,7 +705,8 @@ object OcrVisionMerger {
                 borderColors = indices.map { ocrData.borderColors.getOrElse(it) { "#FFFFFF" } },
                 pageNumbers = indices.map { ocrData.pageNumbers.getOrElse(it) { pageNum } },
                 pageNames = indices.map { ocrData.pageNames.getOrElse(it) { pageName } },
-                failedFiles = emptyList()
+                failedFiles = emptyList(),
+                categories = indices.map { ocrData.categories.getOrElse(it) { "none" } }
             )
 
             val mergedPageOcr = if (visionResult != null) {
@@ -699,6 +728,7 @@ object OcrVisionMerger {
             allBorderColors.addAll(mergedPageOcr.borderColors)
             allPageNumbers.addAll(mergedPageOcr.pageNumbers)
             allPageNames.addAll(mergedPageOcr.pageNames)
+            allCategories.addAll(mergedPageOcr.categories)
         }
 
         return ocrData.copy(
@@ -714,7 +744,8 @@ object OcrVisionMerger {
             hasBorder = allHasBorder,
             borderColors = allBorderColors,
             pageNumbers = allPageNumbers,
-            pageNames = allPageNames
+            pageNames = allPageNames,
+            categories = allCategories
         )
     }
 }

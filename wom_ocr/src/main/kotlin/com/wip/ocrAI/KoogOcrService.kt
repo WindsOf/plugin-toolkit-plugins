@@ -16,6 +16,7 @@ import com.wip.common.models.AdvancedOcrServiceResult
 import com.wip.common.models.BalloonsResponse
 import com.wip.common.models.ChapterVisionResult
 import com.wip.common.models.OcrServiceResult
+import com.wip.common.models.OcrTextFilter
 import com.wip.common.models.sortedNaturally
 import com.wip.ocrAI.models.AIModel
 import com.wip.ocrAI.models.OcrIASettings
@@ -89,37 +90,7 @@ class KoogOcrService(
         1000.0 to 1000.0 // fallback
     }
 
-    private fun isHallucinationOrEmpty(rawText: String?): Boolean {
-        if (rawText.isNullOrBlank()) return true
-        val clean = rawText.trim()
-        if (clean.isBlank()) return true
-        if (!clean.any { it.isLetterOrDigit() }) return true
-
-        val lower = clean.lowercase()
-        val directMatches = setOf(
-            "(no text)", "no text", "none", "n/a", "na", "empty", "nothing",
-            "no dialogue", "no speech", "no speech bubble", "no speech bubbles",
-            "no text detected", "no text found", "no visible text",
-            "(nessun testo)", "nessun testo", "nessun dialogo",
-            "1", "0", "null", "undefined"
-        )
-        if (lower in directMatches) return true
-
-        val hallucinationRegexes = listOf(
-            Regex("""(?i)^\s*\(?(?:no\s+text|nessun\s+testo|none|empty|nothing|no\s+dialogue|no\s+speech(?:\s+bubbles?)?)\)?\.?\s*$"""),
-            Regex("""(?i)\b(?:the\s+image\s+contains\s+no\s+text|image\s+contains\s+no\s+visible\s+text|there\s+is\s+no\s+text\s+in\s+this\s+image|no\s+text\s+(?:found|detected|visible)\s+in\s+the\s+image)\b"""),
-            Regex("""(?i)\b(?:the\s+ocr\s+result.*is\s+a\s+hallucination|does\s+not\s+correspond\s+to\s+any\s+content|absence\s+of\s+any\s+visible\s+text)\b"""),
-            Regex("""(?i)\b(?:correct\s+ocr\s+output\s+must\s+reflect\s+the\s+absence\s+of|cannot\s+find\s+any\s+text\s+to\s+transcribe|no\s+transcription\s+available)\b""")
-        )
-
-        for (regex in hallucinationRegexes) {
-            if (regex.containsMatchIn(lower)) {
-                return true
-            }
-        }
-
-        return false
-    }
+    private fun isHallucinationOrEmpty(rawText: String?): Boolean = OcrTextFilter.isHallucinationOrEmpty(rawText)
 
     private fun scaleBoxToPixels(box: List<Double>, width: Double, height: Double): List<Double> {
         if (box.size < 4) return box
@@ -283,14 +254,27 @@ class KoogOcrService(
         )
 
         val promptInstructions =
-            "Analyze this comic panel. Locate ALL areas containing text (speech bubbles, captions, and text boxes). " +
-                    "Do NOT transcribe sound effects (SFX) or onomatopoeia that appear OUTSIDE of speech bubbles. " +
-                    "For each text area provide:\n" +
-                    " 1. The bounding box of the TEXT ITSELF (not the balloon outline).\n" +
-                    " Express coordinates as FRACTIONS of the image dimensions, between 0.0 and 1.0:\n" +
-                    " xmin = left edge / image_width, ymin = top edge / image_height,\n" +
-                    " xmax = right edge / image_width, ymax = bottom edge / image_height.\n" +
-                    " 2. The exact text transcribed from that area."
+            "Analyze this comic page/panel. Locate ALL areas containing text (speech bubbles, narration, captions, and sound effects / SFX).\n" +
+            "Classify each text area into 'category': 'speech' (dialogue or narration in bubbles/boxes), 'sfx' (sound effects, onomatopoeia), or 'none'.\n" +
+            "For each text area provide:\n" +
+            " 1. The bounding box of the TEXT ITSELF (the tightest box around the transcribed words).\n" +
+            " Express coordinates as FRACTIONS of the image dimensions, between 0.0 and 1.0:\n" +
+            " xmin = left edge / image_width, ymin = top edge / image_height,\n" +
+            " xmax = right edge / image_width, ymax = bottom edge / image_height.\n" +
+            " 2. The exact text transcribed from that area.\n" +
+            " 3. The classification 'category' ('speech', 'sfx', or 'none')."
+
+        val cropPromptInstructions =
+            "This is a cropped close-up region of a comic page centered around a text or speech balloon.\n" +
+            "Locate and transcribe the primary text inside this region. If other adjacent text is partially visible at the edges, focus on the primary/centered text.\n" +
+            "Classify each text area into 'category': 'speech' (dialogue or narration in bubbles/boxes), 'sfx' (sound effects, onomatopoeia), or 'none'.\n" +
+            "For each text area provide:\n" +
+            " 1. The bounding box of the TEXT ITSELF relative to this cropped image.\n" +
+            " Express coordinates as FRACTIONS of the cropped image dimensions, between 0.0 and 1.0:\n" +
+            " xmin = left edge / crop_width, ymin = top edge / crop_height,\n" +
+            " xmax = right edge / crop_width, ymax = bottom edge / crop_height.\n" +
+            " 2. The exact text transcribed from that area.\n" +
+            " 3. The classification 'category' ('speech', 'sfx', or 'none')."
 
         val balloonSchema = buildJsonObject {
             put("type", "object")
@@ -305,6 +289,7 @@ class KoogOcrService(
                             putJsonObject("xmax") { put("type", "number") }
                             putJsonObject("ymax") { put("type", "number") }
                             putJsonObject("text") { put("type", "string") }
+                            putJsonObject("category") { put("type", "string") }
                         }
                         putJsonArray("required") { add("xmin"); add("ymin"); add("xmax"); add("ymax"); add("text") }
                     }
@@ -319,8 +304,15 @@ class KoogOcrService(
             promptInstructions + "\n\nIMPORTANT: Your output MUST be a valid JSON object matching the following schema:\n" + balloonSchema.toString()
         }
 
+        val effectiveCropPromptInstructions = if (useStructuredOutput) {
+            cropPromptInstructions
+        } else {
+            cropPromptInstructions + "\n\nIMPORTANT: Your output MUST be a valid JSON object matching the following schema:\n" + balloonSchema.toString()
+        }
+
         val allTexts = mutableListOf<String>()
         val allBoxes = mutableListOf<List<Double>>()
+        val allCategories = mutableListOf<String>()
         val allPageNumbers = mutableListOf<Int>()
         val allPageNames = mutableListOf<String>()
         val failedFiles = mutableListOf<String>()
@@ -374,7 +366,7 @@ class KoogOcrService(
                                             )
                                         ) {
                                             user {
-                                                text(effectivePromptInstructions)
+                                                text(effectiveCropPromptInstructions)
                                                 image(Path(tempCropFile.absolutePath))
                                             }
                                         }
@@ -424,6 +416,8 @@ class KoogOcrService(
                                                     allBoxes.add(globalBox)
                                                     allPageNumbers.add(index + 1)
                                                     allPageNames.add(file.name)
+                                                    val cat = if (balloon.category.isNotBlank() && balloon.category != "none") balloon.category else "speech"
+                                                    allCategories.add(cat)
                                                 }
                                             }
                                         }
@@ -483,9 +477,13 @@ class KoogOcrService(
                                             allTexts.add(balloon.text)
                                             val originalBox =
                                                 listOf(balloon.ymin, balloon.xmin, balloon.ymax, balloon.xmax)
-                                            allBoxes.add(scaleBoxToPixels(originalBox, imgWidth, imgHeight))
+                                            val scaledBox = scaleBoxToPixels(originalBox, imgWidth, imgHeight)
+                                            val normBox = VisionCutoutHelper.normalizeBoxToGlobal(scaledBox, imgWidth, imgHeight)
+                                            allBoxes.add(normBox)
                                             allPageNumbers.add(index + 1)
                                             allPageNames.add(file.name)
+                                            val cat = if (balloon.category.isNotBlank() && balloon.category != "none") balloon.category else "speech"
+                                            allCategories.add(cat)
                                         }
                                     }
                                     processedFilesCount++
@@ -500,7 +498,7 @@ class KoogOcrService(
                 }
             }.awaitAll()
         }
-        return OcrServiceResult(allTexts, allBoxes, allPageNumbers, allPageNames, failedFiles)
+        return OcrServiceResult(allTexts, allBoxes, allPageNumbers, allPageNames, failedFiles, allCategories)
     }
 
     suspend fun performAdvancedOcr(
@@ -602,22 +600,43 @@ class KoogOcrService(
         }
 
         val promptInstructions =
-            "Analyze this comic panel. Locate ALL areas containing text (speech bubbles, captions, and text boxes).\n" +
-                    "Do NOT transcribe sound effects (SFX) or onomatopoeia that appear OUTSIDE of speech bubbles.\n" +
-                    "For each text area provide:\n" +
-                    " 1. The bounding box of the SPEECH BUBBLE / BALLOON enclosing the text (exclude the tail).\n" +
-                    " 2. The bounding box of the TEXT ITSELF (the tightest box around the transcribed words).\n" +
-                    " $coordFormat\n" +
-                    " Provide a 'balloon_box_2d' array and a 'text_box_2d' array containing exactly 4 numbers in this STRICT ORDER: [ymin, xmin, ymax, xmax].\n" +
-                    " 3. The 'shape' of the bubble: Choose EXACTLY ONE from: 'oval' or 'rectangular'.\n" +
-                    " 4. The 'fontStyle': Choose EXACTLY ONE from: 'normal', 'italic', 'bold', 'bold-italic'.\n" +
-                    " 5. The 'fontFamily': A string describing the font type, e.g. 'sans-serif', 'serif', 'handwritten', 'screaming'.\n" +
-                    " 6. The 'textAngle': Rotation angle of the text in degrees (e.g. 0.0 for horizontal, 90.0 for vertical).\n" +
-                    " 7. 'isSparse': Boolean, true if the text is sparsely spread inside the bounding box.\n" +
-                    " 8. 'textColor': The dominant color of the text (e.g. 'black', 'white', '#FF0000').\n" +
-                    " 9. 'hasBorder': Boolean, true if the text has an outline or stroke.\n" +
-                    " 10. 'borderColor': The color of the border/stroke if present, or an empty string if none.\n" +
-                    " 11. The exact 'text' transcribed from that area."
+            "Analyze this comic page/panel. Locate ALL areas containing text (dialogue in speech bubbles, narrations, captions, and sound effects / SFX).\n" +
+            "Classify each text element into 'category': 'speech' (dialogue or narration in bubbles/boxes), 'sfx' (sound effects / onomatopoeia), or 'none'.\n" +
+            "For each text area provide:\n" +
+            " 1. The bounding box of the SPEECH BUBBLE / BALLOON enclosing the text (exclude the tail).\n" +
+            " 2. The bounding box of the TEXT ITSELF (the tightest box around the transcribed words).\n" +
+            " $coordFormat\n" +
+            " Provide a 'balloon_box_2d' array and a 'text_box_2d' array containing exactly 4 numbers in this STRICT ORDER: [ymin, xmin, ymax, xmax].\n" +
+            " 3. The 'shape' of the bubble: Choose EXACTLY ONE from: 'oval' or 'rectangular'.\n" +
+            " 4. The 'fontStyle': Choose EXACTLY ONE from: 'normal', 'italic', 'bold', 'bold-italic'.\n" +
+            " 5. The 'fontFamily': A string describing the font type, e.g. 'sans-serif', 'serif', 'handwritten', 'screaming'.\n" +
+            " 6. The 'textAngle': Rotation angle of the text in degrees (e.g. 0.0 for horizontal, 90.0 for vertical).\n" +
+            " 7. 'isSparse': Boolean, true if the text is sparsely spread inside the bounding box.\n" +
+            " 8. 'textColor': The dominant color of the text (e.g. 'black', 'white', '#FF0000').\n" +
+            " 9. 'hasBorder': Boolean, true if the text has an outline or stroke.\n" +
+            " 10. 'borderColor': The color of the border/stroke if present, or an empty string if none.\n" +
+            " 11. The exact 'text' transcribed from that area.\n" +
+            " 12. The classification 'category' ('speech', 'sfx', or 'none')."
+
+        val cropPromptInstructions =
+            "This is a cropped close-up region of a comic page centered around a text or speech balloon.\n" +
+            "Locate and transcribe the primary text inside this region. If other adjacent text is partially visible at the edges, focus on the primary/centered text.\n" +
+            "Classify each text element into 'category': 'speech' (dialogue or narration in bubbles/boxes), 'sfx' (sound effects / onomatopoeia), or 'none'.\n" +
+            "For each text area provide:\n" +
+            " 1. The bounding box of the SPEECH BUBBLE / BALLOON enclosing the text relative to this cropped image.\n" +
+            " 2. The bounding box of the TEXT ITSELF relative to this cropped image.\n" +
+            " $coordFormat\n" +
+            " Provide a 'balloon_box_2d' array and a 'text_box_2d' array containing exactly 4 numbers in this STRICT ORDER: [ymin, xmin, ymax, xmax].\n" +
+            " 3. The 'shape' of the bubble: Choose EXACTLY ONE from: 'oval' or 'rectangular'.\n" +
+            " 4. The 'fontStyle': Choose EXACTLY ONE from: 'normal', 'italic', 'bold', 'bold-italic'.\n" +
+            " 5. The 'fontFamily': A string describing the font type, e.g. 'sans-serif', 'serif', 'handwritten', 'screaming'.\n" +
+            " 6. The 'textAngle': Rotation angle of the text in degrees (e.g. 0.0 for horizontal, 90.0 for vertical).\n" +
+            " 7. 'isSparse': Boolean, true if the text is sparsely spread inside the bounding box.\n" +
+            " 8. 'textColor': The dominant color of the text (e.g. 'black', 'white', '#FF0000').\n" +
+            " 9. 'hasBorder': Boolean, true if the text has an outline or stroke.\n" +
+            " 10. 'borderColor': The color of the border/stroke if present, or an empty string if none.\n" +
+            " 11. The exact 'text' transcribed from that area.\n" +
+            " 12. The classification 'category' ('speech', 'sfx', or 'none')."
 
         val balloonSchema = buildJsonObject {
             put("type", "object")
@@ -652,6 +671,7 @@ class KoogOcrService(
                             putJsonObject("hasBorder") { put("type", "boolean") }
                             putJsonObject("borderColor") { put("type", "string") }
                             putJsonObject("text") { put("type", "string") }
+                            putJsonObject("category") { put("type", "string") }
                         }
                         putJsonArray("required") {
                             add("balloon_box_2d"); add("text_box_2d"); add("shape"); add("fontStyle"); add("fontFamily"); add(
@@ -668,6 +688,9 @@ class KoogOcrService(
         val effectivePromptInstructions =
             if (useStructuredOutput) promptInstructions else promptInstructions + "\n\nIMPORTANT: Your output MUST be a valid JSON object matching the following schema:\n" + balloonSchema.toString()
 
+        val effectiveCropPromptInstructions =
+            if (useStructuredOutput) cropPromptInstructions else cropPromptInstructions + "\n\nIMPORTANT: Your output MUST be a valid JSON object matching the following schema:\n" + balloonSchema.toString()
+
         val allTexts = mutableListOf<String>()
         val allBalloonBoxes = mutableListOf<List<Double>>()
         val allTextBoxes = mutableListOf<List<Double>>()
@@ -679,6 +702,7 @@ class KoogOcrService(
         val allTextColors = mutableListOf<String>()
         val allHasBorder = mutableListOf<Boolean>()
         val allBorderColors = mutableListOf<String>()
+        val allCategories = mutableListOf<String>()
         val allPageNumbers = mutableListOf<Int>()
         val allPageNames = mutableListOf<String>()
         val failedFiles = mutableListOf<String>()
@@ -732,7 +756,7 @@ class KoogOcrService(
                                             )
                                         ) {
                                             user {
-                                                text(effectivePromptInstructions)
+                                                text(effectiveCropPromptInstructions)
                                                 image(Path(tempCropFile.absolutePath))
                                             }
                                         }
@@ -752,7 +776,6 @@ class KoogOcrService(
                                                     RegexOption.DOT_MATCHES_ALL
                                                 ), ""
                                             ).trim()
-
                                             val jsonToParse =
                                                 if (!useStructuredOutput) extractJsonFromText(rawText) else rawText
                                             val parsed = Json {
@@ -800,6 +823,8 @@ class KoogOcrService(
                                                     allBorderColors.add(balloon.borderColor)
                                                     allPageNumbers.add(index + 1)
                                                     allPageNames.add(file.name)
+                                                    val cat = if (balloon.category.isNotBlank() && balloon.category != "none") balloon.category else "speech"
+                                                    allCategories.add(cat)
                                                 }
                                             }
                                         }
@@ -858,14 +883,10 @@ class KoogOcrService(
                                     balloonsResponse.balloons.forEach { balloon ->
                                         if (!isHallucinationOrEmpty(balloon.text)) {
                                             allTexts.add(balloon.text)
-                                            allBalloonBoxes.add(
-                                                scaleBoxToPixels(
-                                                    balloon.balloon_box_2d,
-                                                    imgWidth,
-                                                    imgHeight
-                                                )
-                                            )
-                                            allTextBoxes.add(scaleBoxToPixels(balloon.text_box_2d, imgWidth, imgHeight))
+                                            val scaledBalloon = scaleBoxToPixels(balloon.balloon_box_2d, imgWidth, imgHeight)
+                                            val scaledText = scaleBoxToPixels(balloon.text_box_2d, imgWidth, imgHeight)
+                                            allBalloonBoxes.add(VisionCutoutHelper.normalizeBoxToGlobal(scaledBalloon, imgWidth, imgHeight))
+                                            allTextBoxes.add(VisionCutoutHelper.normalizeBoxToGlobal(scaledText, imgWidth, imgHeight))
                                             allShapes.add(balloon.shape)
                                             allFontStyles.add(balloon.fontStyle)
                                             allFontFamilies.add(balloon.fontFamily)
@@ -876,6 +897,8 @@ class KoogOcrService(
                                             allBorderColors.add(balloon.borderColor)
                                             allPageNumbers.add(index + 1)
                                             allPageNames.add(file.name)
+                                            val cat = if (balloon.category.isNotBlank() && balloon.category != "none") balloon.category else "speech"
+                                            allCategories.add(cat)
                                         }
                                     }
                                     processedFilesCount++
@@ -904,7 +927,8 @@ class KoogOcrService(
             allBorderColors,
             allPageNumbers,
             allPageNames,
-            failedFiles
+            failedFiles,
+            allCategories
         )
     }
 

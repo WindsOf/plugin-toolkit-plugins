@@ -20,7 +20,9 @@ import java.awt.Color
 import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
+import com.wip.common.models.OcrCategory
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class CleanerPluginTest {
@@ -776,6 +778,94 @@ class CleanerPluginTest {
             )
             assertTrue(File(laplacianResult.cleanedImagePath).exists())
         }
+    }
+
+    @Test
+    fun testResolveEffectiveTargetLabels() {
+        val cleaner = CleanerPlugin()
+        val speechLabels = cleaner.resolveEffectiveTargetLabels(listOf(OcrCategory.speech), emptyList())
+        assertTrue(speechLabels.contains("speech"))
+        assertTrue(speechLabels.contains("text"))
+        assertTrue(speechLabels.contains("balloon"))
+        assertFalse(speechLabels.contains("sfx"))
+
+        val sfxLabels = cleaner.resolveEffectiveTargetLabels(listOf(OcrCategory.sfx), emptyList())
+        assertTrue(sfxLabels.contains("sfx"))
+        assertFalse(sfxLabels.contains("speech"))
+
+        val mixedLabels = cleaner.resolveEffectiveTargetLabels(listOf(OcrCategory.speech, OcrCategory.non_text), listOf("custom"))
+        assertTrue(mixedLabels.contains("speech"))
+        assertTrue(mixedLabels.contains("non_text"))
+        assertTrue(mixedLabels.contains("custom"))
+    }
+
+    @Test
+    fun testCleanChapterWithOutputCropPatches() = kotlinx.coroutines.runBlocking {
+        val cleaner = CleanerPlugin()
+        val tempDir = File("build/tmp/test_cleaner_patches").apply {
+            if (exists()) deleteRecursively()
+            mkdirs()
+        }
+        val imgFile = File(tempDir, "p1.png")
+        val bi = BufferedImage(100, 100, BufferedImage.TYPE_INT_RGB)
+        val g = bi.createGraphics()
+        g.color = Color.WHITE
+        g.fillRect(0, 0, 100, 100)
+        g.color = Color.BLACK
+        g.fillRect(20, 20, 30, 30)
+        g.dispose()
+        ImageIO.write(bi, "png", imgFile)
+
+        val outDir = File(tempDir, "out")
+        val visResult = VisionResult(
+            objects = listOf(
+                SegmentedObject(
+                    label = "speech",
+                    confidence = 0.99,
+                    box = DetectionBox("speech", 0.99, 0.2, 0.2, 0.5, 0.5),
+                    polygon = listOf(
+                        PolygonPoint(0.2, 0.2),
+                        PolygonPoint(0.5, 0.2),
+                        PolygonPoint(0.5, 0.5),
+                        PolygonPoint(0.2, 0.5)
+                    )
+                )
+            ),
+            imageWidth = 100,
+            imageHeight = 100,
+            pageName = "p1.png"
+        )
+        val chapterVision = ChapterVisionResult(listOf(visResult), 1)
+
+        val logger = FakeLogger()
+        val progress = FakeProgress()
+        val pluginFs = mockk<PluginFileSystem>(relaxed = true) {
+            coEvery { readFile(any()) } returns null
+            coEvery { exists(any()) } returns false
+        }
+        val hostFs = mockk<HostFileSystem>(relaxed = true)
+
+        val context = mockk<PluginContext>(relaxed = true) {
+            every { this@mockk.logger } returns logger
+            every { this@mockk.progress } returns progress
+            every { this@mockk.fileSystem } returns pluginFs
+        }
+
+        val res = cleaner.cleanChapter(
+            inputFolder = tempDir.absolutePath,
+            chapterVisionResult = chapterVision,
+            outputDir = outDir.absolutePath,
+            model = InpaintingModel.LAMA,
+            clean_classes = listOf(OcrCategory.speech),
+            isolatedRegionsOnly = true,
+            outputCropPatches = true,
+            context = context,
+            hostFs = hostFs
+        )
+
+        assertEquals(1, res.cleanedImagePaths.size)
+        assertTrue(res.clean.isNotEmpty(), "Clean patches should be populated")
+        assertTrue(File(res.clean[0]).exists(), "Patch file must exist")
     }
 }
 

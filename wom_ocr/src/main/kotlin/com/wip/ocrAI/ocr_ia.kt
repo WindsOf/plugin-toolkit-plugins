@@ -12,6 +12,7 @@ import com.wip.common.models.OCRResult
 import com.wip.common.models.OcrVisionMerger
 import com.wip.common.models.VisionResult
 import com.wip.ocrAI.models.AIModel
+import com.wip.ocrAI.models.AdvancedAIModel
 import com.wip.ocrAI.models.OcrDownloadModel
 import com.wip.ocrAI.models.OcrIASettings
 import com.wip.ocrAI.models.OcrQuantization
@@ -36,7 +37,7 @@ import org.wip.plugintoolkit.api.annotations.PluginValidate
 @PluginInfo(
     id = "com.wip.ocr_ia",
     name = "WOM OCR",
-    version = "2.8.0",
+    version = "2.9.1",
     description = "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog",
     supportedOs = [OS.WINDOWS]
 )
@@ -292,6 +293,11 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
         chapterVisionResult: ChapterVisionResult? = null,
         @CapabilityParam(description = "Padding in pixels around detected regions for cutout OCR", defaultValue = "100")
         cropPadding: Int = 100,
+        @CapabilityParam(
+            description = "Automatically merge nearby OCR detections that fall within the same speech balloon when vision segmentation is provided",
+            defaultValue = "true"
+        )
+        merge_nearby_with_vision: Boolean = true,
         context: PluginContext,
         hostFs: HostFileSystem
     ): OCRResult {
@@ -301,10 +307,10 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
             AIModel.QWEN3_VL_8B -> if (quantization == OcrQuantization.Q8_0) ModelCatalog.QWEN3_VL_8B_Q8_0_ID else ModelCatalog.QWEN3_VL_8B_Q4_K_M_ID
             else -> model.id
         }
-        logger.info("OCR IA (Basic) v2.4.0 started. Model: ${model.id} (resolved: $resolvedModelId, quantization: $quantization)")
-        logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput | VisionAssisted: ${chapterVisionResult != null}")
+        logger.info("OCR IA (Basic) v2.9.0 started. Model: ${model.id} (resolved: $resolvedModelId, quantization: $quantization)")
+        logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput | VisionAssisted: ${chapterVisionResult != null} | AutoMerge: $merge_nearby_with_vision")
 
-        return try {
+        val baseResult = try {
             if (model in setOf(
                     AIModel.UNLIMITED_OCR_BF16,
                     AIModel.UNLIMITED_OCR_Q8_0,
@@ -315,7 +321,7 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
                 )
             ) {
                 val runner = UnlimitedOcrRunner(context, hostFs, settings)
-                return runner.performOcr(
+                runner.performOcr(
                     input,
                     save,
                     outputDir,
@@ -325,19 +331,20 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
                     chapterVisionResult = chapterVisionResult,
                     cropPadding = cropPadding
                 )
+            } else {
+                val service = KoogOcrService(context, settings, hostFs)
+                val ocrResult = service.performOcr(
+                    input,
+                    save,
+                    outputDir,
+                    useStructuredOutput,
+                    saveThinking,
+                    model,
+                    chapterVisionResult = chapterVisionResult,
+                    cropPadding = cropPadding
+                )
+                OCRResult(ocrResult.texts, ocrResult.bb, ocrResult.pageNumbers, ocrResult.pageNames, ocrResult.failedFiles, ocrResult.categories)
             }
-            val service = KoogOcrService(context, settings, hostFs)
-            val ocrResult = service.performOcr(
-                input,
-                save,
-                outputDir,
-                useStructuredOutput,
-                saveThinking,
-                model,
-                chapterVisionResult = chapterVisionResult,
-                cropPadding = cropPadding
-            )
-            OCRResult(ocrResult.texts, ocrResult.bb, ocrResult.pageNumbers, ocrResult.pageNames, ocrResult.failedFiles)
         } catch (e: Throwable) {
             val msg = "OCR failed: ${e::class.simpleName}: ${e.message}"
             logger.error(msg)
@@ -345,6 +352,13 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
                 logger.error("A critical Error occurred: ${e.stackTraceToString()}")
             }
             throw RuntimeException(msg, e)
+        }
+
+        return if (merge_nearby_with_vision && chapterVisionResult != null) {
+            logger.info("[OCR_IA] Automatically merging OCR results using ChapterVisionResult...")
+            OcrVisionMerger.mergeChapterOcrResult(baseResult, chapterVisionResult, separator = " ")
+        } else {
+            baseResult
         }
     }
 
@@ -374,7 +388,7 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
         @CapabilityParam(description = "Whether to save the thinking inside the json", defaultValue = "false")
         saveThinking: Boolean,
         @CapabilityParam(description = "The AI Model to use", defaultValue = "GEMMA_31B")
-        model: AIModel,
+        model: AdvancedAIModel,
         @CapabilityParam(
             description = "Quantization variant for local OCR models (e.g. Qwen)",
             defaultValue = "\"Q4_K_M\"",
@@ -386,30 +400,31 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
         chapterVisionResult: ChapterVisionResult? = null,
         @CapabilityParam(description = "Padding in pixels around detected regions for cutout OCR", defaultValue = "100")
         cropPadding: Int = 100,
+        @CapabilityParam(
+            description = "Automatically merge nearby Advanced OCR detections that fall within the same speech balloon when vision segmentation is provided",
+            defaultValue = "true"
+        )
+        merge_nearby_with_vision: Boolean = true,
         context: PluginContext,
         hostFs: HostFileSystem
     ): AdvancedOCRResult {
         val logger = context.logger
         val resolvedModelId = when (model) {
-            AIModel.QWEN3_VL_4B -> if (quantization == OcrQuantization.Q8_0) ModelCatalog.QWEN3_VL_4B_Q8_0_ID else ModelCatalog.QWEN3_VL_4B_Q4_K_M_ID
-            AIModel.QWEN3_VL_8B -> if (quantization == OcrQuantization.Q8_0) ModelCatalog.QWEN3_VL_8B_Q8_0_ID else ModelCatalog.QWEN3_VL_8B_Q4_K_M_ID
+            AdvancedAIModel.QWEN3_VL_4B -> if (quantization == OcrQuantization.Q8_0) ModelCatalog.QWEN3_VL_4B_Q8_0_ID else ModelCatalog.QWEN3_VL_4B_Q4_K_M_ID
+            AdvancedAIModel.QWEN3_VL_8B -> if (quantization == OcrQuantization.Q8_0) ModelCatalog.QWEN3_VL_8B_Q8_0_ID else ModelCatalog.QWEN3_VL_8B_Q4_K_M_ID
             else -> model.id
         }
-        logger.info("OCR IA (Advanced) v2.4.0 started. Model: ${model.id} (resolved: $resolvedModelId, quantization: $quantization)")
-        logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput | VisionAssisted: ${chapterVisionResult != null}")
+        logger.info("OCR IA (Advanced) v2.9.0 started. Model: ${model.id} (resolved: $resolvedModelId, quantization: $quantization)")
+        logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput | VisionAssisted: ${chapterVisionResult != null} | AutoMerge: $merge_nearby_with_vision")
 
-        return try {
+        val baseResult = try {
             if (model in setOf(
-                    AIModel.UNLIMITED_OCR_BF16,
-                    AIModel.UNLIMITED_OCR_Q8_0,
-                    AIModel.UNLIMITED_OCR_Q4_K_M,
-                    AIModel.UNLIMITED_OCR_IQ2_M,
-                    AIModel.QWEN3_VL_4B,
-                    AIModel.QWEN3_VL_8B
+                    AdvancedAIModel.QWEN3_VL_4B,
+                    AdvancedAIModel.QWEN3_VL_8B
                 )
             ) {
                 val runner = UnlimitedOcrRunner(context, hostFs, settings)
-                return runner.performAdvancedOcr(
+                runner.performAdvancedOcr(
                     input,
                     save,
                     outputDir,
@@ -419,34 +434,36 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
                     chapterVisionResult = chapterVisionResult,
                     cropPadding = cropPadding
                 )
+            } else {
+                val service = KoogOcrService(context, settings, hostFs)
+                val ocrResult = service.performAdvancedOcr(
+                    input,
+                    save,
+                    outputDir,
+                    useStructuredOutput,
+                    saveThinking,
+                    model.toAIModel(),
+                    chapterVisionResult = chapterVisionResult,
+                    cropPadding = cropPadding
+                )
+                AdvancedOCRResult(
+                    texts = ocrResult.texts,
+                    balloonBoxes = ocrResult.balloonBoxes,
+                    textBoxes = ocrResult.textBoxes,
+                    shapes = ocrResult.shapes,
+                    fontStyles = ocrResult.fontStyles,
+                    fontFamilies = ocrResult.fontFamilies,
+                    textAngles = ocrResult.textAngles,
+                    isSparse = ocrResult.isSparse,
+                    textColors = ocrResult.textColors,
+                    hasBorder = ocrResult.hasBorder,
+                    borderColors = ocrResult.borderColors,
+                    pageNumbers = ocrResult.pageNumbers,
+                    pageNames = ocrResult.pageNames,
+                    failedFiles = ocrResult.failedFiles,
+                    categories = ocrResult.categories
+                )
             }
-            val service = KoogOcrService(context, settings, hostFs)
-            val ocrResult = service.performAdvancedOcr(
-                input,
-                save,
-                outputDir,
-                useStructuredOutput,
-                saveThinking,
-                model,
-                chapterVisionResult = chapterVisionResult,
-                cropPadding = cropPadding
-            )
-            AdvancedOCRResult(
-                texts = ocrResult.texts,
-                balloonBoxes = ocrResult.balloonBoxes,
-                textBoxes = ocrResult.textBoxes,
-                shapes = ocrResult.shapes,
-                fontStyles = ocrResult.fontStyles,
-                fontFamilies = ocrResult.fontFamilies,
-                textAngles = ocrResult.textAngles,
-                isSparse = ocrResult.isSparse,
-                textColors = ocrResult.textColors,
-                hasBorder = ocrResult.hasBorder,
-                borderColors = ocrResult.borderColors,
-                pageNumbers = ocrResult.pageNumbers,
-                pageNames = ocrResult.pageNames,
-                failedFiles = ocrResult.failedFiles
-            )
         } catch (e: Throwable) {
             val msg = "Advanced OCR failed: ${e::class.simpleName}: ${e.message}"
             logger.error(msg)
@@ -455,82 +472,13 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
             }
             throw RuntimeException(msg, e)
         }
-    }
 
-    @Capability(
-        name = "merge_ocr_with_vision",
-        description = "Merges multi-line OCR text entries that fall within the same speech balloon using Vision instance segmentation"
-    )
-    suspend fun mergeOcrWithVision(
-        @CapabilityParam(description = "The OCR Result to merge")
-        ocrData: OCRResult,
-        @CapabilityParam(description = "Chapter Vision segmentation result containing balloon instances")
-        chapterVisionResult: ChapterVisionResult,
-        context: PluginContext
-    ): OCRResult {
-        context.logger.info("Merging OCR Result using ChapterVisionResult (total vision pages: ${chapterVisionResult.results.size}, total OCR items: ${ocrData.texts.size})")
-        return OcrVisionMerger.mergeChapterOcrResult(
-            ocrData = ocrData,
-            chapterVisionResult = chapterVisionResult,
-            separator = " "
-        )
-    }
-
-    @Capability(
-        name = "merge_advanced_ocr_with_vision",
-        description = "Merges multi-line Advanced OCR text entries that fall within the same speech balloon using Vision instance segmentation"
-    )
-    suspend fun mergeAdvancedOcrWithVision(
-        @CapabilityParam(description = "The Advanced OCR Result to merge")
-        ocrData: AdvancedOCRResult,
-        @CapabilityParam(description = "Chapter Vision segmentation result containing balloon instances")
-        chapterVisionResult: ChapterVisionResult,
-        context: PluginContext
-    ): AdvancedOCRResult {
-        context.logger.info("Merging Advanced OCR Result using ChapterVisionResult (total vision pages: ${chapterVisionResult.results.size}, total OCR items: ${ocrData.texts.size})")
-        return OcrVisionMerger.mergeChapterAdvancedOcrResult(
-            ocrData = ocrData,
-            chapterVisionResult = chapterVisionResult,
-            separator = " "
-        )
-    }
-
-    @Capability(
-        name = "merge_single_ocr_with_vision",
-        description = "Merges multi-line single image OCR text entries that fall within the same speech balloon using Vision instance segmentation"
-    )
-    suspend fun mergeSingleOcrWithVision(
-        @CapabilityParam(description = "The OCR Result to merge")
-        ocrData: OCRResult,
-        @CapabilityParam(description = "Single image Vision segmentation result containing balloon instances")
-        visionResult: VisionResult,
-        context: PluginContext
-    ): OCRResult {
-        context.logger.info("Merging single OCR Result using VisionResult (total vision objects: ${visionResult.objects.size}, total OCR items: ${ocrData.texts.size})")
-        return OcrVisionMerger.mergeOcrResult(
-            ocrData = ocrData,
-            visionResult = visionResult,
-            separator = " "
-        )
-    }
-
-    @Capability(
-        name = "merge_single_advanced_ocr_with_vision",
-        description = "Merges multi-line single image Advanced OCR text entries that fall within the same speech balloon using Vision instance segmentation"
-    )
-    suspend fun mergeSingleAdvancedOcrWithVision(
-        @CapabilityParam(description = "The Advanced OCR Result to merge")
-        ocrData: AdvancedOCRResult,
-        @CapabilityParam(description = "Single image Vision segmentation result containing balloon instances")
-        visionResult: VisionResult,
-        context: PluginContext
-    ): AdvancedOCRResult {
-        context.logger.info("Merging single Advanced OCR Result using VisionResult (total vision objects: ${visionResult.objects.size}, total OCR items: ${ocrData.texts.size})")
-        return OcrVisionMerger.mergeAdvancedOcrResult(
-            ocrData = ocrData,
-            visionResult = visionResult,
-            separator = " "
-        )
+        return if (merge_nearby_with_vision && chapterVisionResult != null) {
+            logger.info("[OCR_IA] Automatically merging Advanced OCR results using ChapterVisionResult...")
+            OcrVisionMerger.mergeChapterAdvancedOcrResult(baseResult, chapterVisionResult, separator = " ")
+        } else {
+            baseResult
+        }
     }
 
     @PluginSetup

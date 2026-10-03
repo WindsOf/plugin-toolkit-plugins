@@ -66,6 +66,30 @@ Output format:
 {category} [x1, y1, x2, y2] extracted_text
 
 Now process the image. Output only valid instances, one per line:"""
+
+        const val QWEN_OCR_CROP_SYSTEM_PROMPT = """Task: Extract text, sound effects, and punctuation from this cropped comic region centered around a text or balloon area.
+
+Rules:
+1. Focus:
+   - This is a close-up crop of a text area. Transcribe the primary centered text. If adjacent text is partially clipped at the edges, prioritize the central text.
+2. Classification:
+   - Mark as {speech} if dialogue or narration inside a speech bubble/box.
+   - Mark as {sfx} if floating sound words, onomatopoeia, or stylized effects.
+3. Coordinates:
+   - Output coordinates on a 1000x1000 scale [x1, y1, x2, y2] relative to this cropped image.
+4. Punctuation & Symbols:
+   - Always extract standalone punctuation marks ("...", "?", "!", "?!") if dialogue.
+
+Example 1 (dialogue text):
+{speech} [540, 30, 980, 270] WASHING THE DISHES
+
+Example 2 (sound effect):
+{sfx} [550, 314, 909, 470] THUMP
+
+Output format:
+{category} [x1, y1, x2, y2] extracted_text
+
+Now process the cropped image. Output only valid instances, one per line:"""
     }
 
     private val logger: PluginLogger = context.logger
@@ -236,8 +260,9 @@ Now process the image. Output only valid instances, one per line:"""
         }
 
         // 2. Format: {speech/sfx} [top_left_x, top_left_y, bottom_right_x, bottom_right_y] text
+        // Handles: {speech}, (speech), [speech], with or without brackets, with or without colons
         val qwenPattern = Pattern.compile(
-            "\\{\\s*([^}]+)\\s*\\}\\s*\\[?\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*\\]?\\s*([\\s\\S]*?)(?=(?:\\s*\\{[^}]+\\}\\s*[\\[\\d]|<\\||$))",
+            "[{(\\[]\\s*(speech|sfx|text|balloon|caption)\\s*[})\\]]\\s*:?\\s*\\[?\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*\\]?\\s*:?\\s*([\\s\\S]*?)(?=(?:\\s*[{(\\[]\\s*(?:speech|sfx|text|balloon|caption)\\s*[})\\]]|<\\||$))",
             Pattern.CASE_INSENSITIVE
         )
         val qwenMatcher = qwenPattern.matcher(rawOutput)
@@ -249,6 +274,38 @@ Now process the image. Output only valid instances, one per line:"""
             val xmax = qwenMatcher.group(4).toDoubleOrNull() ?: 0.0
             val ymax = qwenMatcher.group(5).toDoubleOrNull() ?: 0.0
             val text = cleanExtractedText(qwenMatcher.group(6))
+            val box = scaleBox(listOf(ymin, xmin, ymax, xmax), imgWidth, imgHeight)
+            if (!isHallucinationOrEmpty(text)) {
+                regions.add(
+                    ExtractedTextRegion(
+                        text = text,
+                        ymin = box[0],
+                        xmin = box[1],
+                        ymax = box[2],
+                        xmax = box[3],
+                        shape = if (category == "sfx") "rectangular" else "oval",
+                        fontFamily = if (category == "sfx") "screaming" else "sans-serif",
+                        category = category
+                    )
+                )
+            }
+        }
+        if (regions.isNotEmpty()) return regions
+
+        // 2b. Coordinates-first Qwen format: [x1, y1, x2, y2] {speech/sfx} text
+        val qwenCoordFirstPattern = Pattern.compile(
+            "\\[\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*,\\s*([\\d.]+)\\s*\\]\\s*[{(\\[]\\s*(speech|sfx|text|balloon|caption)\\s*[})\\]]\\s*:?\\s*([\\s\\S]*?)(?=(?:\\s*\\[\\s*[\\d.]+\\s*,|<\\||$))",
+            Pattern.CASE_INSENSITIVE
+        )
+        val qwenCoordFirstMatcher = qwenCoordFirstPattern.matcher(rawOutput)
+        while (qwenCoordFirstMatcher.find()) {
+            val xmin = qwenCoordFirstMatcher.group(1).toDoubleOrNull() ?: 0.0
+            val ymin = qwenCoordFirstMatcher.group(2).toDoubleOrNull() ?: 0.0
+            val xmax = qwenCoordFirstMatcher.group(3).toDoubleOrNull() ?: 0.0
+            val ymax = qwenCoordFirstMatcher.group(4).toDoubleOrNull() ?: 0.0
+            val rawCategory = qwenCoordFirstMatcher.group(5).lowercase().trim()
+            val category = if (rawCategory == "sfx") "sfx" else "speech"
+            val text = cleanExtractedText(qwenCoordFirstMatcher.group(6))
             val box = scaleBox(listOf(ymin, xmin, ymax, xmax), imgWidth, imgHeight)
             if (!isHallucinationOrEmpty(text)) {
                 regions.add(
@@ -376,6 +433,11 @@ Now process the image. Output only valid instances, one per line:"""
         if (regions.isNotEmpty()) return regions
 
         // 6. Fallback if plain text output without explicit boxes: wrap whole image
+        var fallbackCategory = "speech"
+        val lowerRaw = rawOutput.lowercase()
+        if (lowerRaw.contains("{sfx}") || lowerRaw.contains("(sfx)") || lowerRaw.contains("[sfx]")) {
+            fallbackCategory = "sfx"
+        }
         val cleanFallback = cleanExtractedText(rawOutput)
         if (!isHallucinationOrEmpty(cleanFallback)) {
             regions.add(
@@ -384,7 +446,10 @@ Now process the image. Output only valid instances, one per line:"""
                     ymin = 0.0,
                     xmin = 0.0,
                     ymax = imgHeight,
-                    xmax = imgWidth
+                    xmax = imgWidth,
+                    shape = if (fallbackCategory == "sfx") "rectangular" else "oval",
+                    fontFamily = if (fallbackCategory == "sfx") "screaming" else "sans-serif",
+                    category = fallbackCategory
                 )
             )
         }
@@ -484,6 +549,7 @@ Now process the image. Output only valid instances, one per line:"""
 
             val allTexts = mutableListOf<String>()
             val allBoxes = mutableListOf<List<Double>>()
+            val allCategories = mutableListOf<String>()
             val allPageNumbers = mutableListOf<Int>()
             val allPageNames = mutableListOf<String>()
             val failedFiles = mutableListOf<String>()
@@ -527,7 +593,7 @@ Now process the image. Output only valid instances, one per line:"""
                                     ImageIO.write(subImage, "png", tempCropFile)
                                 }
                                 val isQwen = targetModelId?.contains("qwen", ignoreCase = true) == true
-                                val prompt = if (isQwen) (settings.qwenOcrPrompt?.ifBlank { null } ?: QWEN_OCR_SYSTEM_PROMPT) else ""
+                                val prompt = if (isQwen) (settings.qwenOcrPrompt?.ifBlank { null } ?: QWEN_OCR_CROP_SYSTEM_PROMPT) else ""
                                 val rawOutput = if (llamaSession != null) {
                                     LlamaInferenceClient.Default.executeVisionChat(
                                         baseUrl = llamaSession.baseUrl,
@@ -568,6 +634,7 @@ Now process the image. Output only valid instances, one per line:"""
                             allBoxes.add(listOf(r.ymin, r.xmin, r.ymax, r.xmax))
                             allPageNumbers.add(index + 1)
                             allPageNames.add(file.name)
+                            allCategories.add(r.category)
                         }
 
                         saveJsonResult(save, outputDir, file, pageRegions, rawOutputs.joinToString("\n---\n"))
@@ -588,9 +655,11 @@ Now process the image. Output only valid instances, one per line:"""
                         val regions = parseOcrOutput(rawOutput, imgW, imgH)
                         for (r in regions) {
                             allTexts.add(r.text)
-                            allBoxes.add(listOf(r.ymin, r.xmin, r.ymax, r.xmax))
+                            val normBox = VisionCutoutHelper.normalizeBoxToGlobal(listOf(r.ymin, r.xmin, r.ymax, r.xmax), imgW, imgH)
+                            allBoxes.add(normBox)
                             allPageNumbers.add(index + 1)
                             allPageNames.add(file.name)
+                            allCategories.add(r.category)
                         }
 
                         saveJsonResult(save, outputDir, file, regions, rawOutput)
@@ -612,7 +681,7 @@ Now process the image. Output only valid instances, one per line:"""
                 progressReporter.report((index + 1).toFloat() / total.toFloat())
             }
 
-            return OCRResult(allTexts, allBoxes, allPageNumbers, allPageNames, failedFiles)
+            return OCRResult(allTexts, allBoxes, allPageNumbers, allPageNames, failedFiles, allCategories)
         } finally {
             if (settings.llamaServerAutoStop == true) {
                 logger.info("[UnlimitedOcrRunner] Auto-stopping local llama-server and unloading model from memory...")
@@ -655,6 +724,7 @@ Now process the image. Output only valid instances, one per line:"""
             val allTextColors = mutableListOf<String>()
             val allHasBorder = mutableListOf<Boolean>()
             val allBorderColors = mutableListOf<String>()
+            val allCategories = mutableListOf<String>()
             val allPageNumbers = mutableListOf<Int>()
             val allPageNames = mutableListOf<String>()
             val failedFiles = mutableListOf<String>()
@@ -698,7 +768,7 @@ Now process the image. Output only valid instances, one per line:"""
                                     ImageIO.write(subImage, "png", tempCropFile)
                                 }
                                 val isQwen = targetModelId?.contains("qwen", ignoreCase = true) == true
-                                val prompt = if (isQwen) (settings.qwenOcrPrompt?.ifBlank { null } ?: QWEN_OCR_SYSTEM_PROMPT) else ""
+                                val prompt = if (isQwen) (settings.qwenOcrPrompt?.ifBlank { null } ?: QWEN_OCR_CROP_SYSTEM_PROMPT) else ""
                                 val rawOutput = if (llamaSession != null) {
                                     LlamaInferenceClient.Default.executeVisionChat(
                                         baseUrl = llamaSession.baseUrl,
@@ -749,6 +819,7 @@ Now process the image. Output only valid instances, one per line:"""
                             allBorderColors.add(r.borderColor)
                             allPageNumbers.add(index + 1)
                             allPageNames.add(file.name)
+                            allCategories.add(r.category)
                         }
 
                         saveJsonResult(save, outputDir, file, pageRegions, rawOutputs.joinToString("\n---\n"))
@@ -769,9 +840,9 @@ Now process the image. Output only valid instances, one per line:"""
                         val regions = parseOcrOutput(rawOutput, imgW, imgH)
                         for (r in regions) {
                             allTexts.add(r.text)
-                            val box = listOf(r.ymin, r.xmin, r.ymax, r.xmax)
-                            allBalloonBoxes.add(box)
-                            allTextBoxes.add(box)
+                            val normBox = VisionCutoutHelper.normalizeBoxToGlobal(listOf(r.ymin, r.xmin, r.ymax, r.xmax), imgW, imgH)
+                            allBalloonBoxes.add(normBox)
+                            allTextBoxes.add(normBox)
                             allShapes.add(r.shape)
                             allFontStyles.add(r.fontStyle)
                             allFontFamilies.add(r.fontFamily)
@@ -782,6 +853,7 @@ Now process the image. Output only valid instances, one per line:"""
                             allBorderColors.add(r.borderColor)
                             allPageNumbers.add(index + 1)
                             allPageNames.add(file.name)
+                            allCategories.add(r.category)
                         }
 
                         saveJsonResult(save, outputDir, file, regions, rawOutput)
@@ -817,7 +889,8 @@ Now process the image. Output only valid instances, one per line:"""
                 borderColors = allBorderColors,
                 pageNumbers = allPageNumbers,
                 pageNames = allPageNames,
-                failedFiles = failedFiles
+                failedFiles = failedFiles,
+                categories = allCategories
             )
         } finally {
             if (settings.llamaServerAutoStop == true) {

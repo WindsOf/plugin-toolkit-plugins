@@ -109,7 +109,13 @@ data class CleanerResult(
         name = "segmentation data",
         description = "Optional vision segmentation data passed through from input"
     )
-    val segmentationData: VisionResult? = null
+    val segmentationData: VisionResult? = null,
+    @CapabilityResult(
+        name = "clean patches",
+        description = "Optional list of individual clean cropped patches",
+        semanticTypes = ["list/path/file"]
+    )
+    val clean: List<String> = emptyList()
 )
 
 /**
@@ -123,10 +129,15 @@ data class CleanerResult(
 @Serializable
 data class ChapterCleanerResult(
     @CapabilityResult(
+        name = "clean",
+        description = "List of cleaned image paths (single full-page image or individual clean image patches)"
+    )
+    val clean: List<String> = emptyList(),
+    @CapabilityResult(
         name = "cleaned images",
         description = "List of paths to the cleaned output image files"
     )
-    val cleanedImagePaths: List<String>,
+    val cleanedImagePaths: List<String> = clean,
     @CapabilityResult(
         name = "mask paths",
         description = "List of paths to generated binary mask files"
@@ -142,4 +153,17 @@ data class ChapterCleanerResult(
         description = "Optional chapter vision segmentation results passed through from input"
     )
     val chapterVisionResult: ChapterVisionResult? = null
-)
+) {
+    constructor(
+        cleanedImagePaths: List<String>,
+        maskPaths: List<String> = emptyList(),
+        totalCleanedPages: Int,
+        chapterVisionResult: ChapterVisionResult? = null
+    ) : this(
+        clean = cleanedImagePaths,
+        cleanedImagePaths = cleanedImagePaths,
+        maskPaths = maskPaths,
+        totalCleanedPages = totalCleanedPages,
+        chapterVisionResult = chapterVisionResult
+    )
+}
