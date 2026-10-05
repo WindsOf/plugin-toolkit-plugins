@@ -1,3 +1,19 @@
+Version: 2.9.3
+Date: 2026-10-04
+Added:
+  - Added `classify_text` parameter (default: `false`) across `ocr` and `advanced_ocr` to make OCR text classification optional. When disabled, models run with cleaner, focused recognition prompts and inherit categories directly from Vision segmentation crops.
+Fixed:
+  - Removed canvas edge text dropping rule in OCR prompts that caused Vision crops to lose legitimate dialogue touching crop borders.
+  - Added robust parser support for untagged coordinate format `[ymin, xmin, ymax, xmax] text` with category inheritance from crop metadata.
+  - Fixed `computeCropRegions` in `VisionCutoutHelper` to process all non-ignored Vision objects (`speech`, `sfx`, `balloon`, etc.) rather than discarding reclassified speech/sfx detections.
+  - Updated `OcrVisionMerger.filterValidVisionObjects` to preserve reclassified Vision objects (`speech`, `sfx`) and shape labels (`circular`, `irregular`, `jagged`, `rectangular`, `spiky`).
+-------------------------------------------------------------------------------------------------
+Version: 2.9.2
+Date: 2026-10-04
+Added:
+  - Centralized OCR classification instructions into `OcrClassificationInstructions` to modularize prompts across Qwen and Koog/Gemini/Anthropic pipelines.
+  - Enforced strict balloon container rule: dialogue, moans, groans, screams, gasps, and non-word vocal utterances enclosed within speech bubbles or containers are strictly classified as `speech` instead of being misidentified as `sfx`.
+-------------------------------------------------------------------------------------------------
 Version: 2.9.1
 Date: 2026-10-03
 Fixed:

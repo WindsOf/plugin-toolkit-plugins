@@ -43,7 +43,7 @@ import javax.imageio.spi.IIORegistry
 @PluginInfo(
     id = "com.wip.cleaner",
     name = "WOM Cleaner",
-    version = "1.4.0",
+    version = "1.5.1",
     description = "Inpaints and erases segmented text and artifacts from images using segmentation maps.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
@@ -272,22 +272,28 @@ class CleanerPlugin {
 
     fun resolveEffectiveTargetLabels(
         cleanClasses: List<OcrCategory>,
-        targetClasses: List<String>
+        targetClasses: List<String>? = null,
+        segmentationData: VisionResult? = null
     ): Set<String> {
         val result = mutableSetOf<String>()
         for (cat in cleanClasses) {
-            when (cat) {
-                OcrCategory.speech -> {
-                    result.add("speech")
-                    result.add("text")
-                    result.add("balloon")
-                }
-                OcrCategory.sfx -> result.add("sfx")
-                OcrCategory.non_text -> result.add("non_text")
-                OcrCategory.none -> result.add("none")
-            }
+            result.add(cat.name.lowercase())
         }
-        for (tc in targetClasses) {
+        if (result.contains("speech")) {
+            result.add("dialogue")
+        }
+
+        val hasReclassified = segmentationData?.objects?.any {
+            val l = it.label.trim().lowercase()
+            l == "speech" || l == "sfx" || l == "non_text"
+        } ?: false
+
+        if (!hasReclassified && result.contains("speech")) {
+            result.add("text")
+            result.add("balloon")
+        }
+
+        targetClasses?.forEach { tc ->
             val cleanTc = tc.trim().lowercase()
             if (cleanTc.isNotBlank()) {
                 result.add(cleanTc)
@@ -296,144 +302,26 @@ class CleanerPlugin {
         return result
     }
 
-    private suspend fun cleanImageInternal(
-        imagePath: String,
-        segmentationData: VisionResult,
-        outputDir: String,
-        model: InpaintingModel,
-        sessionBundle: InpaintingSessionBundle?,
-        targetClasses: List<String>,
-        cleanClasses: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.non_text, OcrCategory.none),
-        outputCropPatches: Boolean = false,
-        dilationRadius: Int,
-        saveMask: Boolean,
-        isolatedRegionsOnly: Boolean,
-        options: InpaintingOptions = InpaintingOptions(),
-        context: PluginContext,
-        hostFs: HostFileSystem
-    ): CleanerResult {
-        val logger = context.logger
-        val inputFile = File(imagePath)
-        if (!inputFile.exists()) {
-            throw IllegalArgumentException("Input image does not exist: $imagePath")
-        }
+    fun resolveEffectiveTargetLabels(
+        cleanClasses: List<OcrCategory>,
+        targetClasses: List<String>
+    ): Set<String> = resolveEffectiveTargetLabels(cleanClasses, targetClasses, null)
 
-        val outDir = File(outputDir)
-        if (!outDir.exists()) outDir.mkdirs()
-
-        val baseImage = withContext(Dispatchers.IO) {
-            ImageIO.read(inputFile)
-        } ?: throw IllegalArgumentException("Failed to decode image from path: $imagePath")
-
-        val targetSet = resolveEffectiveTargetLabels(cleanClasses, targetClasses)
-        val textObjects = segmentationData.objects.filter { it.label.trim().lowercase() in targetSet }
-
-        val mask = InpaintingUtils.renderMaskFromObjects(
-            objects = segmentationData.objects,
-            imageWidth = baseImage.width,
-            imageHeight = baseImage.height,
-            targetClasses = targetSet,
-            dilationPx = dilationRadius
-        )
-
-        var maskPath: String? = null
-        if (saveMask) {
-            val maskFile = File(outDir, "${inputFile.nameWithoutExtension}_mask.png")
-            withContext(Dispatchers.IO) {
-                ImageIO.write(mask, "png", maskFile)
-            }
-            maskPath = maskFile.absolutePath
-        }
-
-        val cleanedImage = if (isolatedRegionsOnly) {
-            InpaintingUtils.inpaintImageIsolated(
-                sourceImage = baseImage,
-                mask = mask,
-                session = sessionBundle?.session,
-                spec = sessionBundle?.spec,
-                roiPaddingPx = 24,
-                featherRadiusPx = options.featherRadius,
-                options = options,
-                multiSessions = sessionBundle?.multiSessions ?: emptyMap()
-            )
-        } else {
-            // Run neural ONNX inpainting with fallback to pure Kotlin inpainting
-            if (sessionBundle != null && sessionBundle.session != null) {
-                InpaintingUtils.inpaintWithOnnx(
-                    sourceImage = baseImage,
-                    mask = mask,
-                    session = sessionBundle.session,
-                    spec = sessionBundle.spec,
-                    roiPaddingPx = 24,
-                    options = options,
-                    multiSessions = sessionBundle.multiSessions
-                )
-            } else {
-                InpaintingUtils.inpaintImage(baseImage, mask, roiPaddingPx = 24)
-            }
-        }
-
-        val outputFormat = if (isolatedRegionsOnly) {
-            "png"
-        } else if (inputFile.extension.lowercase() in setOf("jpg", "jpeg", "webp", "png")) {
-            inputFile.extension.lowercase()
-        } else {
-            "png"
-        }
-
-        val suffix = if (isolatedRegionsOnly) "_patches" else ""
-        val outputFile = File(outDir, "${inputFile.nameWithoutExtension}$suffix.$outputFormat")
-        withContext(Dispatchers.IO) {
-            ImageIO.write(cleanedImage, outputFormat, outputFile)
-        }
-
-        val patchPaths = mutableListOf<String>()
-        if (isolatedRegionsOnly && outputCropPatches && textObjects.isNotEmpty()) {
-            val patchesSubdir = File(outDir, "${inputFile.nameWithoutExtension}_patches")
-            if (!patchesSubdir.exists()) patchesSubdir.mkdirs()
-            val imgW = cleanedImage.width
-            val imgH = cleanedImage.height
-            for ((idx, obj) in textObjects.withIndex()) {
-                val box = obj.box
-                val xminPx = (box.xmin * imgW).toInt().coerceIn(0, imgW - 1)
-                val yminPx = (box.ymin * imgH).toInt().coerceIn(0, imgH - 1)
-                val xmaxPx = (box.xmax * imgW).toInt().coerceIn(0, imgW)
-                val ymaxPx = (box.ymax * imgH).toInt().coerceIn(0, imgH)
-                val w = max(1, xmaxPx - xminPx)
-                val h = max(1, ymaxPx - yminPx)
-                val patchCrop = cleanedImage.getSubimage(xminPx, yminPx, w, h)
-                val patchFile = File(patchesSubdir, "patch_${idx}.png")
-                withContext(Dispatchers.IO) {
-                    ImageIO.write(patchCrop, "png", patchFile)
-                }
-                patchPaths.add(patchFile.absolutePath)
-            }
-        }
-
-        logger.info("Cleaning complete for $imagePath with ${model.displayName} (isolatedRegionsOnly=$isolatedRegionsOnly, patches=${patchPaths.size}). Cleaned ${textObjects.size} text instances -> ${outputFile.absolutePath}")
-
-        return CleanerResult(
-            cleanedImagePath = outputFile.absolutePath,
-            maskPath = maskPath,
-            cleanedObjectsCount = textObjects.size,
-            clean = patchPaths
-        )
-    }
-
-    private suspend fun cleanImageInternalHybrid(
+    private suspend fun cleanImageCore(
         imagePath: String,
         segmentationData: VisionResult,
         outputDir: String,
         model: InpaintingModel,
         strategy: CleaningStrategy,
         sessionBundle: InpaintingSessionBundle?,
-        targetClasses: List<String>,
-        cleanClasses: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.non_text, OcrCategory.none),
-        outputCropPatches: Boolean = false,
+        cleanClasses: List<OcrCategory>,
+        targetClasses: List<String>? = null,
         dilationRadius: Int,
-        adaptivePadding: Boolean,
-        saveMask: Boolean,
-        isolatedRegionsOnly: Boolean,
+        adaptivePadding: Boolean = true,
+        saveMask: Boolean = false,
+        isolatedRegions: Boolean = false,
+        saveCropPatches: Boolean = false,
+        splitRegions: Boolean = false,
         options: InpaintingOptions = InpaintingOptions(),
         context: PluginContext,
         hostFs: HostFileSystem
@@ -444,14 +332,13 @@ class CleanerPlugin {
             throw IllegalArgumentException("Input image does not exist: $imagePath")
         }
 
-        val outDir = File(outputDir)
-        if (!outDir.exists()) outDir.mkdirs()
+        val outDir = File(outputDir).apply { if (!exists()) mkdirs() }
 
         val baseImage = withContext(Dispatchers.IO) {
             ImageIO.read(inputFile)
         } ?: throw IllegalArgumentException("Failed to decode image from path: $imagePath")
 
-        val targetSet = resolveEffectiveTargetLabels(cleanClasses, targetClasses)
+        val targetSet = resolveEffectiveTargetLabels(cleanClasses, targetClasses, segmentationData)
         val textObjects = segmentationData.objects.filter { it.label.trim().lowercase() in targetSet }
 
         val mask = InpaintingUtils.renderMaskFromObjects(
@@ -476,7 +363,7 @@ class CleanerPlugin {
         val activeSpec = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else sessionBundle?.spec
         val activeMultiSessions = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) emptyMap() else (sessionBundle?.multiSessions ?: emptyMap())
 
-        val cleanedImage = if (isolatedRegionsOnly) {
+        val cleanedImage = if (isolatedRegions) {
             InpaintingUtils.inpaintProductionHybridIsolated(
                 sourceImage = baseImage,
                 mask = mask,
@@ -503,7 +390,7 @@ class CleanerPlugin {
             )
         }
 
-        val outputFormat = if (isolatedRegionsOnly) {
+        val outputFormat = if (isolatedRegions) {
             "png"
         } else if (inputFile.extension.lowercase() in setOf("jpg", "jpeg", "webp", "png")) {
             inputFile.extension.lowercase()
@@ -511,48 +398,126 @@ class CleanerPlugin {
             "png"
         }
 
-        val suffix = if (isolatedRegionsOnly) "_patches" else ""
+        val suffix = if (isolatedRegions) "_patches" else ""
         val outputFile = File(outDir, "${inputFile.nameWithoutExtension}$suffix.$outputFormat")
         withContext(Dispatchers.IO) {
             ImageIO.write(cleanedImage, outputFormat, outputFile)
         }
 
         val patchPaths = mutableListOf<String>()
-        if (isolatedRegionsOnly && outputCropPatches && textObjects.isNotEmpty()) {
+        val effectiveSavePatches = saveCropPatches || splitRegions
+        if (effectiveSavePatches && textObjects.isNotEmpty()) {
             val patchesSubdir = File(outDir, "${inputFile.nameWithoutExtension}_patches")
             if (!patchesSubdir.exists()) patchesSubdir.mkdirs()
             val imgW = cleanedImage.width
             val imgH = cleanedImage.height
-            for ((idx, obj) in textObjects.withIndex()) {
-                val box = obj.box
-                val xminPx = (box.xmin * imgW).toInt().coerceIn(0, imgW - 1)
-                val yminPx = (box.ymin * imgH).toInt().coerceIn(0, imgH - 1)
-                val xmaxPx = (box.xmax * imgW).toInt().coerceIn(0, imgW)
-                val ymaxPx = (box.ymax * imgH).toInt().coerceIn(0, imgH)
-                val w = max(1, xmaxPx - xminPx)
-                val h = max(1, ymaxPx - yminPx)
-                val patchCrop = cleanedImage.getSubimage(xminPx, yminPx, w, h)
-                val patchFile = File(patchesSubdir, "patch_${idx}.png")
+            for (obj in textObjects) {
+                val originalIndex = segmentationData.objects.indexOf(obj).let { if (it >= 0) it else textObjects.indexOf(obj) }
+                val singleObjMask = InpaintingUtils.renderMaskFromObjects(
+                    objects = listOf(obj),
+                    imageWidth = imgW,
+                    imageHeight = imgH,
+                    targetClasses = emptySet(),
+                    dilationPx = dilationRadius
+                )
+                val patchImg = InpaintingUtils.isolateCleanedRegion(
+                    cleanedImage = cleanedImage,
+                    mask = singleObjMask,
+                    featherRadiusPx = options.featherRadius
+                )
+                val cleanLabel = obj.label.trim().lowercase().ifBlank { "none" }
+                val patchFile = File(patchesSubdir, "${inputFile.nameWithoutExtension}_patch_${originalIndex}_${cleanLabel}.png")
                 withContext(Dispatchers.IO) {
-                    ImageIO.write(patchCrop, "png", patchFile)
+                    ImageIO.write(patchImg, "png", patchFile)
                 }
                 patchPaths.add(patchFile.absolutePath)
             }
         }
 
-        logger.info("Hybrid cleaning complete for $imagePath with ${model.displayName} [${strategy.displayName}] (isolatedRegionsOnly=$isolatedRegionsOnly, patches=${patchPaths.size}). Cleaned ${textObjects.size} text instances -> ${outputFile.absolutePath}")
+        logger.info("Cleaning complete for $imagePath with ${model.displayName} [${strategy.displayName}] (isolatedRegions=$isolatedRegions, saveCropPatches=$effectiveSavePatches, patches=${patchPaths.size}). Cleaned ${textObjects.size} text instances -> ${outputFile.absolutePath}")
 
         return CleanerResult(
             cleanedImagePath = outputFile.absolutePath,
             maskPath = maskPath,
             cleanedObjectsCount = textObjects.size,
-            clean = patchPaths
+            segmentationData = segmentationData,
+            clean = if (effectiveSavePatches) patchPaths else emptyList()
         )
     }
 
+    private suspend fun cleanImageInternal(
+        imagePath: String,
+        segmentationData: VisionResult,
+        outputDir: String,
+        model: InpaintingModel,
+        sessionBundle: InpaintingSessionBundle?,
+        targetClasses: List<String>,
+        cleanClasses: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.text, OcrCategory.balloon, OcrCategory.watermark, OcrCategory.non_text, OcrCategory.none),
+        outputCropPatches: Boolean = false,
+        dilationRadius: Int,
+        saveMask: Boolean,
+        isolatedRegionsOnly: Boolean,
+        options: InpaintingOptions = InpaintingOptions(),
+        context: PluginContext,
+        hostFs: HostFileSystem
+    ): CleanerResult = cleanImageCore(
+        imagePath = imagePath,
+        segmentationData = segmentationData,
+        outputDir = outputDir,
+        model = model,
+        strategy = CleaningStrategy.NEURAL_ONLY,
+        sessionBundle = sessionBundle,
+        cleanClasses = cleanClasses,
+        targetClasses = targetClasses,
+        dilationRadius = dilationRadius,
+        adaptivePadding = false,
+        saveMask = saveMask,
+        isolatedRegions = isolatedRegionsOnly,
+        saveCropPatches = outputCropPatches,
+        options = options,
+        context = context,
+        hostFs = hostFs
+    )
+
+    private suspend fun cleanImageInternalHybrid(
+        imagePath: String,
+        segmentationData: VisionResult,
+        outputDir: String,
+        model: InpaintingModel,
+        strategy: CleaningStrategy,
+        sessionBundle: InpaintingSessionBundle?,
+        targetClasses: List<String>,
+        cleanClasses: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.text, OcrCategory.balloon, OcrCategory.watermark, OcrCategory.non_text, OcrCategory.none),
+        outputCropPatches: Boolean = false,
+        dilationRadius: Int,
+        adaptivePadding: Boolean,
+        saveMask: Boolean,
+        isolatedRegionsOnly: Boolean,
+        options: InpaintingOptions = InpaintingOptions(),
+        context: PluginContext,
+        hostFs: HostFileSystem
+    ): CleanerResult = cleanImageCore(
+        imagePath = imagePath,
+        segmentationData = segmentationData,
+        outputDir = outputDir,
+        model = model,
+        strategy = strategy,
+        sessionBundle = sessionBundle,
+        cleanClasses = cleanClasses,
+        targetClasses = targetClasses,
+        dilationRadius = dilationRadius,
+        adaptivePadding = adaptivePadding,
+        saveMask = saveMask,
+        isolatedRegions = isolatedRegionsOnly,
+        saveCropPatches = outputCropPatches,
+        options = options,
+        context = context,
+        hostFs = hostFs
+    )
+
     @Capability(
         name = "Clean Image",
-        description = "Inpaints and erases segmented text regions from an image using segmentation data"
+        description = "Inpaints and erases segmented text and artifacts from an image using segmentation data"
     )
     @RequiresLock(locks = ["model:lama"])
     suspend fun cleanImage(
@@ -571,184 +536,50 @@ class CleanerPlugin {
             defaultValue = "\"LAMA\""
         )
         model: InpaintingModel = InpaintingModel.LAMA,
-        @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
-        targetClasses: List<String> = listOf("text"),
         @CapabilityParam(
-            description = "Element categories to clean/inpaint",
-            defaultValue = "[\"speech\", \"sfx\", \"non_text\", \"none\"]"
+            description = "Cleaning strategy mode (AUTO_HYBRID: deterministic balloons + neural fallback, NEURAL_ONLY: always neural inpainter, DETERMINISTIC_ONLY: solid & gradient only)",
+            defaultValue = "\"AUTO_HYBRID\""
+        )
+        strategy: CleaningStrategy = CleaningStrategy.AUTO_HYBRID,
+        @CapabilityParam(
+            description = "Element classes to clean/inpaint",
+            defaultValue = "[\"speech\", \"sfx\", \"text\", \"balloon\", \"watermark\", \"non_text\", \"none\"]"
         )
         clean_classes: List<OcrCategory> = listOf(
             OcrCategory.speech,
             OcrCategory.sfx,
+            OcrCategory.text,
+            OcrCategory.balloon,
+            OcrCategory.watermark,
             OcrCategory.non_text,
             OcrCategory.none
         ),
         @CapabilityParam(description = "Mask dilation radius in pixels for contour coverage", defaultValue = "3")
         dilationRadius: Int = 3,
-        @CapabilityParam(
-            description = "Save the generated binary mask file alongside the cleaned image",
-            defaultValue = "false"
-        )
-        saveMask: Boolean = false,
         @CapabilityParam(
             description = "Output only the isolated inpainted regions with transparency (PNG)",
             defaultValue = "false"
         )
-        isolatedRegionsOnly: Boolean = false,
+        isolated_regions: Boolean = false,
         @CapabilityParam(
-            description = "Boundary feathering radius (px) for smooth alpha blending",
-            defaultValue = "2",
-            isAdvanced = true
-        )
-        featherRadius: Int = 2,
-        @CapabilityParam(
-            description = "Boundary blending technique to eliminate seams (FEATHER, POISSON, MODIFIED_POISSON, LAPLACIAN_PYRAMID, NONE)",
-            defaultValue = "\"FEATHER\"",
-            isAdvanced = true
-        )
-        blendingMode: BlendingMode = BlendingMode.FEATHER,
-        @CapabilityParam(
-            description = "Context expansion margin (px) around mask bounding box",
-            defaultValue = "32",
-            isAdvanced = true
-        )
-        cropMargin: Int = 32,
-        @CapabilityParam(
-            description = "Autoregressive TSR sampling iterations",
-            defaultValue = "5",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        iterations: Int = 5,
-        @CapabilityParam(
-            description = "Additive color offset correction [-1.0, 1.0]",
-            defaultValue = "0.0",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        addV: Double = 0.0,
-        @CapabilityParam(
-            description = "Multiplicative contrast scaling [0.0, 2.0]",
-            defaultValue = "1.0",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        mulV: Double = 1.0,
-        @CapabilityParam(
-            description = "Gaussian smoothing sigma for edge detection",
-            defaultValue = "1.5",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        sigma256: Double = 1.5,
-        @CapabilityParam(
-            description = "Wireframe proposal acceptance threshold",
-            defaultValue = "0.85",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        maskTh: Double = 0.85,
-        @CapabilityParam(
-            description = "Suppress line hallucination inside hole to remove object cleanly",
+            description = "Save individual clean crop patch images for each cleaned element so PSD builder can place and control them per-layer",
             defaultValue = "false",
             isAdvanced = true
         )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        objRemoval: Boolean = false,
-        @CapabilityParam(
-            description = "Edge-NMS binarization threshold [0, 255] (lower = more edges, higher = fewer edges)",
-            defaultValue = "50",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", value = "ZITSPP")
-        binaryThreshold: Int = 50,
-        context: PluginContext,
-        hostFs: HostFileSystem
-    ): CleanerResult {
-        val options = InpaintingOptions(
-            featherRadius = featherRadius,
-            blendingMode = blendingMode,
-            cropMargin = cropMargin,
-            iterations = iterations,
-            addV = addV,
-            mulV = mulV,
-            sigma256 = sigma256,
-            maskTh = maskTh,
-            objRemoval = objRemoval,
-            binaryThreshold = binaryThreshold
-        )
-        context.logger.info("Starting Cleaner on image: $imagePath with model: ${model.displayName}. Targeting classes: $targetClasses, isolatedRegionsOnly: $isolatedRegionsOnly")
-        val sessionBundle = getInpaintingSession(model, context)
-        return try {
-            cleanImageInternal(
-                imagePath = imagePath,
-                segmentationData = segmentationData,
-                outputDir = outputDir,
-                model = model,
-                sessionBundle = sessionBundle,
-                targetClasses = targetClasses,
-                cleanClasses = clean_classes,
-                dilationRadius = dilationRadius,
-                saveMask = saveMask,
-                isolatedRegionsOnly = isolatedRegionsOnly,
-                options = options,
-                context = context,
-                hostFs = hostFs
-            )
-        } finally {
-            sessionBundle?.close()
-        }
-    }
-
-    @Capability(
-        name = "Clean Image (Production Hybrid)",
-        description = "High-precision comic cleaner using instant deterministic balloon fills and context-aware neural inpainting for complex redraws"
-    )
-    @RequiresLock(locks = ["model:lama"])
-    suspend fun cleanImageHybrid(
-        @CapabilityInput(description = "Path to the base image to clean", semanticTypes = ["path/file"])
-        imagePath: String,
-        @CapabilityParam(description = "Segmentation result containing objects to inpaint")
-        segmentationData: VisionResult,
-        @CapabilityOutput(
-            description = "Directory to save cleaned image",
-            autogeneratedPattern = "{imagePath}/clean_chapter/",
-            semanticTypes = ["path/folder"]
-        )
-        outputDir: String,
-        @CapabilityParam(description = "Inpainting model to use for complex redraws", defaultValue = "\"MANGA\"")
-        model: InpaintingModel = InpaintingModel.MANGA,
-        @CapabilityParam(description = "Cleaning strategy mode", defaultValue = "\"AUTO_HYBRID\"")
-        strategy: CleaningStrategy = CleaningStrategy.AUTO_HYBRID,
-        @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
-        targetClasses: List<String> = listOf("text"),
-        @CapabilityParam(
-            description = "Element categories to clean/inpaint",
-            defaultValue = "[\"speech\", \"sfx\", \"non_text\", \"none\"]"
-        )
-        clean_classes: List<OcrCategory> = listOf(
-            OcrCategory.speech,
-            OcrCategory.sfx,
-            OcrCategory.non_text,
-            OcrCategory.none
-        ),
-        @CapabilityParam(description = "Mask dilation radius in pixels for contour coverage", defaultValue = "3")
-        dilationRadius: Int = 3,
+        save_crop_patches: Boolean = false,
+        split_regions: Boolean = false,
         @CapabilityParam(
             description = "Enable adaptive 2.5x context expansion for neural redraws",
-            defaultValue = "true"
+            defaultValue = "true",
+            isAdvanced = true
         )
         adaptivePadding: Boolean = true,
         @CapabilityParam(
             description = "Save the generated binary mask file alongside the cleaned image",
-            defaultValue = "false"
+            defaultValue = "false",
+            isAdvanced = true
         )
-        saveMask: Boolean = false,
-        @CapabilityParam(
-            description = "Output only the isolated inpainted regions with transparency (PNG)",
-            defaultValue = "false"
-        )
-        isolatedRegionsOnly: Boolean = false,
+        save_mask: Boolean = false,
         @CapabilityParam(
             description = "Boundary feathering radius (px) for smooth alpha blending",
             defaultValue = "2",
@@ -831,23 +662,23 @@ class CleanerPlugin {
             objRemoval = objRemoval,
             binaryThreshold = binaryThreshold
         )
-        context.logger.info("Starting Hybrid Cleaner on image: $imagePath with model: ${model.displayName} [${strategy.displayName}]. Targeting classes: $targetClasses, adaptivePadding: $adaptivePadding")
-        val sessionBundle =
-            if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else getInpaintingSession(model, context)
+        context.logger.info("Starting Cleaner on image: $imagePath with model: ${model.displayName} [${strategy.displayName}]. Targeting classes: $clean_classes, isolatedRegions: $isolated_regions, saveCropPatches: $save_crop_patches")
+        val sessionBundle = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else getInpaintingSession(model, context)
         return try {
-            cleanImageInternalHybrid(
+            cleanImageCore(
                 imagePath = imagePath,
                 segmentationData = segmentationData,
                 outputDir = outputDir,
                 model = model,
                 strategy = strategy,
                 sessionBundle = sessionBundle,
-                targetClasses = targetClasses,
                 cleanClasses = clean_classes,
                 dilationRadius = dilationRadius,
                 adaptivePadding = adaptivePadding,
-                saveMask = saveMask,
-                isolatedRegionsOnly = isolatedRegionsOnly,
+                saveMask = save_mask,
+                isolatedRegions = isolated_regions,
+                saveCropPatches = save_crop_patches,
+                splitRegions = split_regions,
                 options = options,
                 context = context,
                 hostFs = hostFs
@@ -858,263 +689,8 @@ class CleanerPlugin {
     }
 
     @Capability(
-        name = "Clean Image (Patches Only)",
-        description = "Inpaints segmented text regions and outputs only the reconstructed patches on a transparent PNG canvas"
-    )
-    @RequiresLock(locks = ["model:lama"])
-    suspend fun cleanImagePatchesOnly(
-        @CapabilityInput(description = "Path to the base image to clean", semanticTypes = ["path/file"])
-        imagePath: String,
-        @CapabilityParam(description = "Segmentation result containing objects to inpaint")
-        segmentationData: VisionResult,
-        @CapabilityOutput(
-            description = "Directory to save transparent patch image",
-            autogeneratedPattern = "{imagePath}/clean_chapter_patches/",
-            semanticTypes = ["path/folder"]
-        )
-        outputDir: String,
-        @CapabilityParam(
-            description = "Inpainting model to use for background reconstruction",
-            defaultValue = "\"LAMA\""
-        )
-        model: InpaintingModel = InpaintingModel.LAMA,
-        @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
-        targetClasses: List<String> = listOf("text"),
-        @CapabilityParam(
-            description = "Element categories to clean/inpaint",
-            defaultValue = "[\"speech\", \"sfx\", \"non_text\", \"none\"]"
-        )
-        clean_classes: List<OcrCategory> = listOf(
-            OcrCategory.speech,
-            OcrCategory.sfx,
-            OcrCategory.non_text,
-            OcrCategory.none
-        ),
-        @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
-        dilationRadius: Int = 3,
-        @CapabilityParam(
-            description = "Boundary feathering radius (px) for smooth alpha blending",
-            defaultValue = "2",
-            isAdvanced = true
-        )
-        featherRadius: Int = 2,
-        @CapabilityParam(
-            description = "Boundary blending technique to eliminate seams (FEATHER, POISSON, MODIFIED_POISSON, LAPLACIAN_PYRAMID, NONE)",
-            defaultValue = "\"FEATHER\"",
-            isAdvanced = true
-        )
-        blendingMode: BlendingMode = BlendingMode.FEATHER,
-        @CapabilityParam(
-            description = "Context expansion margin (px) around mask bounding box",
-            defaultValue = "32",
-            isAdvanced = true
-        )
-        cropMargin: Int = 32,
-        @CapabilityParam(
-            description = "Autoregressive TSR sampling iterations",
-            defaultValue = "5",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        iterations: Int = 5,
-        @CapabilityParam(
-            description = "Additive color offset correction [-1.0, 1.0]",
-            defaultValue = "0.0",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        addV: Double = 0.0,
-        @CapabilityParam(
-            description = "Multiplicative contrast scaling [0.0, 2.0]",
-            defaultValue = "1.0",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        mulV: Double = 1.0,
-        @CapabilityParam(
-            description = "Gaussian smoothing sigma for edge detection",
-            defaultValue = "1.5",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        sigma256: Double = 1.5,
-        @CapabilityParam(
-            description = "Wireframe proposal acceptance threshold",
-            defaultValue = "0.85",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        maskTh: Double = 0.85,
-        @CapabilityParam(
-            description = "Suppress line hallucination inside hole to remove object cleanly",
-            defaultValue = "false",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        objRemoval: Boolean = false,
-        @CapabilityParam(
-            description = "Edge-NMS binarization threshold [0, 255] (lower = more edges, higher = fewer edges)",
-            defaultValue = "50",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", value = "ZITSPP")
-        binaryThreshold: Int = 50,
-        context: PluginContext,
-        hostFs: HostFileSystem
-    ): CleanerResult {
-        return cleanImage(
-            imagePath = imagePath,
-            segmentationData = segmentationData,
-            outputDir = outputDir,
-            model = model,
-            targetClasses = targetClasses,
-            clean_classes = clean_classes,
-            dilationRadius = dilationRadius,
-            saveMask = false,
-            isolatedRegionsOnly = true,
-            featherRadius = featherRadius,
-            blendingMode = blendingMode,
-            cropMargin = cropMargin,
-            iterations = iterations,
-            addV = addV,
-            mulV = mulV,
-            sigma256 = sigma256,
-            maskTh = maskTh,
-            objRemoval = objRemoval,
-            binaryThreshold = binaryThreshold,
-            context = context,
-            hostFs = hostFs
-        )
-    }
-
-    @Capability(
-        name = "Clean Image (Patches Only - Production Hybrid)",
-        description = "Inpaints segmented text regions and outputs only the reconstructed patches on a transparent PNG canvas using the production hybrid pipeline"
-    )
-    @RequiresLock(locks = ["model:lama"])
-    suspend fun cleanImagePatchesOnlyHybrid(
-        @CapabilityInput(description = "Path to the base image to clean", semanticTypes = ["path/file"])
-        imagePath: String,
-        @CapabilityParam(description = "Segmentation result containing objects to inpaint")
-        segmentationData: VisionResult,
-        @CapabilityOutput(
-            description = "Directory to save transparent patch image",
-            autogeneratedPattern = "{imagePath}/clean_chapter_patches/",
-            semanticTypes = ["path/folder"]
-        )
-        outputDir: String,
-        @CapabilityParam(description = "Inpainting model to use for complex redraws", defaultValue = "\"MANGA\"")
-        model: InpaintingModel = InpaintingModel.MANGA,
-        @CapabilityParam(description = "Cleaning strategy mode", defaultValue = "\"AUTO_HYBRID\"")
-        strategy: CleaningStrategy = CleaningStrategy.AUTO_HYBRID,
-        @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
-        targetClasses: List<String> = listOf("text"),
-        @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
-        dilationRadius: Int = 3,
-        @CapabilityParam(
-            description = "Enable adaptive 2.5x context expansion for neural redraws",
-            defaultValue = "true"
-        )
-        adaptivePadding: Boolean = true,
-        @CapabilityParam(
-            description = "Boundary feathering radius (px) for smooth alpha blending",
-            defaultValue = "2",
-            isAdvanced = true
-        )
-        featherRadius: Int = 2,
-        @CapabilityParam(
-            description = "Boundary blending technique to eliminate seams (FEATHER, POISSON, MODIFIED_POISSON, LAPLACIAN_PYRAMID, NONE)",
-            defaultValue = "\"FEATHER\"",
-            isAdvanced = true
-        )
-        blendingMode: BlendingMode = BlendingMode.FEATHER,
-        @CapabilityParam(
-            description = "Context expansion margin (px) around mask bounding box",
-            defaultValue = "32",
-            isAdvanced = true
-        )
-        cropMargin: Int = 32,
-        @CapabilityParam(
-            description = "Autoregressive TSR sampling iterations",
-            defaultValue = "5",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        iterations: Int = 5,
-        @CapabilityParam(
-            description = "Additive color offset correction [-1.0, 1.0]",
-            defaultValue = "0.0",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        addV: Double = 0.0,
-        @CapabilityParam(
-            description = "Multiplicative contrast scaling [0.0, 2.0]",
-            defaultValue = "1.0",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        mulV: Double = 1.0,
-        @CapabilityParam(
-            description = "Gaussian smoothing sigma for edge detection",
-            defaultValue = "1.5",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        sigma256: Double = 1.5,
-        @CapabilityParam(
-            description = "Wireframe proposal acceptance threshold",
-            defaultValue = "0.85",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        maskTh: Double = 0.85,
-        @CapabilityParam(
-            description = "Suppress line hallucination inside hole to remove object cleanly",
-            defaultValue = "false",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
-        objRemoval: Boolean = false,
-        @CapabilityParam(
-            description = "Edge-NMS binarization threshold [0, 255] (lower = more edges, higher = fewer edges)",
-            defaultValue = "50",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", value = "ZITSPP")
-        binaryThreshold: Int = 50,
-        context: PluginContext,
-        hostFs: HostFileSystem
-    ): CleanerResult {
-        return cleanImageHybrid(
-            imagePath = imagePath,
-            segmentationData = segmentationData,
-            outputDir = outputDir,
-            model = model,
-            strategy = strategy,
-            targetClasses = targetClasses,
-            dilationRadius = dilationRadius,
-            adaptivePadding = adaptivePadding,
-            saveMask = false,
-            isolatedRegionsOnly = true,
-            featherRadius = featherRadius,
-            blendingMode = blendingMode,
-            cropMargin = cropMargin,
-            iterations = iterations,
-            addV = addV,
-            mulV = mulV,
-            sigma256 = sigma256,
-            maskTh = maskTh,
-            objRemoval = objRemoval,
-            binaryThreshold = binaryThreshold,
-            context = context,
-            hostFs = hostFs
-        )
-    }
-
-    @Capability(
         name = "Clean Chapter",
-        description = "Inpaints and erases segmented text across an entire chapter/folder of images"
+        description = "Inpaints and erases segmented text and artifacts across an entire chapter/folder of images"
     )
     @RequiresLock(locks = ["model:lama"])
     suspend fun cleanChapter(
@@ -1133,33 +709,50 @@ class CleanerPlugin {
         outputDir: String,
         @CapabilityParam(description = "Inpainting model to use", defaultValue = "\"LAMA\"")
         model: InpaintingModel = InpaintingModel.LAMA,
-        @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
-        targetClasses: List<String> = listOf("text"),
         @CapabilityParam(
-            description = "Element categories to clean/inpaint",
-            defaultValue = "[\"speech\", \"sfx\", \"non_text\", \"none\"]"
+            description = "Cleaning strategy mode (AUTO_HYBRID: deterministic balloons + neural fallback, NEURAL_ONLY: always neural inpainter, DETERMINISTIC_ONLY: solid & gradient only)",
+            defaultValue = "\"AUTO_HYBRID\""
+        )
+        strategy: CleaningStrategy = CleaningStrategy.AUTO_HYBRID,
+        @CapabilityParam(
+            description = "Element classes to clean/inpaint",
+            defaultValue = "[\"speech\", \"sfx\", \"text\", \"balloon\", \"watermark\", \"non_text\", \"none\"]"
         )
         clean_classes: List<OcrCategory> = listOf(
             OcrCategory.speech,
             OcrCategory.sfx,
+            OcrCategory.text,
+            OcrCategory.balloon,
+            OcrCategory.watermark,
             OcrCategory.non_text,
             OcrCategory.none
         ),
         @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
         dilationRadius: Int = 3,
-        @CapabilityParam(description = "Save generated binary masks", defaultValue = "false")
-        saveMasks: Boolean = false,
         @CapabilityParam(
             description = "Output only the isolated inpainted regions with transparency (PNG)",
             defaultValue = "false"
         )
-        isolatedRegionsOnly: Boolean = false,
+        isolated_regions: Boolean = false,
         @CapabilityParam(
-            description = "Output individual clean cropped patch images for each cleaned element",
-            defaultValue = "false"
+            description = "Save individual clean crop patch images for each cleaned element so PSD builder can place and control them per-layer",
+            defaultValue = "false",
+            isAdvanced = true
         )
-        @DependsOn(param = "isolatedRegionsOnly", operator = ConditionOperator.EQUALS, values = ["true"])
-        outputCropPatches: Boolean = false,
+        save_crop_patches: Boolean = false,
+        split_regions: Boolean = false,
+        @CapabilityParam(
+            description = "Enable adaptive 2.5x context expansion for neural redraws",
+            defaultValue = "true",
+            isAdvanced = true
+        )
+        adaptivePadding: Boolean = true,
+        @CapabilityParam(
+            description = "Save generated binary masks",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        save_mask: Boolean = false,
         @CapabilityParam(
             description = "Boundary feathering radius (px) for smooth alpha blending",
             defaultValue = "2",
@@ -1263,12 +856,12 @@ class CleanerPlugin {
             binaryThreshold = binaryThreshold
         )
 
-        logger.info("Starting Chapter Cleaner for ${imageFiles.size} images with model ${model.displayName} (isolatedRegionsOnly=$isolatedRegionsOnly).")
+        logger.info("Starting Chapter Cleaner for ${imageFiles.size} images with model ${model.displayName} [${strategy.displayName}] (isolatedRegions=$isolated_regions, saveCropPatches=$save_crop_patches).")
 
         val totalImages = imageFiles.size
         val results = mutableListOf<CleanerResult>()
 
-        val sessionBundle = getInpaintingSession(model, context)
+        val sessionBundle = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else getInpaintingSession(model, context)
         try {
             for ((index, file) in imageFiles.withIndex()) {
                 val vResult = visionMap[file.name] ?: VisionResult(
@@ -1278,18 +871,20 @@ class CleanerPlugin {
                     pageName = file.name
                 )
 
-                val cResult = cleanImageInternal(
+                val cResult = cleanImageCore(
                     imagePath = file.absolutePath,
                     segmentationData = vResult,
                     outputDir = outDir.absolutePath,
                     model = model,
+                    strategy = strategy,
                     sessionBundle = sessionBundle,
-                    targetClasses = targetClasses,
                     cleanClasses = clean_classes,
-                    outputCropPatches = outputCropPatches,
                     dilationRadius = dilationRadius,
-                    saveMask = saveMasks,
-                    isolatedRegionsOnly = isolatedRegionsOnly,
+                    adaptivePadding = adaptivePadding,
+                    saveMask = save_mask,
+                    isolatedRegions = isolated_regions,
+                    saveCropPatches = save_crop_patches,
+                    splitRegions = split_regions,
                     options = options,
                     context = context,
                     hostFs = hostFs
@@ -1304,6 +899,7 @@ class CleanerPlugin {
         val cleanedPaths = results.map { it.cleanedImagePath }
         val maskPaths = results.mapNotNull { it.maskPath }
         val allCleanPatches = results.flatMap { it.clean }
+        val effectiveSavePatches = save_crop_patches || split_regions
 
         logger.info("Chapter Cleaner complete. Cleaned $totalImages pages.")
 
@@ -1312,155 +908,37 @@ class CleanerPlugin {
             maskPaths = maskPaths,
             totalCleanedPages = totalImages,
             chapterVisionResult = chapterVisionResult,
-            clean = if (outputCropPatches) allCleanPatches else cleanedPaths
+            clean = if (effectiveSavePatches) allCleanPatches else emptyList()
         )
     }
 
-    @Capability(
-        name = "Clean Chapter (Production Hybrid)",
-        description = "Cleans an entire folder of chapter images using the production hybrid pipeline with instant deterministic balloon fill and adaptive context neural inpainting"
-    )
-    @RequiresLock(locks = ["model:lama"])
-    suspend fun cleanChapterHybrid(
-        @CapabilityInput(
-            description = "Path to folder containing original chapter images",
-            semanticTypes = ["path/folder"]
-        )
-        inputFolder: String,
-        @CapabilityParam(description = "Chapter vision result containing segmentations for each page")
-        chapterVisionResult: ChapterVisionResult,
-        @CapabilityOutput(
-            description = "Directory to save cleaned chapter images",
-            autogeneratedPattern = "{inputFolder}/clean_chapter/",
-            semanticTypes = ["path/folder"]
-        )
+    // Deprecated forwarders for backward compatibility:
+    @Deprecated("Use cleanImage with strategy=AUTO_HYBRID instead")
+    suspend fun cleanImageHybrid(
+        imagePath: String,
+        segmentationData: VisionResult,
         outputDir: String,
-        @CapabilityParam(description = "Inpainting model to use for complex redraws", defaultValue = "\"MANGA\"")
         model: InpaintingModel = InpaintingModel.MANGA,
-        @CapabilityParam(description = "Cleaning strategy mode", defaultValue = "\"AUTO_HYBRID\"")
         strategy: CleaningStrategy = CleaningStrategy.AUTO_HYBRID,
-        @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
         targetClasses: List<String> = listOf("text"),
-        @CapabilityParam(
-            description = "Element categories to clean/inpaint",
-            defaultValue = "[\"speech\", \"sfx\", \"non_text\", \"none\"]"
-        )
-        clean_classes: List<OcrCategory> = listOf(
-            OcrCategory.speech,
-            OcrCategory.sfx,
-            OcrCategory.non_text,
-            OcrCategory.none
-        ),
-        @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
+        clean_classes: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.text, OcrCategory.balloon, OcrCategory.watermark, OcrCategory.non_text, OcrCategory.none),
         dilationRadius: Int = 3,
-        @CapabilityParam(
-            description = "Enable adaptive 2.5x context expansion for neural redraws",
-            defaultValue = "true"
-        )
         adaptivePadding: Boolean = true,
-        @CapabilityParam(description = "Save generated binary masks", defaultValue = "false")
-        saveMasks: Boolean = false,
-        @CapabilityParam(
-            description = "Output only the isolated inpainted regions with transparency (PNG)",
-            defaultValue = "false"
-        )
+        saveMask: Boolean = false,
         isolatedRegionsOnly: Boolean = false,
-        @CapabilityParam(
-            description = "Output individual clean cropped patch images for each cleaned element",
-            defaultValue = "false"
-        )
-        @DependsOn(param = "isolatedRegionsOnly", operator = ConditionOperator.EQUALS, values = ["true"])
-        outputCropPatches: Boolean = false,
-        @CapabilityParam(
-            description = "Boundary feathering radius (px) for smooth alpha blending",
-            defaultValue = "2",
-            isAdvanced = true
-        )
         featherRadius: Int = 2,
-        @CapabilityParam(
-            description = "Boundary blending technique to eliminate seams (FEATHER, POISSON, MODIFIED_POISSON, LAPLACIAN_PYRAMID, NONE)",
-            defaultValue = "\"FEATHER\"",
-            isAdvanced = true
-        )
         blendingMode: BlendingMode = BlendingMode.FEATHER,
-        @CapabilityParam(
-            description = "Context expansion margin (px) around mask bounding box",
-            defaultValue = "32",
-            isAdvanced = true
-        )
         cropMargin: Int = 32,
-        @CapabilityParam(
-            description = "Autoregressive TSR sampling iterations",
-            defaultValue = "5",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         iterations: Int = 5,
-        @CapabilityParam(
-            description = "Additive color offset correction [-1.0, 1.0]",
-            defaultValue = "0.0",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         addV: Double = 0.0,
-        @CapabilityParam(
-            description = "Multiplicative contrast scaling [0.0, 2.0]",
-            defaultValue = "1.0",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         mulV: Double = 1.0,
-        @CapabilityParam(
-            description = "Gaussian smoothing sigma for edge detection",
-            defaultValue = "1.5",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         sigma256: Double = 1.5,
-        @CapabilityParam(
-            description = "Wireframe proposal acceptance threshold",
-            defaultValue = "0.85",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         maskTh: Double = 0.85,
-        @CapabilityParam(
-            description = "Suppress line hallucination inside hole to remove object cleanly",
-            defaultValue = "false",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         objRemoval: Boolean = false,
-        @CapabilityParam(
-            description = "Edge-NMS binarization threshold [0, 255] (lower = more edges, higher = fewer edges)",
-            defaultValue = "50",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", value = "ZITSPP")
         binaryThreshold: Int = 50,
         context: PluginContext,
         hostFs: HostFileSystem
-    ): ChapterCleanerResult {
-        val logger = context.logger
-        val progressReporter = context.progress
-
-        val folder = File(inputFolder)
-        if (!folder.exists() || !folder.isDirectory) {
-            throw IllegalArgumentException("Input folder not found or is not a directory: $inputFolder")
-        }
-
-        val outDir = File(outputDir).apply { mkdirs() }
-        val visionMap = chapterVisionResult.results.associateBy { it.pageName }
-
-        val supportedExtensions = setOf("png", "jpg", "jpeg", "webp")
-        val imageFiles = folder.listFiles { file ->
-            file.isFile && file.extension.lowercase() in supportedExtensions
-        }?.sortedNaturally() ?: emptyList()
-
-        if (imageFiles.isEmpty()) {
-            throw IllegalArgumentException("No images found in folder: $inputFolder")
-        }
-
+    ): CleanerResult {
         val options = InpaintingOptions(
             featherRadius = featherRadius,
             blendingMode = blendingMode,
@@ -1473,167 +951,54 @@ class CleanerPlugin {
             objRemoval = objRemoval,
             binaryThreshold = binaryThreshold
         )
-
-        logger.info("Starting Chapter Hybrid Cleaner for ${imageFiles.size} images with model ${model.displayName} [${strategy.displayName}] (isolatedRegionsOnly=$isolatedRegionsOnly).")
-
-        val totalImages = imageFiles.size
-        val results = mutableListOf<CleanerResult>()
-
-        val sessionBundle =
-            if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else getInpaintingSession(model, context)
-        try {
-            for ((index, file) in imageFiles.withIndex()) {
-                val vResult = visionMap[file.name] ?: VisionResult(
-                    objects = emptyList(),
-                    imageWidth = 0,
-                    imageHeight = 0,
-                    pageName = file.name
-                )
-
-                val cResult = cleanImageInternalHybrid(
-                    imagePath = file.absolutePath,
-                    segmentationData = vResult,
-                    outputDir = outDir.absolutePath,
-                    model = model,
-                    strategy = strategy,
-                    sessionBundle = sessionBundle,
-                    targetClasses = targetClasses,
-                    cleanClasses = clean_classes,
-                    outputCropPatches = outputCropPatches,
-                    dilationRadius = dilationRadius,
-                    adaptivePadding = adaptivePadding,
-                    saveMask = saveMasks,
-                    isolatedRegionsOnly = isolatedRegionsOnly,
-                    options = options,
-                    context = context,
-                    hostFs = hostFs
-                )
-                results.add(cResult)
-                progressReporter.report((index + 1).toFloat() / totalImages.toFloat())
-            }
+        val sessionBundle = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else getInpaintingSession(model, context)
+        return try {
+            cleanImageCore(
+                imagePath = imagePath,
+                segmentationData = segmentationData,
+                outputDir = outputDir,
+                model = model,
+                strategy = strategy,
+                sessionBundle = sessionBundle,
+                cleanClasses = clean_classes,
+                targetClasses = targetClasses,
+                dilationRadius = dilationRadius,
+                adaptivePadding = adaptivePadding,
+                saveMask = saveMask,
+                isolatedRegions = isolatedRegionsOnly,
+                saveCropPatches = false,
+                options = options,
+                context = context,
+                hostFs = hostFs
+            )
         } finally {
             sessionBundle?.close()
         }
-
-        val cleanedPaths = results.map { it.cleanedImagePath }
-        val maskPaths = results.mapNotNull { it.maskPath }
-        val allCleanPatches = results.flatMap { it.clean }
-
-        logger.info("Chapter Hybrid Cleaner complete. Cleaned $totalImages pages.")
-
-        return ChapterCleanerResult(
-            cleanedImagePaths = cleanedPaths,
-            maskPaths = maskPaths,
-            totalCleanedPages = totalImages,
-            chapterVisionResult = chapterVisionResult,
-            clean = if (outputCropPatches) allCleanPatches else cleanedPaths
-        )
     }
 
-    @Capability(
-        name = "Clean Chapter (Patches Only)",
-        description = "Inpaints segmented text across an entire chapter and outputs only transparent PNG patch layers"
-    )
-    @RequiresLock(locks = ["model:lama"])
-    suspend fun cleanChapterPatchesOnly(
-        @CapabilityInput(
-            description = "Path to folder containing original chapter images",
-            semanticTypes = ["path/folder"]
-        )
-        inputFolder: String,
-        @CapabilityParam(description = "Chapter vision result containing segmentations for each page")
-        chapterVisionResult: ChapterVisionResult,
-        @CapabilityOutput(
-            description = "Directory to save transparent patch images",
-            autogeneratedPattern = "{inputFolder}/clean_chapter_patches/",
-            semanticTypes = ["path/folder"]
-        )
+    @Deprecated("Use cleanImage with isolated_regions=true instead")
+    suspend fun cleanImagePatchesOnly(
+        imagePath: String,
+        segmentationData: VisionResult,
         outputDir: String,
-        @CapabilityParam(description = "Inpainting model to use", defaultValue = "\"LAMA\"")
         model: InpaintingModel = InpaintingModel.LAMA,
-        @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
         targetClasses: List<String> = listOf("text"),
-        @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
+        clean_classes: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.text, OcrCategory.balloon, OcrCategory.watermark, OcrCategory.non_text, OcrCategory.none),
         dilationRadius: Int = 3,
-        @CapabilityParam(
-            description = "Boundary feathering radius (px) for smooth alpha blending",
-            defaultValue = "2",
-            isAdvanced = true
-        )
         featherRadius: Int = 2,
-        @CapabilityParam(
-            description = "Boundary blending technique to eliminate seams (FEATHER, POISSON, MODIFIED_POISSON, LAPLACIAN_PYRAMID, NONE)",
-            defaultValue = "\"FEATHER\"",
-            isAdvanced = true
-        )
         blendingMode: BlendingMode = BlendingMode.FEATHER,
-        @CapabilityParam(
-            description = "Context expansion margin (px) around mask bounding box",
-            defaultValue = "32",
-            isAdvanced = true
-        )
         cropMargin: Int = 32,
-        @CapabilityParam(
-            description = "Autoregressive TSR sampling iterations",
-            defaultValue = "5",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         iterations: Int = 5,
-        @CapabilityParam(
-            description = "Additive color offset correction [-1.0, 1.0]",
-            defaultValue = "0.0",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         addV: Double = 0.0,
-        @CapabilityParam(
-            description = "Multiplicative contrast scaling [0.0, 2.0]",
-            defaultValue = "1.0",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         mulV: Double = 1.0,
-        @CapabilityParam(
-            description = "Gaussian smoothing sigma for edge detection",
-            defaultValue = "1.5",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         sigma256: Double = 1.5,
-        @CapabilityParam(
-            description = "Wireframe proposal acceptance threshold",
-            defaultValue = "0.85",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         maskTh: Double = 0.85,
-        @CapabilityParam(
-            description = "Suppress line hallucination inside hole to remove object cleanly",
-            defaultValue = "false",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         objRemoval: Boolean = false,
-        @CapabilityParam(
-            description = "Edge-NMS binarization threshold [0, 255] (lower = more edges, higher = fewer edges)",
-            defaultValue = "50",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", value = "ZITSPP")
         binaryThreshold: Int = 50,
         context: PluginContext,
         hostFs: HostFileSystem
-    ): ChapterCleanerResult {
-        return cleanChapter(
-            inputFolder = inputFolder,
-            chapterVisionResult = chapterVisionResult,
-            outputDir = outputDir,
-            model = model,
-            targetClasses = targetClasses,
-            dilationRadius = dilationRadius,
-            saveMasks = false,
-            isolatedRegionsOnly = true,
+    ): CleanerResult {
+        val options = InpaintingOptions(
             featherRadius = featherRadius,
             blendingMode = blendingMode,
             cropMargin = cropMargin,
@@ -1643,125 +1008,57 @@ class CleanerPlugin {
             sigma256 = sigma256,
             maskTh = maskTh,
             objRemoval = objRemoval,
-            binaryThreshold = binaryThreshold,
-            context = context,
-            hostFs = hostFs
+            binaryThreshold = binaryThreshold
         )
+        val sessionBundle = getInpaintingSession(model, context)
+        return try {
+            cleanImageCore(
+                imagePath = imagePath,
+                segmentationData = segmentationData,
+                outputDir = outputDir,
+                model = model,
+                strategy = CleaningStrategy.NEURAL_ONLY,
+                sessionBundle = sessionBundle,
+                cleanClasses = clean_classes,
+                targetClasses = targetClasses,
+                dilationRadius = dilationRadius,
+                adaptivePadding = false,
+                saveMask = false,
+                isolatedRegions = true,
+                saveCropPatches = false,
+                options = options,
+                context = context,
+                hostFs = hostFs
+            )
+        } finally {
+            sessionBundle?.close()
+        }
     }
 
-    @Capability(
-        name = "Clean Chapter (Patches Only - Production Hybrid)",
-        description = "Inpaints segmented text across an entire chapter and outputs transparent PNG patch layers using the production hybrid pipeline"
-    )
-    @RequiresLock(locks = ["model:lama"])
-    suspend fun cleanChapterPatchesOnlyHybrid(
-        @CapabilityInput(
-            description = "Path to folder containing original chapter images",
-            semanticTypes = ["path/folder"]
-        )
-        inputFolder: String,
-        @CapabilityParam(description = "Chapter vision result containing segmentations for each page")
-        chapterVisionResult: ChapterVisionResult,
-        @CapabilityOutput(
-            description = "Directory to save transparent patch images",
-            autogeneratedPattern = "{inputFolder}/clean_chapter_patches/",
-            semanticTypes = ["path/folder"]
-        )
+    @Deprecated("Use cleanImage with isolated_regions=true and strategy=AUTO_HYBRID instead")
+    suspend fun cleanImagePatchesOnlyHybrid(
+        imagePath: String,
+        segmentationData: VisionResult,
         outputDir: String,
-        @CapabilityParam(description = "Inpainting model to use for complex redraws", defaultValue = "\"MANGA\"")
         model: InpaintingModel = InpaintingModel.MANGA,
-        @CapabilityParam(description = "Cleaning strategy mode", defaultValue = "\"AUTO_HYBRID\"")
         strategy: CleaningStrategy = CleaningStrategy.AUTO_HYBRID,
-        @CapabilityParam(description = "List of class labels to inpaint out", defaultValue = "[\"text\"]")
         targetClasses: List<String> = listOf("text"),
-        @CapabilityParam(description = "Mask dilation radius in pixels", defaultValue = "3")
         dilationRadius: Int = 3,
-        @CapabilityParam(
-            description = "Enable adaptive 2.5x context expansion for neural redraws",
-            defaultValue = "true"
-        )
         adaptivePadding: Boolean = true,
-        @CapabilityParam(
-            description = "Boundary feathering radius (px) for smooth alpha blending",
-            defaultValue = "2",
-            isAdvanced = true
-        )
         featherRadius: Int = 2,
-        @CapabilityParam(
-            description = "Boundary blending technique to eliminate seams (FEATHER, POISSON, MODIFIED_POISSON, LAPLACIAN_PYRAMID, NONE)",
-            defaultValue = "\"FEATHER\"",
-            isAdvanced = true
-        )
         blendingMode: BlendingMode = BlendingMode.FEATHER,
-        @CapabilityParam(
-            description = "Context expansion margin (px) around mask bounding box",
-            defaultValue = "32",
-            isAdvanced = true
-        )
         cropMargin: Int = 32,
-        @CapabilityParam(
-            description = "Autoregressive TSR sampling iterations",
-            defaultValue = "5",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         iterations: Int = 5,
-        @CapabilityParam(
-            description = "Additive color offset correction [-1.0, 1.0]",
-            defaultValue = "0.0",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         addV: Double = 0.0,
-        @CapabilityParam(
-            description = "Multiplicative contrast scaling [0.0, 2.0]",
-            defaultValue = "1.0",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         mulV: Double = 1.0,
-        @CapabilityParam(
-            description = "Gaussian smoothing sigma for edge detection",
-            defaultValue = "1.5",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         sigma256: Double = 1.5,
-        @CapabilityParam(
-            description = "Wireframe proposal acceptance threshold",
-            defaultValue = "0.85",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         maskTh: Double = 0.85,
-        @CapabilityParam(
-            description = "Suppress line hallucination inside hole to remove object cleanly",
-            defaultValue = "false",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", operator = ConditionOperator.IN, values = ["ZITS", "ZITSPP"])
         objRemoval: Boolean = false,
-        @CapabilityParam(
-            description = "Edge-NMS binarization threshold [0, 255] (lower = more edges, higher = fewer edges)",
-            defaultValue = "50",
-            isAdvanced = true
-        )
-        @DependsOn(param = "model", value = "ZITSPP")
         binaryThreshold: Int = 50,
         context: PluginContext,
         hostFs: HostFileSystem
-    ): ChapterCleanerResult {
-        return cleanChapterHybrid(
-            inputFolder = inputFolder,
-            chapterVisionResult = chapterVisionResult,
-            outputDir = outputDir,
-            model = model,
-            strategy = strategy,
-            targetClasses = targetClasses,
-            dilationRadius = dilationRadius,
-            adaptivePadding = adaptivePadding,
-            saveMasks = false,
-            isolatedRegionsOnly = true,
+    ): CleanerResult {
+        val options = InpaintingOptions(
             featherRadius = featherRadius,
             blendingMode = blendingMode,
             cropMargin = cropMargin,
@@ -1771,11 +1068,175 @@ class CleanerPlugin {
             sigma256 = sigma256,
             maskTh = maskTh,
             objRemoval = objRemoval,
-            binaryThreshold = binaryThreshold,
-            context = context,
-            hostFs = hostFs
+            binaryThreshold = binaryThreshold
         )
+        val sessionBundle = if (strategy == CleaningStrategy.DETERMINISTIC_ONLY) null else getInpaintingSession(model, context)
+        return try {
+            cleanImageCore(
+                imagePath = imagePath,
+                segmentationData = segmentationData,
+                outputDir = outputDir,
+                model = model,
+                strategy = strategy,
+                sessionBundle = sessionBundle,
+                cleanClasses = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.text, OcrCategory.balloon, OcrCategory.watermark, OcrCategory.non_text, OcrCategory.none),
+                targetClasses = targetClasses,
+                dilationRadius = dilationRadius,
+                adaptivePadding = adaptivePadding,
+                saveMask = false,
+                isolatedRegions = true,
+                saveCropPatches = false,
+                options = options,
+                context = context,
+                hostFs = hostFs
+            )
+        } finally {
+            sessionBundle?.close()
+        }
     }
+
+    @Deprecated("Use cleanChapter with strategy=AUTO_HYBRID instead")
+    suspend fun cleanChapterHybrid(
+        inputFolder: String,
+        chapterVisionResult: ChapterVisionResult,
+        outputDir: String,
+        model: InpaintingModel = InpaintingModel.MANGA,
+        strategy: CleaningStrategy = CleaningStrategy.AUTO_HYBRID,
+        targetClasses: List<String> = listOf("text"),
+        clean_classes: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.text, OcrCategory.balloon, OcrCategory.watermark, OcrCategory.non_text, OcrCategory.none),
+        dilationRadius: Int = 3,
+        adaptivePadding: Boolean = true,
+        saveMasks: Boolean = false,
+        isolatedRegionsOnly: Boolean = false,
+        outputCropPatches: Boolean = false,
+        featherRadius: Int = 2,
+        blendingMode: BlendingMode = BlendingMode.FEATHER,
+        cropMargin: Int = 32,
+        iterations: Int = 5,
+        addV: Double = 0.0,
+        mulV: Double = 1.0,
+        sigma256: Double = 1.5,
+        maskTh: Double = 0.85,
+        objRemoval: Boolean = false,
+        binaryThreshold: Int = 50,
+        context: PluginContext,
+        hostFs: HostFileSystem
+    ): ChapterCleanerResult = cleanChapter(
+        inputFolder = inputFolder,
+        chapterVisionResult = chapterVisionResult,
+        outputDir = outputDir,
+        model = model,
+        strategy = strategy,
+        clean_classes = clean_classes,
+        dilationRadius = dilationRadius,
+        isolated_regions = isolatedRegionsOnly,
+        save_crop_patches = outputCropPatches,
+        adaptivePadding = adaptivePadding,
+        save_mask = saveMasks,
+        featherRadius = featherRadius,
+        blendingMode = blendingMode,
+        cropMargin = cropMargin,
+        iterations = iterations,
+        addV = addV,
+        mulV = mulV,
+        sigma256 = sigma256,
+        maskTh = maskTh,
+        objRemoval = objRemoval,
+        binaryThreshold = binaryThreshold,
+        context = context,
+        hostFs = hostFs
+    )
+
+    @Deprecated("Use cleanChapter with isolated_regions=true instead")
+    suspend fun cleanChapterPatchesOnly(
+        inputFolder: String,
+        chapterVisionResult: ChapterVisionResult,
+        outputDir: String,
+        model: InpaintingModel = InpaintingModel.LAMA,
+        targetClasses: List<String> = listOf("text"),
+        dilationRadius: Int = 3,
+        featherRadius: Int = 2,
+        blendingMode: BlendingMode = BlendingMode.FEATHER,
+        cropMargin: Int = 32,
+        iterations: Int = 5,
+        addV: Double = 0.0,
+        mulV: Double = 1.0,
+        sigma256: Double = 1.5,
+        maskTh: Double = 0.85,
+        objRemoval: Boolean = false,
+        binaryThreshold: Int = 50,
+        context: PluginContext,
+        hostFs: HostFileSystem
+    ): ChapterCleanerResult = cleanChapter(
+        inputFolder = inputFolder,
+        chapterVisionResult = chapterVisionResult,
+        outputDir = outputDir,
+        model = model,
+        strategy = CleaningStrategy.NEURAL_ONLY,
+        dilationRadius = dilationRadius,
+        isolated_regions = true,
+        save_crop_patches = false,
+        save_mask = false,
+        featherRadius = featherRadius,
+        blendingMode = blendingMode,
+        cropMargin = cropMargin,
+        iterations = iterations,
+        addV = addV,
+        mulV = mulV,
+        sigma256 = sigma256,
+        maskTh = maskTh,
+        objRemoval = objRemoval,
+        binaryThreshold = binaryThreshold,
+        context = context,
+        hostFs = hostFs
+    )
+
+    @Deprecated("Use cleanChapter with isolated_regions=true and strategy=AUTO_HYBRID instead")
+    suspend fun cleanChapterPatchesOnlyHybrid(
+        inputFolder: String,
+        chapterVisionResult: ChapterVisionResult,
+        outputDir: String,
+        model: InpaintingModel = InpaintingModel.MANGA,
+        strategy: CleaningStrategy = CleaningStrategy.AUTO_HYBRID,
+        targetClasses: List<String> = listOf("text"),
+        dilationRadius: Int = 3,
+        adaptivePadding: Boolean = true,
+        featherRadius: Int = 2,
+        blendingMode: BlendingMode = BlendingMode.FEATHER,
+        cropMargin: Int = 32,
+        iterations: Int = 5,
+        addV: Double = 0.0,
+        mulV: Double = 1.0,
+        sigma256: Double = 1.5,
+        maskTh: Double = 0.85,
+        objRemoval: Boolean = false,
+        binaryThreshold: Int = 50,
+        context: PluginContext,
+        hostFs: HostFileSystem
+    ): ChapterCleanerResult = cleanChapter(
+        inputFolder = inputFolder,
+        chapterVisionResult = chapterVisionResult,
+        outputDir = outputDir,
+        model = model,
+        strategy = strategy,
+        dilationRadius = dilationRadius,
+        isolated_regions = true,
+        save_crop_patches = false,
+        adaptivePadding = adaptivePadding,
+        save_mask = false,
+        featherRadius = featherRadius,
+        blendingMode = blendingMode,
+        cropMargin = cropMargin,
+        iterations = iterations,
+        addV = addV,
+        mulV = mulV,
+        sigma256 = sigma256,
+        maskTh = maskTh,
+        objRemoval = objRemoval,
+        binaryThreshold = binaryThreshold,
+        context = context,
+        hostFs = hostFs
+    )
 
     @Capability(
         name = "Generate Mask",

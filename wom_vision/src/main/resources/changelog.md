@@ -1,3 +1,10 @@
+Version: 1.1.1
+Date: 2026-10-04
+Added:
+  - Added `saveReclassificationCrops` parameter to `Detect and Segment` and `Detect and Segment Chapter` capabilities to save text ROI crops to disk for debugging and prompt refinement.
+  - Implemented container-aware ROI expansion: text elements contained within speech balloons (smooth, jagged, spiky, circular, etc.) have their crop expanded to encompass the entire container contour, and receive structural context hints to enforce correct `speech` classification.
+  - Increased general text crop padding from 10% to 35% to provide sufficient surrounding context to the vision LLM.
+-------------------------------------------------------------------------------------------------
 Version: 1.1.0
 Date: 2026-10-03
 Added:

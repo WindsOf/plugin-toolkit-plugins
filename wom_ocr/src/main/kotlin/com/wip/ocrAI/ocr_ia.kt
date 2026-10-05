@@ -37,7 +37,7 @@ import org.wip.plugintoolkit.api.annotations.PluginValidate
 @PluginInfo(
     id = "com.wip.ocr_ia",
     name = "WOM OCR",
-    version = "2.9.1",
+    version = "2.9.3",
     description = "Advanced OCR plugin using Google AI, Anthropic, OpenAI, and LMStudio via Koog",
     supportedOs = [OS.WINDOWS]
 )
@@ -291,8 +291,17 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
         quantization: OcrQuantization = OcrQuantization.Q4_K_M,
         @CapabilityParam(description = "Optional Chapter Vision segmentation result to run OCR on cropped regions of interest")
         chapterVisionResult: ChapterVisionResult? = null,
-        @CapabilityParam(description = "Padding in pixels around detected regions for cutout OCR", defaultValue = "100")
+        @CapabilityParam(
+            description = "Padding in pixels around detected regions for cutout OCR",
+            defaultValue = "100"
+        )
         cropPadding: Int = 100,
+        @CapabilityParam(
+            description = "Whether the OCR model should classify text into speech vs sfx (false by default for faster, cleaner text recognition)",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        classify_text: Boolean = false,
         @CapabilityParam(
             description = "Automatically merge nearby OCR detections that fall within the same speech balloon when vision segmentation is provided",
             defaultValue = "true"
@@ -307,7 +316,7 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
             AIModel.QWEN3_VL_8B -> if (quantization == OcrQuantization.Q8_0) ModelCatalog.QWEN3_VL_8B_Q8_0_ID else ModelCatalog.QWEN3_VL_8B_Q4_K_M_ID
             else -> model.id
         }
-        logger.info("OCR IA (Basic) v2.9.0 started. Model: ${model.id} (resolved: $resolvedModelId, quantization: $quantization)")
+        logger.info("OCR IA (Basic) v2.9.3 started. Model: ${model.id} (resolved: $resolvedModelId, quantization: $quantization, classifyText: $classify_text)")
         logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput | VisionAssisted: ${chapterVisionResult != null} | AutoMerge: $merge_nearby_with_vision")
 
         val baseResult = try {
@@ -329,7 +338,8 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
                     saveThinking,
                     targetModelId = resolvedModelId,
                     chapterVisionResult = chapterVisionResult,
-                    cropPadding = cropPadding
+                    cropPadding = cropPadding,
+                    classifyText = classify_text
                 )
             } else {
                 val service = KoogOcrService(context, settings, hostFs)
@@ -341,7 +351,8 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
                     saveThinking,
                     model,
                     chapterVisionResult = chapterVisionResult,
-                    cropPadding = cropPadding
+                    cropPadding = cropPadding,
+                    classifyText = classify_text
                 )
                 OCRResult(ocrResult.texts, ocrResult.bb, ocrResult.pageNumbers, ocrResult.pageNames, ocrResult.failedFiles, ocrResult.categories)
             }
@@ -398,8 +409,17 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
         quantization: OcrQuantization = OcrQuantization.Q4_K_M,
         @CapabilityParam(description = "Optional Chapter Vision segmentation result to run OCR on cropped regions of interest")
         chapterVisionResult: ChapterVisionResult? = null,
-        @CapabilityParam(description = "Padding in pixels around detected regions for cutout OCR", defaultValue = "100")
+        @CapabilityParam(
+            description = "Padding in pixels around detected regions for cutout OCR",
+            defaultValue = "100"
+        )
         cropPadding: Int = 100,
+        @CapabilityParam(
+            description = "Whether the OCR model should classify text into speech vs sfx (false by default for faster, cleaner text recognition)",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        classify_text: Boolean = false,
         @CapabilityParam(
             description = "Automatically merge nearby Advanced OCR detections that fall within the same speech balloon when vision segmentation is provided",
             defaultValue = "true"
@@ -414,7 +434,7 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
             AdvancedAIModel.QWEN3_VL_8B -> if (quantization == OcrQuantization.Q8_0) ModelCatalog.QWEN3_VL_8B_Q8_0_ID else ModelCatalog.QWEN3_VL_8B_Q4_K_M_ID
             else -> model.id
         }
-        logger.info("OCR IA (Advanced) v2.9.0 started. Model: ${model.id} (resolved: $resolvedModelId, quantization: $quantization)")
+        logger.info("OCR IA (Advanced) v2.9.3 started. Model: ${model.id} (resolved: $resolvedModelId, quantization: $quantization, classifyText: $classify_text)")
         logger.info("Input: $input | Save: $save | OutputDir: '$outputDir' | StructuredOutput: $useStructuredOutput | VisionAssisted: ${chapterVisionResult != null} | AutoMerge: $merge_nearby_with_vision")
 
         val baseResult = try {
@@ -432,7 +452,8 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
                     saveThinking,
                     targetModelId = resolvedModelId,
                     chapterVisionResult = chapterVisionResult,
-                    cropPadding = cropPadding
+                    cropPadding = cropPadding,
+                    classifyText = classify_text
                 )
             } else {
                 val service = KoogOcrService(context, settings, hostFs)
@@ -444,7 +465,8 @@ class OCR_IA(val settings: OcrIASettings = OcrIASettings()) {
                     saveThinking,
                     model.toAIModel(),
                     chapterVisionResult = chapterVisionResult,
-                    cropPadding = cropPadding
+                    cropPadding = cropPadding,
+                    classifyText = classify_text
                 )
                 AdvancedOCRResult(
                     texts = ocrResult.texts,

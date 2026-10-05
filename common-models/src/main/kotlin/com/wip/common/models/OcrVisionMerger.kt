@@ -184,12 +184,14 @@ object OcrVisionMerger {
     }
 
     private fun filterValidVisionObjects(objects: List<SegmentedObject>): List<SegmentedObject> {
-        val ignoredLabels = setOf("watermark", "panel", "character", "face", "panel_border")
+        val ignoredLabels = setOf("watermark", "non_text", "none", "panel", "character", "face", "panel_border")
         return objects.filter { obj ->
             val lbl = obj.label.lowercase().trim()
             val isIgnored = ignoredLabels.any { lbl.contains(it) }
             val isRelevant = lbl.contains("balloon") || lbl.contains("bubble") || lbl.contains("text") ||
-                    lbl.contains("dialogue") || lbl.contains("sfx") || lbl.isEmpty()
+                    lbl.contains("speech") || lbl.contains("dialogue") || lbl.contains("sfx") ||
+                    lbl.contains("circular") || lbl.contains("irregular") || lbl.contains("jagged") ||
+                    lbl.contains("rectangular") || lbl.contains("spiky") || lbl.isEmpty()
             !isIgnored && isRelevant
         }
     }

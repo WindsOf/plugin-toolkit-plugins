@@ -22,11 +22,42 @@ import org.wip.plugintoolkit.api.PluginContext
 
 object VisionTextReclassifier {
 
+    fun isBalloonContainer(label: String): Boolean {
+        val l = label.lowercase()
+        if (l == "text" || l == "watermark" || l == "sfx" || l == "non_text" || l == "none") return false
+        return l.contains("balloon") || l.contains("bubble") || l.contains("circular") ||
+            l.contains("irregular") || l.contains("jagged") || l.contains("rectangular") ||
+            l.contains("spiky")
+    }
+
+    fun findEnclosingContainer(textBox: com.wip.common.models.DetectionBox, containers: List<SegmentedObject>): SegmentedObject? {
+        val centerX = (textBox.xmin + textBox.xmax) / 2.0
+        val centerY = (textBox.ymin + textBox.ymax) / 2.0
+        val textArea = (textBox.xmax - textBox.xmin) * (textBox.ymax - textBox.ymin)
+
+        val matching = containers.filter { c ->
+            val cBox = c.box
+            val interXmin = max(textBox.xmin, cBox.xmin)
+            val interYmin = max(textBox.ymin, cBox.ymin)
+            val interXmax = min(textBox.xmax, cBox.xmax)
+            val interYmax = min(textBox.ymax, cBox.ymax)
+            val interArea = max(0.0, interXmax - interXmin) * max(0.0, interYmax - interYmin)
+            val containment = if (textArea > 0) interArea / textArea else 0.0
+
+            val centerInside = centerX in cBox.xmin..cBox.xmax && centerY in cBox.ymin..cBox.ymax
+            centerInside || containment >= 0.35
+        }
+
+        return matching.minByOrNull { (it.box.xmax - it.box.xmin) * (it.box.ymax - it.box.ymin) }
+    }
+
     suspend fun reclassifyTextElements(
         image: BufferedImage,
         objects: List<SegmentedObject>,
         mode: VisionReclassificationMode,
-        context: PluginContext
+        context: PluginContext,
+        debugCropsDir: File? = null,
+        pageName: String? = null
     ): List<SegmentedObject> {
         if (mode == VisionReclassificationMode.NONE) return objects
 
@@ -87,24 +118,49 @@ object VisionTextReclassifier {
         val imgW = image.width
         val imgH = image.height
         val updatedObjects = objects.toMutableList()
+        val containerCandidates = objects.filter { isBalloonContainer(it.label) }
 
         for (idx in textIndices) {
             val obj = updatedObjects[idx]
             val box = obj.box
 
-            // Compute crop box with padding
-            val yminPx = (box.ymin * imgH).toInt()
-            val xminPx = (box.xmin * imgW).toInt()
-            val ymaxPx = (box.ymax * imgH).toInt()
-            val xmaxPx = (box.xmax * imgW).toInt()
+            val enclosingContainer = findEnclosingContainer(box, containerCandidates)
 
-            val padX = max(10, ((xmaxPx - xminPx) * 0.1).toInt())
-            val padY = max(10, ((ymaxPx - yminPx) * 0.1).toInt())
+            val cropXmin: Int
+            val cropYmin: Int
+            val cropXmax: Int
+            val cropYmax: Int
 
-            val cropXmin = max(0, xminPx - padX)
-            val cropYmin = max(0, yminPx - padY)
-            val cropXmax = min(imgW, xmaxPx + padX)
-            val cropYmax = min(imgH, ymaxPx + padY)
+            if (enclosingContainer != null) {
+                val cBox = enclosingContainer.box
+                val unionXmin = min(box.xmin, cBox.xmin)
+                val unionYmin = min(box.ymin, cBox.ymin)
+                val unionXmax = max(box.xmax, cBox.xmax)
+                val unionYmax = max(box.ymax, cBox.ymax)
+
+                val spanW = unionXmax - unionXmin
+                val spanH = unionYmax - unionYmin
+                val marginX = spanW * 0.05
+                val marginY = spanH * 0.05
+
+                cropXmin = max(0, ((unionXmin - marginX) * imgW).toInt())
+                cropYmin = max(0, ((unionYmin - marginY) * imgH).toInt())
+                cropXmax = min(imgW, ((unionXmax + marginX) * imgW).toInt())
+                cropYmax = min(imgH, ((unionYmax + marginY) * imgH).toInt())
+            } else {
+                val yminPx = (box.ymin * imgH).toInt()
+                val xminPx = (box.xmin * imgW).toInt()
+                val ymaxPx = (box.ymax * imgH).toInt()
+                val xmaxPx = (box.xmax * imgW).toInt()
+
+                val padX = max(20, ((xmaxPx - xminPx) * 0.35).toInt())
+                val padY = max(20, ((ymaxPx - yminPx) * 0.35).toInt())
+
+                cropXmin = max(0, xminPx - padX)
+                cropYmin = max(0, yminPx - padY)
+                cropXmax = min(imgW, xmaxPx + padX)
+                cropYmax = min(imgH, ymaxPx + padY)
+            }
 
             val cropW = max(1, cropXmax - cropXmin)
             val cropH = max(1, cropYmax - cropYmin)
@@ -118,19 +174,26 @@ object VisionTextReclassifier {
             }
             val dataUrl = "data:image/png;base64,$base64"
 
+            val containerHint = if (enclosingContainer != null) {
+                "\nContext hint: Structural detection confirms this text is positioned inside a speech/dialogue balloon or container ('${enclosingContainer.label}'). As stated in the rule, text inside a balloon/container must be classified as 'speech'."
+            } else ""
+
             val prompt = """
             You are an expert manga/comic text classifier.
             Inspect this close-up crop of comic/manga artwork.
             Focus specifically on the central text element in this crop (ignore peripheral text that may be partially visible at the edges).
+            $containerHint
             Classify the central element into exactly one category:
-            - "speech": regular dialogue, narration, spoken words, thoughts inside or outside balloons.
-            - "sfx": sound effects, onomatopoeia, stylized action lettering, ambient sound words.
+            - "speech": regular dialogue, narration, spoken words, thoughts, and any character utterances (including screams, grunts, moans, gasps, sighs, or non-word vocal sounds like "HNNGH", "HAA...", "UGH", "AAAH", "KYAA") that are enclosed within speech/thought balloons, speech bubbles, or dialogue boxes.
+              * RULE: If text is inside a balloon or dedicated dialogue container, classify it as "speech" regardless of whether the text is a word, groan, or onomatopoeic utterance.
+            - "sfx": sound effects, environmental onomatopoeia, stylized action lettering, impacts, and ambient sound words drawn freeform outside of speech balloons/containers.
             - "non_text": drawing details, screentone patterns, textures, character features, background art, or non-text artifacts mistakenly identified as text.
-
+            
             Respond strictly with JSON:
             {"category": "speech" | "sfx" | "non_text"}
             """.trimIndent()
 
+            var classifiedCategory: String? = null
             try {
                 val rawResponse = LlamaInferenceClient.Default.executeVisionChatBase64(
                     baseUrl = server.baseUrl,
@@ -141,7 +204,7 @@ object VisionTextReclassifier {
                     logger = logger
                 )
 
-                val classifiedCategory = parseCategoryFromResponse(rawResponse)
+                classifiedCategory = parseCategoryFromResponse(rawResponse)
                 if (classifiedCategory != null) {
                     val newLabel = when (classifiedCategory) {
                         "speech" -> "speech"
@@ -156,6 +219,21 @@ object VisionTextReclassifier {
                 }
             } catch (e: Exception) {
                 logger.warn("[VisionTextReclassifier] Failed to reclassify object at index $idx: ${e.message}")
+            }
+
+            if (debugCropsDir != null) {
+                try {
+                    withContext(Dispatchers.IO) {
+                        if (!debugCropsDir.exists()) debugCropsDir.mkdirs()
+                        val prefix = pageName?.ifBlank { "page" } ?: "page"
+                        val filename = "${prefix}_crop_${idx}_${obj.label}_as_${classifiedCategory ?: "unknown"}.png"
+                        val cropFile = File(debugCropsDir, filename)
+                        ImageIO.write(cropImg, "png", cropFile)
+                        logger.info("[VisionTextReclassifier] Saved reclassification debug crop: ${cropFile.absolutePath}")
+                    }
+                } catch (e: Exception) {
+                    logger.warn("[VisionTextReclassifier] Failed to save debug crop for index $idx: ${e.message}")
+                }
             }
         }
 

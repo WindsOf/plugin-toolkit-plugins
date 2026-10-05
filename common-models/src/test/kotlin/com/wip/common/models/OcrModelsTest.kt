@@ -184,5 +184,48 @@ class OcrModelsTest {
         assertEquals(cleanerResult.clean, decoded.clean)
         assertEquals(cleanerResult.cleanedImagePaths, decoded.cleanedImagePaths)
     }
+
+    @Test
+    fun testOcrCategoryEnums() {
+        assertEquals(OcrCategory.speech, OcrCategory.fromString("speech"))
+        assertEquals(OcrCategory.sfx, OcrCategory.fromString("sfx"))
+        assertEquals(OcrCategory.text, OcrCategory.fromString("text"))
+        assertEquals(OcrCategory.balloon, OcrCategory.fromString("balloon"))
+        assertEquals(OcrCategory.watermark, OcrCategory.fromString("watermark"))
+        assertEquals(OcrCategory.non_text, OcrCategory.fromString("non_text"))
+        assertEquals(OcrCategory.none, OcrCategory.fromString("none"))
+        assertEquals(OcrCategory.none, OcrCategory.fromString("unknown_val"))
+    }
+
+    @Test
+    fun testOcrVisionMergerWithReclassifiedAndShapeObjects() {
+        val ocr = OCRResult(
+            texts = listOf("Part 1", "Part 2"),
+            bb = listOf(
+                listOf(0.10, 0.10, 0.15, 0.30),
+                listOf(0.16, 0.10, 0.20, 0.30)
+            ),
+            pageNumbers = listOf(1, 1),
+            pageNames = listOf("page1.png", "page1.png"),
+            failedFiles = emptyList()
+        )
+
+        val vision = VisionResult(
+            objects = listOf(
+                SegmentedObject(
+                    label = "speech", // reclassified label
+                    confidence = 0.95,
+                    box = DetectionBox(ymin = 0.08, xmin = 0.08, ymax = 0.22, xmax = 0.32)
+                )
+            ),
+            imageWidth = 1000,
+            imageHeight = 1000,
+            pageName = "page1.png"
+        )
+
+        val merged = OcrVisionMerger.mergeOcrResult(ocr, vision, separator = " ")
+        assertEquals(1, merged.texts.size)
+        assertEquals("Part 1 Part 2", merged.texts[0])
+    }
 }
 

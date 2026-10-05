@@ -1,3 +1,34 @@
+Version: 5.5.3
+Date: 2026-10-05
+Fixed:
+  - Fixed text layer centering when `PolygonTextBoundary` is available: dynamically centers the text box and transformation matrix around the polygon's visual center (`vcx, vcy`) rather than falling back to the geometric center of the OCR detection box.
+  - Enhanced `PolygonTextBoundary.getAvailableWidth` to calculate symmetric available width relative to `centerX`, preventing text lines from overflowing asymmetric polygon contours.
+  - Aligned boundary debug visualization to display the effective polygon text box centered on the visual center.
+-------------------------------------------------------------------------------------------------
+Version: 5.5.2
+Date: 2026-10-04
+Fixed:
+  - Fixed `VisionOcrMatcher` selecting segmented text polygons (`speech`, `text`, `sfx`) instead of actual speech balloons (`circular`, `irregular`, `rectangular`, `balloon`, `bubble`), which previously caused text boundaries to collapse to tiny text outlines and resulted in microscopic text layout in KPsd.
+  - Added strict `isBalloonContainer` filtering in `VisionOcrMatcher` so candidate matching strictly targets balloon containers.
+  - Updated cleaner debug overlay colors to accurately distinguish balloon containers (`cyan`) from text elements (`green`).
+  - Fixed clean patch label extraction from filename regex to handle optional capture groups properly when matching `patch_X.png`.
+-------------------------------------------------------------------------------------------------
+Version: 5.5.1
+Date: 2026-10-04
+Fixed:
+  - Eliminated duplicate full-page patch layer in PSD clean group: patch matching now strictly distinguishes between full-page clean images and individual patch files (`_patch_`).
+  - Added support for full-size isolated clean patches, aligning them directly at (0, 0, width, height) with zero offset and full class visibility support.
+  - Automatically discover patches from `cleanFolder` subdirectories when direct patch lists are not provided.
+-------------------------------------------------------------------------------------------------
+Version: 5.5.0
+Date: 2026-10-04
+Added:
+  - Updated `default_visible_classes` default to include all 7 standard classes: `speech`, `sfx`, `text`, `balloon`, `watermark`, `non_text`, `none`.
+  - Added support for index and label parsing from `${page}_patch_${index}_${label}.png` patch files.
+Changed:
+  - When individual clean patches are provided alongside a base `clean_image`, `clean_image` is automatically marked `hidden = true` in the PSD `clean` group so patch visibility controls function properly.
+  - Enhanced text layer visibility check to verify both OCR classification and Vision model label against `default_visible_classes`.
+-------------------------------------------------------------------------------------------------
 Version: 5.4.1
 Date: 2026-10-03
 Fixed:

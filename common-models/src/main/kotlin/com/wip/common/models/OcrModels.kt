@@ -143,6 +143,9 @@ fun AdvancedOCRResult.toOCRResult(): OCRResult = OCRResult(
 enum class OcrCategory {
     speech,
     sfx,
+    text,
+    balloon,
+    watermark,
     non_text,
     none;
 

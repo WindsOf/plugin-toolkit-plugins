@@ -1444,9 +1444,24 @@ object InpaintingUtils {
             )
         }
 
+        return isolateCleanedRegion(fullyCleaned, mask, featherRadiusPx)
+    }
+
+    /**
+     * Extracts cleaned regions based on a binary mask onto an alpha-transparent canvas (TYPE_INT_ARGB).
+     * Pixels inside the mask take RGB from cleanedImage, with smooth boundary alpha feathering.
+     * All pixels outside the mask are completely transparent (alpha = 0).
+     */
+    fun isolateCleanedRegion(
+        cleanedImage: BufferedImage,
+        mask: BufferedImage,
+        featherRadiusPx: Int = 2
+    ): BufferedImage {
+        val width = cleanedImage.width
+        val height = cleanedImage.height
         val isolatedImage = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
         val cleanedPixels = IntArray(width * height)
-        fullyCleaned.getRGB(0, 0, width, height, cleanedPixels, 0, width)
+        cleanedImage.getRGB(0, 0, width, height, cleanedPixels, 0, width)
 
         val maskRaster = mask.raster
         val maskPixels = IntArray(width * height)
@@ -2225,42 +2240,6 @@ object InpaintingUtils {
             multiSessions = multiSessions
         )
 
-        val width = sourceImage.width
-        val height = sourceImage.height
-        val isolatedImage = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
-
-        val cleanedPixels = IntArray(width * height)
-        fullyCleaned.getRGB(0, 0, width, height, cleanedPixels, 0, width)
-
-        val maskRaster = mask.raster
-        val maskPixels = IntArray(width * height)
-        maskRaster.getSamples(0, 0, width, height, 0, maskPixels)
-
-        val alphaValues = IntArray(width * height)
-        for (i in 0 until width * height) {
-            if (maskPixels[i] > 128) {
-                alphaValues[i] = 255
-            }
-        }
-
-        val featheredAlpha = if (featherRadiusPx > 0) {
-            applyAlphaFeathering(alphaValues, width, height, featherRadiusPx)
-        } else {
-            alphaValues
-        }
-
-        val outPixels = IntArray(width * height)
-        for (i in 0 until width * height) {
-            val a = featheredAlpha[i].coerceIn(0, 255)
-            if (a > 0) {
-                val rgb = cleanedPixels[i] and 0x00FFFFFF
-                outPixels[i] = (a shl 24) or rgb
-            } else {
-                outPixels[i] = 0x00000000
-            }
-        }
-
-        isolatedImage.setRGB(0, 0, width, height, outPixels, 0, width)
-        return isolatedImage
+        return isolateCleanedRegion(fullyCleaned, mask, featherRadiusPx)
     }
 }

@@ -14,7 +14,8 @@ data class CropRegion(
     val xmin: Int,
     val ymin: Int,
     val xmax: Int,
-    val ymax: Int
+    val ymax: Int,
+    val category: String = "speech"
 ) {
     val width: Int get() = max(1, xmax - xmin)
     val height: Int get() = max(1, ymax - ymin)
@@ -31,11 +32,17 @@ data class CropRegion(
      * Merges this region with another overlapping region into a bounding union.
      */
     fun union(other: CropRegion): CropRegion {
+        val mergedCat = when {
+            category == "speech" || other.category == "speech" -> "speech"
+            category == "sfx" || other.category == "sfx" -> "sfx"
+            else -> category
+        }
         return CropRegion(
             xmin = min(xmin, other.xmin),
             ymin = min(ymin, other.ymin),
             xmax = max(xmax, other.xmax),
-            ymax = max(ymax, other.ymax)
+            ymax = max(ymax, other.ymax),
+            category = mergedCat
         )
     }
 }
@@ -83,15 +90,16 @@ object VisionCutoutHelper {
         imageWidth: Int,
         imageHeight: Int,
         paddingPx: Int = 100,
-        targetClasses: Set<String> = setOf("balloon", "text")
+        targetClasses: Set<String> = emptySet()
     ): List<CropRegion> {
         if (objects.isEmpty() || imageWidth <= 0 || imageHeight <= 0) return emptyList()
 
-        val relevantObjects = objects.filter {
-            it.label.lowercase() in targetClasses || targetClasses.isEmpty()
-        }.ifEmpty {
-            // If no objects match specific labels, take all detected objects
-            objects
+        val ignoredLabels = setOf("watermark", "non_text", "none")
+        val relevantObjects = objects.filter { obj ->
+            val lbl = obj.label.lowercase().trim()
+            val isIgnored = ignoredLabels.any { lbl.contains(it) }
+            val isTarget = targetClasses.isEmpty() || targetClasses.contains(lbl)
+            !isIgnored && isTarget
         }
 
         if (relevantObjects.isEmpty()) return emptyList()
@@ -108,8 +116,13 @@ object VisionCutoutHelper {
             val expandedXmax = min(imageWidth, pxMaxX + paddingPx)
             val expandedYmax = min(imageHeight, pxMaxY + paddingPx)
 
+            val cat = when (obj.label.lowercase().trim()) {
+                "sfx" -> "sfx"
+                else -> "speech"
+            }
+
             if (expandedXmax > expandedXmin && expandedYmax > expandedYmin) {
-                CropRegion(expandedXmin, expandedYmin, expandedXmax, expandedYmax)
+                CropRegion(expandedXmin, expandedYmin, expandedXmax, expandedYmax, category = cat)
             } else null
         }
 

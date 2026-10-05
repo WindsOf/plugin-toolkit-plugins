@@ -1,5 +1,12 @@
 [
   {
+    "fromVersion": "5.4.1",
+    "toVersion": "5.5.0",
+    "capabilityMigrations": [],
+    "settingMigrations": [],
+    "objectMigrations": []
+  },
+  {
     "fromVersion": "5.3.3",
     "toVersion": "5.4.0",
     "capabilityMigrations": []

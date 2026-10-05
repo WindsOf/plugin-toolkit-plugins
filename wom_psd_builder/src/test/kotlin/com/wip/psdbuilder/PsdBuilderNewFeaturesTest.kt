@@ -531,4 +531,226 @@ class PsdBuilderNewFeaturesTest {
             tempDir.deleteRecursively()
         }
     }
+
+    @Test
+    fun testSplitPatchNamingAndCleanImageHidingWhenPatchesPresent() {
+        runBlocking {
+            val plugin = PSDBuilderPlugin()
+            val ctx = mockk<PluginContext>(relaxed = true)
+
+            val tempDir = File("build/tmp/test_psd_split_patches").apply {
+                if (exists()) deleteRecursively()
+                mkdirs()
+            }
+
+            val baseImg = BufferedImage(200, 200, BufferedImage.TYPE_INT_RGB)
+            val cleanImg = BufferedImage(200, 200, BufferedImage.TYPE_INT_ARGB)
+
+            val patchDir = File(tempDir, "page_01_patches").apply { mkdirs() }
+            val patchSpeech = File(patchDir, "page_01_patch_0_speech.png")
+            val patchWatermark = File(patchDir, "page_01_patch_1_watermark.png")
+            ImageIO.write(BufferedImage(30, 30, BufferedImage.TYPE_INT_ARGB), "png", patchSpeech)
+            ImageIO.write(BufferedImage(20, 20, BufferedImage.TYPE_INT_ARGB), "png", patchWatermark)
+
+            val visionResult = VisionResult(
+                objects = listOf(
+                    SegmentedObject(
+                        label = "speech",
+                        confidence = 0.99,
+                        box = DetectionBox("speech", 0.99, 0.1, 0.1, 0.4, 0.4),
+                        polygon = emptyList()
+                    ),
+                    SegmentedObject(
+                        label = "watermark",
+                        confidence = 0.99,
+                        box = DetectionBox("watermark", 0.99, 0.7, 0.7, 0.9, 0.9),
+                        polygon = emptyList()
+                    )
+                ),
+                imageWidth = 200,
+                imageHeight = 200,
+                pageName = "page_01.png"
+            )
+
+            // Include speech, but exclude watermark
+            val psd = plugin.buildPsdObject(
+                baseImageBmp = baseImg,
+                cleanImageBmp = cleanImg,
+                cleanPatches = listOf(patchSpeech.absolutePath, patchWatermark.absolutePath),
+                texts = listOf("Hello speech", "WM text"),
+                balloonBoxes = listOf(listOf(0.1, 0.1, 0.4, 0.4), listOf(0.7, 0.7, 0.9, 0.9)),
+                visionResult = visionResult,
+                categories = listOf("speech", "watermark"),
+                defaultVisibleClasses = listOf(OcrCategory.speech),
+                context = ctx
+            )
+
+            val cleanGroup = psd.children.firstOrNull { it.name == "clean" }
+            assertNotNull(cleanGroup, "Clean group should exist")
+
+            val cleanImageLayer = cleanGroup.children?.firstOrNull { it.name == "clean_image" }
+            assertNotNull(cleanImageLayer, "clean_image layer should exist")
+            assertTrue(cleanImageLayer.hidden, "clean_image must be hidden when individual patches are present")
+
+            val pSpeech = cleanGroup.children?.firstOrNull { it.name == "clean_patch_1" }
+            assertNotNull(pSpeech, "clean_patch_1 should exist")
+            assertEquals(false, pSpeech.hidden, "clean_patch_1 (speech) should be visible")
+
+            val pWatermark = cleanGroup.children?.firstOrNull { it.name == "clean_patch_2" }
+            assertNotNull(pWatermark, "clean_patch_2 should exist")
+            assertEquals(true, pWatermark.hidden, "clean_patch_2 (watermark) should be hidden because watermark is excluded from defaultVisibleClasses")
+
+            val transGroup = psd.children.firstOrNull { it.name == "translation" }
+            assertNotNull(transGroup, "Translation group should exist")
+            val textSpeech = transGroup.children?.firstOrNull { it.name?.contains("Hello") == true }
+            assertNotNull(textSpeech, "Speech text layer should exist")
+            assertEquals(false, textSpeech.hidden, "Speech text layer should be visible")
+
+            val textWM = transGroup.children?.firstOrNull { it.name?.contains("WM") == true }
+            assertNotNull(textWM, "Watermark text layer should exist")
+            assertEquals(true, textWM.hidden, "Watermark text layer should be hidden when watermark is excluded")
+
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testFullSizeCleanPatchesPositioningAndNoDuplicates() {
+        runBlocking {
+            val plugin = PSDBuilderPlugin()
+            val ctx = mockk<PluginContext>(relaxed = true)
+
+            val tempDir = File("build/tmp/test_psd_full_size_patches").apply {
+                if (exists()) deleteRecursively()
+                mkdirs()
+            }
+            val baseImg = BufferedImage(200, 200, BufferedImage.TYPE_INT_RGB)
+            val cleanImg = BufferedImage(200, 200, BufferedImage.TYPE_INT_ARGB)
+
+            val patch1 = File(tempDir, "p1_patch_0_speech.png")
+            val patch2 = File(tempDir, "p1_patch_1_sfx.png")
+            ImageIO.write(BufferedImage(200, 200, BufferedImage.TYPE_INT_ARGB), "png", patch1)
+            ImageIO.write(BufferedImage(200, 200, BufferedImage.TYPE_INT_ARGB), "png", patch2)
+
+            val visResult = VisionResult(
+                objects = listOf(
+                    SegmentedObject("speech", 0.99, DetectionBox("speech", 0.99, 0.1, 0.1, 0.4, 0.4), emptyList()),
+                    SegmentedObject("sfx", 0.95, DetectionBox("sfx", 0.95, 0.6, 0.6, 0.8, 0.8), emptyList())
+                ),
+                imageWidth = 200,
+                imageHeight = 200,
+                pageName = "p1.png"
+            )
+
+            // Test 1: With 2 full-size patches
+            val psdWithPatches = plugin.buildPsdObject(
+                baseImageBmp = baseImg,
+                cleanImageBmp = cleanImg,
+                cleanPatches = listOf(patch1.absolutePath, patch2.absolutePath),
+                texts = listOf("Speech text", "SFX boom"),
+                balloonBoxes = listOf(listOf(0.1, 0.1, 0.4, 0.4), listOf(0.6, 0.6, 0.8, 0.8)),
+                visionResult = visResult,
+                categories = listOf("speech", "sfx"),
+                context = ctx
+            )
+
+            val cleanGroup = psdWithPatches.children.firstOrNull { it.name == "clean" }
+            assertNotNull(cleanGroup)
+            // clean_image is hidden master fallback
+            val cleanImageLayer = cleanGroup.children?.firstOrNull { it.name == "clean_image" }
+            assertNotNull(cleanImageLayer)
+            assertTrue(cleanImageLayer.hidden, "clean_image must be hidden when patches are present")
+
+            val p1 = cleanGroup.children?.firstOrNull { it.name == "clean_patch_1" }
+            val p2 = cleanGroup.children?.firstOrNull { it.name == "clean_patch_2" }
+            assertNotNull(p1)
+            assertNotNull(p2)
+            assertEquals(0, p1.top)
+            assertEquals(0, p1.left)
+            assertEquals(200, p1.bottom)
+            assertEquals(200, p1.right)
+
+            assertEquals(0, p2.top)
+            assertEquals(0, p2.left)
+            assertEquals(200, p2.bottom)
+            assertEquals(200, p2.right)
+
+            // Exactly 3 layers in clean: clean_image (hidden fallback) + clean_patch_1 + clean_patch_2
+            assertEquals(3, cleanGroup.children?.size)
+
+            // Test 2: Without patches, only 1 layer in clean group (clean_image, visible)
+            val psdNoPatches = plugin.buildPsdObject(
+                baseImageBmp = baseImg,
+                cleanImageBmp = cleanImg,
+                cleanPatches = emptyList(),
+                texts = listOf("Speech text"),
+                balloonBoxes = listOf(listOf(0.1, 0.1, 0.4, 0.4)),
+                visionResult = visResult,
+                context = ctx
+            )
+            val cleanGroupNoPatches = psdNoPatches.children.firstOrNull { it.name == "clean" }
+            assertNotNull(cleanGroupNoPatches)
+            assertEquals(1, cleanGroupNoPatches.children?.size, "Without patches, clean group must contain only 1 layer")
+            val singleClean = cleanGroupNoPatches.children?.firstOrNull { it.name == "clean_image" }
+            assertNotNull(singleClean)
+            assertEquals(false, singleClean.hidden, "clean_image must be visible when no patches exist")
+
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testPolygonTextBoundaryCentersOnVisualCenter() {
+        runBlocking {
+            val plugin = PSDBuilderPlugin(PSDBuilderSettings(debugMode = false))
+            val ctx = mockk<PluginContext>(relaxed = true)
+
+            val w = 1000
+            val h = 1000
+            val baseImg = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+
+            // Detection box spans ymin=0.1, xmin=0.2, ymax=0.9, xmax=0.8
+            // Geometric center of detection box is at y = 500, x = 500
+            // But the balloon's polygon belly is shifted towards the bottom, e.g. visual center at y = 600+
+            val asymmetricBalloon = SegmentedObject(
+                label = "speech_balloon",
+                confidence = 0.95,
+                box = DetectionBox(ymin = 0.1, xmin = 0.2, ymax = 0.9, xmax = 0.8),
+                polygon = listOf(
+                    // Sharp spike at top (500, 100)
+                    PolygonPoint(0.5, 0.1),
+                    // Right belly (800, 650)
+                    PolygonPoint(0.8, 0.65),
+                    // Bottom (500, 850)
+                    PolygonPoint(0.5, 0.85),
+                    // Left belly (200, 650)
+                    PolygonPoint(0.2, 0.65)
+                )
+            )
+
+            val psd = plugin.buildPsdObject(
+                baseImageBmp = baseImg,
+                texts = listOf("Centered on visual center!"),
+                balloonBoxes = listOf(listOf(0.1, 0.2, 0.9, 0.8)),
+                visionResult = VisionResult(objects = listOf(asymmetricBalloon)),
+                context = ctx
+            )
+
+            val translationGroup = psd.children.firstOrNull { it.name == "translation" }
+            assertNotNull(translationGroup)
+            val textLayer = translationGroup.children?.firstOrNull()
+            assertNotNull(textLayer)
+
+            // Verify that the text layer's vertical center is NOT at the detection box center (500)
+            val verticalCenter = (textLayer.top + textLayer.bottom) / 2
+            val horizontalCenter = (textLayer.left + textLayer.right) / 2
+
+            // Visual center of this diamond polygon with bottom-heavy mass is around ~562
+            assertTrue(
+                verticalCenter > 520,
+                "Text layer vertical center ($verticalCenter) must align with polygon visual center, not detection box center (500)"
+            )
+            assertEquals(500, horizontalCenter, "Text layer horizontal center must be at 500")
+        }
+    }
 }

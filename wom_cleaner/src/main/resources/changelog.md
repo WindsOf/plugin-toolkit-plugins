@@ -1,3 +1,23 @@
+Version: 1.5.1
+Date: 2026-10-04
+Fixed:
+  - Fixed patch generation when splitting regions: each vision detection is now isolated onto its own transparent canvas matching the full image dimensions, guaranteeing 100% pixel-perfect alignment in PSD layers without coordinate offsets.
+  - Fixed duplicate full-page patch issue: when `save_crop_patches` is false, `clean` now returns an empty list instead of duplicating the full-page cleaned image.
+  - Added `split_regions` as an alias for `save_crop_patches` to support both naming conventions.
+-------------------------------------------------------------------------------------------------
+Version: 1.5.0
+Date: 2026-10-04
+Added:
+  - Merged multiple inpainting capabilities into two unified capabilities: `Clean Image` and `Clean Chapter`. All options (strategy, models, blending) are controlled via toggles/dropdowns.
+  - Added `save_crop_patches` advanced toggle (`isAdvanced = true`) to export individual cropped clean PNG patches per element (`${page}_patch_${originalIndex}_${label}.png`) for fine-grained per-layer PSD integration.
+  - Retained single unified `isolated_regions` toggle to export transparent isolated inpainting canvas (removed duplicate `isolatedRegionsOnly`).
+  - Standardized on unified `clean_classes` using `OcrCategory` (`speech`, `sfx`, `text`, `balloon`, `watermark`, `non_text`, `none`) with smart fallback mapping (removed duplicate `targetClasses`).
+Changed:
+  - Moved `save_mask` and `save_crop_patches` to advanced options (`isAdvanced = true`).
+  - Removed duplicate and legacy parameters (`isolatedRegionsOnly`, `targetClasses`, `saveMask`, `saveMasks`, `outputCropPatches`) from capability signatures.
+  - Added comprehensive `portMigrations` in `migrations.json` mapping legacy parameters and capability calls seamlessly.
+  - Deprecated legacy separate capabilities (`cleanImageHybrid`, `cleanImagePatchesOnly`, `cleanImagePatchesOnlyHybrid`, etc.).
+-------------------------------------------------------------------------------------------------
 Version: 1.4.0
 Date: 2026-10-03
 Added:

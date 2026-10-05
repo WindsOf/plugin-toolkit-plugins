@@ -15,6 +15,9 @@ import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class VisionPluginTest {
@@ -425,5 +428,44 @@ class VisionPluginTest {
         val context = mockk<PluginContext>(relaxed = true)
         val result = VisionTextReclassifier.reclassifyTextElements(img, objects, VisionReclassificationMode.NONE, context)
         assertEquals(objects, result)
+    }
+
+    @Test
+    fun testIsBalloonContainer() {
+        assertTrue(VisionTextReclassifier.isBalloonContainer("balloon"))
+        assertTrue(VisionTextReclassifier.isBalloonContainer("bubble"))
+        assertTrue(VisionTextReclassifier.isBalloonContainer("jagged"))
+        assertTrue(VisionTextReclassifier.isBalloonContainer("spiky"))
+        assertTrue(VisionTextReclassifier.isBalloonContainer("circular"))
+        assertTrue(VisionTextReclassifier.isBalloonContainer("rectangular"))
+        assertTrue(VisionTextReclassifier.isBalloonContainer("irregular"))
+
+        assertFalse(VisionTextReclassifier.isBalloonContainer("text"))
+        assertFalse(VisionTextReclassifier.isBalloonContainer("watermark"))
+        assertFalse(VisionTextReclassifier.isBalloonContainer("sfx"))
+        assertFalse(VisionTextReclassifier.isBalloonContainer("non_text"))
+        assertFalse(VisionTextReclassifier.isBalloonContainer("none"))
+    }
+
+    @Test
+    fun testFindEnclosingContainer() {
+        val textBox = com.wip.common.models.DetectionBox("text", 0.95, ymin = 0.3, xmin = 0.3, ymax = 0.4, xmax = 0.5)
+        val jaggedContainer = com.wip.common.models.SegmentedObject(
+            label = "jagged",
+            confidence = 0.95,
+            box = com.wip.common.models.DetectionBox("jagged", 0.95, ymin = 0.2, xmin = 0.2, ymax = 0.6, xmax = 0.7)
+        )
+        val distantContainer = com.wip.common.models.SegmentedObject(
+            label = "circular",
+            confidence = 0.90,
+            box = com.wip.common.models.DetectionBox("circular", 0.90, ymin = 0.8, xmin = 0.8, ymax = 0.95, xmax = 0.95)
+        )
+
+        val enclosing = VisionTextReclassifier.findEnclosingContainer(textBox, listOf(distantContainer, jaggedContainer))
+        assertNotNull(enclosing)
+        assertEquals("jagged", enclosing.label)
+
+        val none = VisionTextReclassifier.findEnclosingContainer(textBox, listOf(distantContainer))
+        assertNull(none)
     }
 }

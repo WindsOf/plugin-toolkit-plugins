@@ -70,4 +70,50 @@ class PolygonTextBoundaryTest {
         val topWidth = boundary.getAvailableWidth(-90f, bounds)
         assertEquals(20f, topWidth, 1.0f)
     }
+
+    @Test
+    fun testAsymmetricPolygonWidthConstraint() {
+        // Asymmetric polygon from x=100 to x=500, but visualCenter is at x=200
+        val asymmetric = listOf(
+            Point2D.Double(100.0, 100.0),
+            Point2D.Double(500.0, 100.0),
+            Point2D.Double(500.0, 300.0),
+            Point2D.Double(100.0, 300.0)
+        )
+
+        val visualCenter = Point2D.Double(200.0, 200.0)
+        val boundary = PolygonTextBoundary(
+            polygon = asymmetric,
+            padding = 0f,
+            visualCenter = visualCenter
+        )
+
+        val bounds = PsdBounds(left = 100f, top = 100f, right = 500f, bottom = 300f)
+
+        // At center (y=0, scanline at y=200), span is 400, but distance to left is 100, to right is 300.
+        // Symmetric available width centered on x=200 is 2 * min(100, 300) = 200.
+        val availableWidth = boundary.getAvailableWidth(0f, bounds)
+        assertEquals(200f, availableWidth, 0.5f)
+    }
+
+    @Test
+    fun testAutoCentroidComputation() {
+        // Triangle from (0, 0), (90, 0), (0, 90)
+        val triangle = listOf(
+            Point2D.Double(0.0, 0.0),
+            Point2D.Double(90.0, 0.0),
+            Point2D.Double(0.0, 90.0)
+        )
+
+        val boundary = PolygonTextBoundary(
+            polygon = triangle,
+            padding = 0f
+            // visualCenter is null, should be auto-computed to centroid (30, 30)
+        )
+
+        val vc = boundary.visualCenter
+        kotlin.test.assertNotNull(vc)
+        assertEquals(30.0, vc.x, 1.0)
+        assertEquals(30.0, vc.y, 1.0)
+    }
 }

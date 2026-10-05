@@ -150,4 +150,81 @@ class VisionOcrMatcherTest {
         assertEquals(700f, bounds.right, 1f)
         assertEquals(700f, bounds.bottom, 1f)
     }
+
+    @Test
+    fun testIsBalloonContainer() {
+        assertTrue(VisionOcrMatcher.isBalloonContainer("balloon"))
+        assertTrue(VisionOcrMatcher.isBalloonContainer("bubble"))
+        assertTrue(VisionOcrMatcher.isBalloonContainer("speech_balloon"))
+        assertTrue(VisionOcrMatcher.isBalloonContainer("speech balloon"))
+        assertTrue(VisionOcrMatcher.isBalloonContainer("circular"))
+        assertTrue(VisionOcrMatcher.isBalloonContainer("circular (98%)"))
+        assertTrue(VisionOcrMatcher.isBalloonContainer("irregular"))
+        assertTrue(VisionOcrMatcher.isBalloonContainer("rectangular"))
+        assertTrue(VisionOcrMatcher.isBalloonContainer("jagged"))
+        assertTrue(VisionOcrMatcher.isBalloonContainer("spiky"))
+
+        assertFalse(VisionOcrMatcher.isBalloonContainer("text"))
+        assertFalse(VisionOcrMatcher.isBalloonContainer("speech"))
+        assertFalse(VisionOcrMatcher.isBalloonContainer("sfx"))
+        assertFalse(VisionOcrMatcher.isBalloonContainer("watermark"))
+        assertFalse(VisionOcrMatcher.isBalloonContainer("non_text"))
+        assertFalse(VisionOcrMatcher.isBalloonContainer("none"))
+    }
+
+    @Test
+    fun testMatchPrefersBalloonOverTextElement() {
+        val width = 1000.0
+        val height = 1000.0
+
+        // Large speech bubble (circular)
+        val circularBalloon = SegmentedObject(
+            label = "circular",
+            confidence = 0.98,
+            box = DetectionBox(ymin = 0.10, xmin = 0.10, ymax = 0.70, xmax = 0.70),
+            polygon = listOf(
+                PolygonPoint(0.10, 0.40),
+                PolygonPoint(0.40, 0.10),
+                PolygonPoint(0.70, 0.40),
+                PolygonPoint(0.40, 0.70)
+            ),
+            shape = "oval",
+            area = 360000.0
+        )
+
+        // Tight text polygon (reclassified as "speech")
+        val textElement = SegmentedObject(
+            label = "speech",
+            confidence = 0.95,
+            box = DetectionBox(ymin = 0.35, xmin = 0.30, ymax = 0.45, xmax = 0.50),
+            polygon = listOf(
+                PolygonPoint(0.30, 0.35),
+                PolygonPoint(0.50, 0.35),
+                PolygonPoint(0.50, 0.45),
+                PolygonPoint(0.30, 0.45)
+            ),
+            shape = "rectangular",
+            area = 20000.0
+        )
+
+        val texts = listOf("...BY STICKING")
+        val ocrBoxes = listOf(listOf(0.35, 0.30, 0.45, 0.50))
+
+        val matches = VisionOcrMatcher.match(
+            texts = texts,
+            ocrBoxes = ocrBoxes,
+            visionObjects = listOf(textElement, circularBalloon),
+            imageWidth = width,
+            imageHeight = height
+        )
+
+        assertEquals(1, matches.size)
+        val matched = matches[0].matchedBalloon
+        assertNotNull(matched, "Should match the circular speech balloon")
+        assertEquals("circular", matched.label, "Must match the balloon container, NOT the text element")
+        val bounds = matches[0].polygonBounds
+        assertNotNull(bounds)
+        assertEquals(100f, bounds.left, 1f, "Bounding box must be the whole balloon, not the tight text")
+        assertEquals(700f, bounds.right, 1f)
+    }
 }

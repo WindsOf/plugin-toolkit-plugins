@@ -200,7 +200,8 @@ class KoogOcrService(
         saveThinking: Boolean,
         aiModel: AIModel,
         chapterVisionResult: ChapterVisionResult? = null,
-        cropPadding: Int = 100
+        cropPadding: Int = 100,
+        classifyText: Boolean = false
     ): OcrServiceResult {
         if (aiModel in setOf(
                 AIModel.UNLIMITED_OCR_BF16,
@@ -218,16 +219,17 @@ class KoogOcrService(
                 saveThinking,
                 targetModelId = aiModel.id,
                 chapterVisionResult = chapterVisionResult,
-                cropPadding = cropPadding
+                cropPadding = cropPadding,
+                classifyText = classifyText
             )
-            return OcrServiceResult(res.texts, res.bb, res.pageNumbers, res.pageNames, res.failedFiles)
+            return OcrServiceResult(res.texts, res.bb, res.pageNumbers, res.pageNames, res.failedFiles, res.categories)
         }
 
         val files = resolveFiles(input)
         if (files.isEmpty()) {
             return OcrServiceResult(emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
         }
-        logger.info("Found ${files.size} image(s) to process (hasVisionResult=${chapterVisionResult != null}, cropPadding=$cropPadding).")
+        logger.info("Found ${files.size} image(s) to process (hasVisionResult=${chapterVisionResult != null}, cropPadding=$cropPadding, classifyText=$classifyText).")
 
         val executor = try {
             getExecutor(aiModel)
@@ -253,28 +255,31 @@ class KoogOcrService(
             contextLength = 100000,
         )
 
+        val classificationRules = if (classifyText) "${OcrClassificationInstructions.KOOG_CLASSIFICATION_RULES}\n" else ""
+        val categoryPromptItem = if (classifyText) " 3. The classification 'category' ('speech', 'sfx', or 'none').\n" else ""
+
         val promptInstructions =
             "Analyze this comic page/panel. Locate ALL areas containing text (speech bubbles, narration, captions, and sound effects / SFX).\n" +
-            "Classify each text area into 'category': 'speech' (dialogue or narration in bubbles/boxes), 'sfx' (sound effects, onomatopoeia), or 'none'.\n" +
+            classificationRules +
             "For each text area provide:\n" +
             " 1. The bounding box of the TEXT ITSELF (the tightest box around the transcribed words).\n" +
             " Express coordinates as FRACTIONS of the image dimensions, between 0.0 and 1.0:\n" +
             " xmin = left edge / image_width, ymin = top edge / image_height,\n" +
             " xmax = right edge / image_width, ymax = bottom edge / image_height.\n" +
             " 2. The exact text transcribed from that area.\n" +
-            " 3. The classification 'category' ('speech', 'sfx', or 'none')."
+            categoryPromptItem
 
         val cropPromptInstructions =
             "This is a cropped close-up region of a comic page centered around a text or speech balloon.\n" +
             "Locate and transcribe the primary text inside this region. If other adjacent text is partially visible at the edges, focus on the primary/centered text.\n" +
-            "Classify each text area into 'category': 'speech' (dialogue or narration in bubbles/boxes), 'sfx' (sound effects, onomatopoeia), or 'none'.\n" +
+            classificationRules +
             "For each text area provide:\n" +
             " 1. The bounding box of the TEXT ITSELF relative to this cropped image.\n" +
             " Express coordinates as FRACTIONS of the cropped image dimensions, between 0.0 and 1.0:\n" +
             " xmin = left edge / crop_width, ymin = top edge / crop_height,\n" +
             " xmax = right edge / crop_width, ymax = bottom edge / crop_height.\n" +
             " 2. The exact text transcribed from that area.\n" +
-            " 3. The classification 'category' ('speech', 'sfx', or 'none')."
+            categoryPromptItem
 
         val balloonSchema = buildJsonObject {
             put("type", "object")
@@ -416,7 +421,7 @@ class KoogOcrService(
                                                     allBoxes.add(globalBox)
                                                     allPageNumbers.add(index + 1)
                                                     allPageNames.add(file.name)
-                                                    val cat = if (balloon.category.isNotBlank() && balloon.category != "none") balloon.category else "speech"
+                                                    val cat = if (classifyText && balloon.category.isNotBlank() && balloon.category != "none") balloon.category else crop.category
                                                     allCategories.add(cat)
                                                 }
                                             }
@@ -509,7 +514,8 @@ class KoogOcrService(
         saveThinking: Boolean,
         aiModel: AIModel,
         chapterVisionResult: ChapterVisionResult? = null,
-        cropPadding: Int = 100
+        cropPadding: Int = 100,
+        classifyText: Boolean = false
     ): AdvancedOcrServiceResult {
         if (aiModel in setOf(
                 AIModel.UNLIMITED_OCR_BF16,
@@ -527,7 +533,8 @@ class KoogOcrService(
                 saveThinking,
                 targetModelId = aiModel.id,
                 chapterVisionResult = chapterVisionResult,
-                cropPadding = cropPadding
+                cropPadding = cropPadding,
+                classifyText = classifyText
             )
             return AdvancedOcrServiceResult(
                 texts = res.texts,
@@ -577,7 +584,7 @@ class KoogOcrService(
                 logger = logger
             )
         } else aiModel.id
-        logger.info("Found ${files.size} image(s). Advanced OCR with model: $modelId (isGemma: $isGemma, hasVisionResult=${chapterVisionResult != null}, cropPadding=$cropPadding)")
+        logger.info("Found ${files.size} image(s). Advanced OCR with model: $modelId (isGemma: $isGemma, hasVisionResult=${chapterVisionResult != null}, cropPadding=$cropPadding, classifyText=$classifyText)")
 
         val executor = try {
             getExecutor(aiModel)
@@ -599,9 +606,12 @@ class KoogOcrService(
             "Express coordinates as FRACTIONS of the image dimensions, between 0.0 and 1.0."
         }
 
+        val classificationRules = if (classifyText) "${OcrClassificationInstructions.KOOG_CLASSIFICATION_RULES}\n" else ""
+        val categoryPromptItem = if (classifyText) " 12. The classification 'category' ('speech', 'sfx', or 'none').\n" else ""
+
         val promptInstructions =
             "Analyze this comic page/panel. Locate ALL areas containing text (dialogue in speech bubbles, narrations, captions, and sound effects / SFX).\n" +
-            "Classify each text element into 'category': 'speech' (dialogue or narration in bubbles/boxes), 'sfx' (sound effects / onomatopoeia), or 'none'.\n" +
+            classificationRules +
             "For each text area provide:\n" +
             " 1. The bounding box of the SPEECH BUBBLE / BALLOON enclosing the text (exclude the tail).\n" +
             " 2. The bounding box of the TEXT ITSELF (the tightest box around the transcribed words).\n" +
@@ -616,12 +626,12 @@ class KoogOcrService(
             " 9. 'hasBorder': Boolean, true if the text has an outline or stroke.\n" +
             " 10. 'borderColor': The color of the border/stroke if present, or an empty string if none.\n" +
             " 11. The exact 'text' transcribed from that area.\n" +
-            " 12. The classification 'category' ('speech', 'sfx', or 'none')."
+            categoryPromptItem
 
         val cropPromptInstructions =
             "This is a cropped close-up region of a comic page centered around a text or speech balloon.\n" +
             "Locate and transcribe the primary text inside this region. If other adjacent text is partially visible at the edges, focus on the primary/centered text.\n" +
-            "Classify each text element into 'category': 'speech' (dialogue or narration in bubbles/boxes), 'sfx' (sound effects / onomatopoeia), or 'none'.\n" +
+            classificationRules +
             "For each text area provide:\n" +
             " 1. The bounding box of the SPEECH BUBBLE / BALLOON enclosing the text relative to this cropped image.\n" +
             " 2. The bounding box of the TEXT ITSELF relative to this cropped image.\n" +
@@ -636,7 +646,7 @@ class KoogOcrService(
             " 9. 'hasBorder': Boolean, true if the text has an outline or stroke.\n" +
             " 10. 'borderColor': The color of the border/stroke if present, or an empty string if none.\n" +
             " 11. The exact 'text' transcribed from that area.\n" +
-            " 12. The classification 'category' ('speech', 'sfx', or 'none')."
+            categoryPromptItem
 
         val balloonSchema = buildJsonObject {
             put("type", "object")
@@ -823,7 +833,7 @@ class KoogOcrService(
                                                     allBorderColors.add(balloon.borderColor)
                                                     allPageNumbers.add(index + 1)
                                                     allPageNames.add(file.name)
-                                                    val cat = if (balloon.category.isNotBlank() && balloon.category != "none") balloon.category else "speech"
+                                                    val cat = if (classifyText && balloon.category.isNotBlank() && balloon.category != "none") balloon.category else crop.category
                                                     allCategories.add(cat)
                                                 }
                                             }
@@ -897,7 +907,7 @@ class KoogOcrService(
                                             allBorderColors.add(balloon.borderColor)
                                             allPageNumbers.add(index + 1)
                                             allPageNames.add(file.name)
-                                            val cat = if (balloon.category.isNotBlank() && balloon.category != "none") balloon.category else "speech"
+                                            val cat = if (classifyText && balloon.category.isNotBlank() && balloon.category != "none") balloon.category else "speech"
                                             allCategories.add(cat)
                                         }
                                     }

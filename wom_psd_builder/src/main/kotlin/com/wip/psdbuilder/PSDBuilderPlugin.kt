@@ -10,11 +10,15 @@ import com.wip.common.models.OcrCategory
 import com.wip.common.models.OcrTextFilter
 import com.wip.common.models.VisionResult
 import com.wip.common.models.sortedNaturally
+import com.wip.kpsd.EllipseBoundary
 import com.wip.kpsd.Justification
 import com.wip.kpsd.KPsd
 import com.wip.kpsd.Layer
 import com.wip.kpsd.PixelData
 import com.wip.kpsd.Psd
+import com.wip.kpsd.PsdBounds
+import com.wip.kpsd.RectangleBoundary
+import com.wip.kpsd.TextBoundary
 import com.wip.kpsd.TextShapeType
 import com.wip.kpsd.Units
 import com.wip.kpsd.psd
@@ -43,6 +47,8 @@ import org.wip.plugintoolkit.api.annotations.PluginSetting
 import org.wip.plugintoolkit.api.annotations.PluginSetup
 import org.wip.plugintoolkit.api.annotations.PluginUpdate
 import org.wip.plugintoolkit.api.annotations.PluginValidate
+import java.awt.RenderingHints
+import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
 import javax.imageio.spi.IIORegistry
@@ -152,7 +158,7 @@ data class PSDBuilderSettings(
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "WOM PSD Builder",
-    version = "5.4.1",
+    version = "5.5.3",
     description = "A plugin that builds layered PSD files natively in Kotlin.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
@@ -254,9 +260,17 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         @CapabilityParam(description = "Optional Vision segmentation result for polygon-based balloon text centering") visionResult: VisionResult? = null,
         @CapabilityParam(
             description = "Default visible element classes in PSD translation group",
-            defaultValue = "[\"speech\", \"sfx\", \"none\"]"
+            defaultValue = "[\"speech\", \"sfx\", \"text\", \"balloon\", \"watermark\", \"non_text\", \"none\"]"
         )
-        default_visible_classes: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.none),
+        default_visible_classes: List<OcrCategory> = listOf(
+            OcrCategory.speech,
+            OcrCategory.sfx,
+            OcrCategory.text,
+            OcrCategory.balloon,
+            OcrCategory.watermark,
+            OcrCategory.non_text,
+            OcrCategory.none
+        ),
         @CapabilityParam(description = "Element classifications (speech, sfx, non_text, none)") categories: List<String>? = null,
         @CapabilityParam(description = "Optional list of cleaned crop patch image paths") cleanPatches: List<String>? = null,
         context: PluginContext,
@@ -353,9 +367,17 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         @CapabilityParam(description = "Optional Vision segmentation result for polygon-based balloon text centering") visionResult: VisionResult? = null,
         @CapabilityParam(
             description = "Default visible element classes in PSD translation group",
-            defaultValue = "[\"speech\", \"sfx\", \"none\"]"
+            defaultValue = "[\"speech\", \"sfx\", \"text\", \"balloon\", \"watermark\", \"non_text\", \"none\"]"
         )
-        default_visible_classes: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.none),
+        default_visible_classes: List<OcrCategory> = listOf(
+            OcrCategory.speech,
+            OcrCategory.sfx,
+            OcrCategory.text,
+            OcrCategory.balloon,
+            OcrCategory.watermark,
+            OcrCategory.non_text,
+            OcrCategory.none
+        ),
         @CapabilityParam(description = "Optional list of cleaned crop patch image paths") cleanPatches: List<String>? = null,
         context: PluginContext,
         hostFs: HostFileSystem
@@ -425,9 +447,17 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         @CapabilityParam(description = "Optional Vision segmentation result for polygon-based balloon text centering") visionResult: VisionResult? = null,
         @CapabilityParam(
             description = "Default visible element classes in PSD translation group",
-            defaultValue = "[\"speech\", \"sfx\", \"none\"]"
+            defaultValue = "[\"speech\", \"sfx\", \"text\", \"balloon\", \"watermark\", \"non_text\", \"none\"]"
         )
-        default_visible_classes: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.none),
+        default_visible_classes: List<OcrCategory> = listOf(
+            OcrCategory.speech,
+            OcrCategory.sfx,
+            OcrCategory.text,
+            OcrCategory.balloon,
+            OcrCategory.watermark,
+            OcrCategory.non_text,
+            OcrCategory.none
+        ),
         @CapabilityParam(description = "Optional list of cleaned crop patch image paths") cleanPatches: List<String>? = null,
         context: PluginContext,
         hostFs: HostFileSystem
@@ -515,9 +545,17 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         @CapabilityParam(description = "Optional Chapter Vision segmentation result for polygon-based balloon text centering") chapterVisionResult: ChapterVisionResult? = null,
         @CapabilityParam(
             description = "Default visible element classes in PSD translation group",
-            defaultValue = "[\"speech\", \"sfx\", \"none\"]"
+            defaultValue = "[\"speech\", \"sfx\", \"text\", \"balloon\", \"watermark\", \"non_text\", \"none\"]"
         )
-        default_visible_classes: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.none),
+        default_visible_classes: List<OcrCategory> = listOf(
+            OcrCategory.speech,
+            OcrCategory.sfx,
+            OcrCategory.text,
+            OcrCategory.balloon,
+            OcrCategory.watermark,
+            OcrCategory.non_text,
+            OcrCategory.none
+        ),
         @CapabilityParam(description = "Element classifications") categories: List<String>? = null,
         @CapabilityParam(description = "Optional list of cleaned crop patch image paths across pages") cleanPatches: List<String>? = null,
         context: PluginContext,
@@ -658,23 +696,23 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                         val pageCategories = mutableListOf<String>()
 
                         var currentYOffset = 0
-                        var mergedBmp: java.awt.image.BufferedImage? = null
+                        var mergedBmp: BufferedImage? = null
                         var g2d: java.awt.Graphics2D? = null
-                        var mergedCleanBmp: java.awt.image.BufferedImage? = null
+                        var mergedCleanBmp: BufferedImage? = null
                         var g2dClean: java.awt.Graphics2D? = null
 
                         if (desiredHeight != null && desiredHeight > 0 && group.files.size > 1) {
-                            mergedBmp = java.awt.image.BufferedImage(
+                            mergedBmp = BufferedImage(
                                 group.maxWidth,
                                 group.mergedHeight,
-                                java.awt.image.BufferedImage.TYPE_INT_ARGB
+                                BufferedImage.TYPE_INT_ARGB
                             )
                             g2d = mergedBmp.createGraphics()
                             if (hasCleanInput) {
-                                mergedCleanBmp = java.awt.image.BufferedImage(
+                                mergedCleanBmp = BufferedImage(
                                     group.maxWidth,
                                     group.mergedHeight,
-                                    java.awt.image.BufferedImage.TYPE_INT_ARGB
+                                    BufferedImage.TYPE_INT_ARGB
                                 )
                                 g2dClean = mergedCleanBmp.createGraphics()
                             }
@@ -790,7 +828,16 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                                     r.pageName.equals(group.files.first().name, ignoreCase = true)
                         }
 
-                        val allPatches = (cleanPatches ?: cleanChapterResult?.clean ?: emptyList()).map { File(it) }
+                        val allPatches = (cleanPatches ?: cleanChapterResult?.clean ?: emptyList()).map { File(it) }.let { list ->
+                            if (list.isEmpty() && cleanDir != null) {
+                                cleanDir.walkTopDown().filter { f ->
+                                    f.isFile && f.extension.lowercase() == "png" &&
+                                            (f.name.contains("_patch_") || f.parentFile?.name?.endsWith("_patches") == true)
+                                }.toList()
+                            } else {
+                                list
+                            }
+                        }
                         val isOnlyGroupInChapter = imageGroups.size == 1
                         val pagePatches = allPatches.filter { f ->
                             patchMatchesGroup(f, group.files, isOnlyGroupInChapter)
@@ -884,9 +931,17 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         @CapabilityParam(description = "Optional Chapter Vision segmentation result for polygon-based balloon text centering") chapterVisionResult: ChapterVisionResult? = null,
         @CapabilityParam(
             description = "Default visible element classes in PSD translation group",
-            defaultValue = "[\"speech\", \"sfx\", \"none\"]"
+            defaultValue = "[\"speech\", \"sfx\", \"text\", \"balloon\", \"watermark\", \"non_text\", \"none\"]"
         )
-        default_visible_classes: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.none),
+        default_visible_classes: List<OcrCategory> = listOf(
+            OcrCategory.speech,
+            OcrCategory.sfx,
+            OcrCategory.text,
+            OcrCategory.balloon,
+            OcrCategory.watermark,
+            OcrCategory.non_text,
+            OcrCategory.none
+        ),
         @CapabilityParam(description = "Optional list of cleaned crop patch image paths across pages") cleanPatches: List<String>? = null,
         context: PluginContext,
         hostFs: HostFileSystem
@@ -961,9 +1016,17 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         @CapabilityParam(description = "Optional Chapter Vision segmentation result for polygon-based balloon text centering") chapterVisionResult: ChapterVisionResult? = null,
         @CapabilityParam(
             description = "Default visible element classes in PSD translation group",
-            defaultValue = "[\"speech\", \"sfx\", \"none\"]"
+            defaultValue = "[\"speech\", \"sfx\", \"text\", \"balloon\", \"watermark\", \"non_text\", \"none\"]"
         )
-        default_visible_classes: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.none),
+        default_visible_classes: List<OcrCategory> = listOf(
+            OcrCategory.speech,
+            OcrCategory.sfx,
+            OcrCategory.text,
+            OcrCategory.balloon,
+            OcrCategory.watermark,
+            OcrCategory.non_text,
+            OcrCategory.none
+        ),
         @CapabilityParam(description = "Optional list of cleaned crop patch image paths across pages") cleanPatches: List<String>? = null,
         context: PluginContext,
         hostFs: HostFileSystem
@@ -999,16 +1062,17 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         val parentName = patchFile.parentFile?.name ?: ""
         val patchBaseName = patchFile.nameWithoutExtension
 
+        // A file is ONLY a patch if it's an actual patch file (contains "_patch_" or parent is a patches directory)
+        val isPatchFile = patchBaseName.contains("_patch_") || parentName.endsWith("_patches", ignoreCase = true)
+        if (!isPatchFile) {
+            return false
+        }
+
         for (file in groupFiles) {
             val pageBaseName = file.nameWithoutExtension
             // Exact folder match: e.g. "page_01_patches" or "page_01"
             if (parentName.equals("${pageBaseName}_patches", ignoreCase = true) ||
                 parentName.equals(pageBaseName, ignoreCase = true)) {
-                return true
-            }
-            // Exact filename match: e.g. "page_01_patches.png" or "page_01.png"
-            if (patchBaseName.equals("${pageBaseName}_patches", ignoreCase = true) ||
-                patchBaseName.equals(pageBaseName, ignoreCase = true)) {
                 return true
             }
             // Prefix / boundary match: e.g. "page_01_patch_1.png", "page_01_patch.png"
@@ -1155,19 +1219,19 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         return PSDBuildResult(outputPsdPath)
     }
 
-    private fun ensureFastImage(image: java.awt.image.BufferedImage): java.awt.image.BufferedImage {
-        if (image.type == java.awt.image.BufferedImage.TYPE_INT_RGB || image.type == java.awt.image.BufferedImage.TYPE_INT_ARGB) {
+    private fun ensureFastImage(image: BufferedImage): BufferedImage {
+        if (image.type == BufferedImage.TYPE_INT_RGB || image.type == BufferedImage.TYPE_INT_ARGB) {
             return image
         }
         val newImage =
-            java.awt.image.BufferedImage(image.width, image.height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+            BufferedImage(image.width, image.height, BufferedImage.TYPE_INT_ARGB)
         val g = newImage.createGraphics()
         g.drawImage(image, 0, 0, null)
         g.dispose()
         return newImage
     }
 
-    private fun bufferedImageToPixelData(image: java.awt.image.BufferedImage): PixelData {
+    private fun bufferedImageToPixelData(image: BufferedImage): PixelData {
         val width = image.width
         val height = image.height
         val totalPixels = width * height
@@ -1175,9 +1239,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
         val raster = image.raster
         val dataBuffer = raster.dataBuffer
-        if (dataBuffer is java.awt.image.DataBufferInt && (image.type == java.awt.image.BufferedImage.TYPE_INT_ARGB || image.type == java.awt.image.BufferedImage.TYPE_INT_RGB)) {
+        if (dataBuffer is java.awt.image.DataBufferInt && (image.type == BufferedImage.TYPE_INT_ARGB || image.type == BufferedImage.TYPE_INT_RGB)) {
             val intData = dataBuffer.data
-            val isRgb = image.type == java.awt.image.BufferedImage.TYPE_INT_RGB
+            val isRgb = image.type == BufferedImage.TYPE_INT_RGB
             for (i in 0 until totalPixels) {
                 val argb = intData[i]
                 val a = if (isRgb) 255 else ((argb shr 24) and 0xff)
@@ -1224,8 +1288,8 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             val sH = maxOf(1, sYmax - sYmin)
 
             val color = when {
-                label.contains("balloon") -> java.awt.Color(0, 200, 255)
-                label == "text" -> java.awt.Color(50, 255, 50)
+                VisionOcrMatcher.isBalloonContainer(label) -> java.awt.Color(0, 200, 255)
+                label == "text" || label == "speech" || label == "sfx" -> java.awt.Color(50, 255, 50)
                 label == "watermark" -> java.awt.Color(255, 0, 255)
                 else -> java.awt.Color.YELLOW
             }
@@ -1305,6 +1369,113 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         }
     }
 
+    data class EffectiveTextLayout(
+        val boundaryShape: com.wip.kpsd.TextBoundary,
+        val top: Int,
+        val left: Int,
+        val bottom: Int,
+        val right: Int,
+        val boxWidth: Int,
+        val boxHeight: Int,
+        val tx: Double,
+        val ty: Double
+    )
+
+    private fun resolveTextLayout(
+        index: Int,
+        box: BoxData,
+        matched: MatchedBalloonText?,
+        customBoundaries: List<com.wip.kpsd.TextBoundary>?,
+        effShapes: List<String?>,
+        paddingPercentage: Float,
+        rot: Double = 0.0
+    ): EffectiveTextLayout {
+        val rawLeft = box.ibx0.toInt()
+        val rawTop = box.iby0.toInt()
+        val rawRight = box.ibx1.toInt()
+        val rawBottom = box.iby1.toInt()
+        val rawWidth = maxOf(1, rawRight - rawLeft)
+        val rawHeight = maxOf(1, rawBottom - rawTop)
+
+        val theta = Math.toRadians(rot)
+        val cos = kotlin.math.cos(theta)
+        val sin = kotlin.math.sin(theta)
+
+        var boundaryShape = customBoundaries?.getOrNull(index)
+        if (boundaryShape == null && matched?.polygonPixels != null) {
+            val bPadding = minOf(rawWidth, rawHeight) * paddingPercentage
+            boundaryShape = PolygonTextBoundary(
+                polygon = matched.polygonPixels,
+                padding = bPadding,
+                visualCenter = matched.visualCenter
+            )
+        }
+        if (boundaryShape == null) {
+            val shape = effShapes.getOrNull(index) ?: "oval"
+            val bPadding = minOf(rawWidth, rawHeight) * paddingPercentage
+            boundaryShape = if (shape.equals("rectangular", ignoreCase = true)) {
+                RectangleBoundary(padding = bPadding)
+            } else {
+                EllipseBoundary(padding = bPadding)
+            }
+        }
+
+        return if (boundaryShape is PolygonTextBoundary && boundaryShape.polygon.size >= 3) {
+            val poly = boundaryShape.polygon
+            val vCenter = boundaryShape.visualCenter ?: java.awt.geom.Point2D.Double(box.cx, box.cy)
+            val vcx = vCenter.x
+            val vcy = vCenter.y
+
+            val pMinX = poly.minOf { it.x }
+            val pMaxX = poly.maxOf { it.x }
+            val pMinY = poly.minOf { it.y }
+            val pMaxY = poly.maxOf { it.y }
+
+            val distLeft = maxOf(1.0, vcx - pMinX)
+            val distRight = maxOf(1.0, pMaxX - vcx)
+            val distTop = maxOf(1.0, vcy - pMinY)
+            val distBottom = maxOf(1.0, pMaxY - vcy)
+
+            val halfW = minOf(distLeft, distRight)
+            val halfH = minOf(distTop, distBottom)
+
+            val effBoxWidth = maxOf(1, (halfW * 2.0).toInt())
+            val effBoxHeight = maxOf(1, (halfH * 2.0).toInt())
+
+            val effLeft = (vcx - halfW).toInt()
+            val effTop = (vcy - halfH).toInt()
+            val effRight = effLeft + effBoxWidth
+            val effBottom = effTop + effBoxHeight
+
+            val tx = vcx - (cos * (effBoxWidth / 2.0) - sin * (effBoxHeight / 2.0))
+            val ty = vcy - (sin * (effBoxWidth / 2.0) + cos * (effBoxHeight / 2.0))
+
+            EffectiveTextLayout(
+                boundaryShape = boundaryShape,
+                top = effTop,
+                left = effLeft,
+                bottom = effBottom,
+                right = effRight,
+                boxWidth = effBoxWidth,
+                boxHeight = effBoxHeight,
+                tx = tx,
+                ty = ty
+            )
+        } else {
+            EffectiveTextLayout(
+                boundaryShape = boundaryShape,
+                top = rawTop,
+                left = rawLeft,
+                bottom = rawBottom,
+                right = rawRight,
+                boxWidth = rawWidth,
+                boxHeight = rawHeight,
+                tx = rawLeft.toDouble(),
+                ty = rawTop.toDouble()
+            )
+        }
+    }
+
     private fun drawBoundaryDebug(
         g2dBoundary: java.awt.Graphics2D,
         effTexts: List<String>,
@@ -1317,31 +1488,16 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         for ((index, _) in effTexts.withIndex()) {
             val box = boxDataList[index]
             val matched = matchedResults?.getOrNull(index)
-
-            val ibTop = box.iby0.toInt()
-            val ibLeft = box.ibx0.toInt()
-            val ibBottom = box.iby1.toInt()
-            val ibRight = box.ibx1.toInt()
-            val boxWidth = maxOf(1, ibRight - ibLeft)
-            val boxHeight = maxOf(1, ibBottom - ibTop)
-
-            val bPadding = minOf(boxWidth, boxHeight) * paddingPercentage
-            var boundaryShape = customBoundaries?.getOrNull(index)
-            if (boundaryShape == null && matched?.polygonPixels != null) {
-                boundaryShape = PolygonTextBoundary(
-                    polygon = matched.polygonPixels,
-                    padding = bPadding,
-                    visualCenter = matched.visualCenter
-                )
-            }
-            if (boundaryShape == null) {
-                val shape = effShapes.getOrNull(index) ?: "oval"
-                boundaryShape = if (shape.equals("rectangular", ignoreCase = true)) {
-                    com.wip.kpsd.RectangleBoundary(padding = bPadding)
-                } else {
-                    com.wip.kpsd.EllipseBoundary(padding = bPadding)
-                }
-            }
+            val layout = resolveTextLayout(
+                index = index,
+                box = box,
+                matched = matched,
+                customBoundaries = customBoundaries,
+                effShapes = effShapes,
+                paddingPercentage = paddingPercentage
+            )
+            val boundaryShape = layout.boundaryShape
+            val bPadding = minOf(layout.boxWidth, layout.boxHeight) * paddingPercentage
 
             when (boundaryShape) {
                 is PolygonTextBoundary -> {
@@ -1369,26 +1525,26 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                             floatArrayOf(4f, 4f),
                             0f
                         )
-                        g2dBoundary.drawRect(ibLeft, ibTop, boxWidth, boxHeight)
+                        g2dBoundary.drawRect(layout.left, layout.top, layout.boxWidth, layout.boxHeight)
 
                         g2dBoundary.color = java.awt.Color(255, 0, 255)
                         g2dBoundary.drawString(
                             "Boundary #${index + 1}: Polygon (${poly.size} pts, pad=${bPadding.toInt()}px)",
-                            ibLeft + 4,
-                            maxOf(12, ibTop - 4)
+                            layout.left + 4,
+                            maxOf(12, layout.top - 4)
                         )
                     }
                 }
 
-                is com.wip.kpsd.EllipseBoundary -> {
+                is EllipseBoundary -> {
                     val pad = bPadding.toInt()
                     g2dBoundary.color = java.awt.Color(0, 229, 255)
                     g2dBoundary.stroke = java.awt.BasicStroke(2.5f)
                     g2dBoundary.drawOval(
-                        ibLeft + pad,
-                        ibTop + pad,
-                        maxOf(1, boxWidth - 2 * pad),
-                        maxOf(1, boxHeight - 2 * pad)
+                        layout.left + pad,
+                        layout.top + pad,
+                        maxOf(1, layout.boxWidth - 2 * pad),
+                        maxOf(1, layout.boxHeight - 2 * pad)
                     )
 
                     g2dBoundary.color = java.awt.Color(0, 229, 255, 150)
@@ -1400,7 +1556,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                         floatArrayOf(4f, 4f),
                         0f
                     )
-                    g2dBoundary.drawRect(ibLeft, ibTop, boxWidth, boxHeight)
+                    g2dBoundary.drawRect(layout.left, layout.top, layout.boxWidth, layout.boxHeight)
 
                     val cx = box.cx.toInt()
                     val cy = box.cy.toInt()
@@ -1412,20 +1568,20 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                     g2dBoundary.color = java.awt.Color(0, 229, 255)
                     g2dBoundary.drawString(
                         "Boundary #${index + 1}: Ellipse (pad=${bPadding.toInt()}px)",
-                        ibLeft + 4,
-                        maxOf(12, ibTop - 4)
+                        layout.left + 4,
+                        maxOf(12, layout.top - 4)
                     )
                 }
 
-                is com.wip.kpsd.RectangleBoundary -> {
+                is RectangleBoundary -> {
                     val pad = bPadding.toInt()
                     g2dBoundary.color = java.awt.Color(0, 255, 102)
                     g2dBoundary.stroke = java.awt.BasicStroke(2.5f)
                     g2dBoundary.drawRect(
-                        ibLeft + pad,
-                        ibTop + pad,
-                        maxOf(1, boxWidth - 2 * pad),
-                        maxOf(1, boxHeight - 2 * pad)
+                        layout.left + pad,
+                        layout.top + pad,
+                        maxOf(1, layout.boxWidth - 2 * pad),
+                        maxOf(1, layout.boxHeight - 2 * pad)
                     )
 
                     val cx = box.cx.toInt()
@@ -1438,8 +1594,8 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                     g2dBoundary.color = java.awt.Color(0, 255, 102)
                     g2dBoundary.drawString(
                         "Boundary #${index + 1}: Rectangle (pad=${bPadding.toInt()}px)",
-                        ibLeft + 4,
-                        maxOf(12, ibTop - 4)
+                        layout.left + 4,
+                        maxOf(12, layout.top - 4)
                     )
                 }
             }
@@ -1495,9 +1651,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
     suspend fun buildPsdObject(
         imagePath: String? = null,
-        baseImageBmp: java.awt.image.BufferedImage? = null,
+        baseImageBmp: BufferedImage? = null,
         cleanImagePath: String? = null,
-        cleanImageBmp: java.awt.image.BufferedImage? = null,
+        cleanImageBmp: BufferedImage? = null,
         texts: List<String>,
         balloonBoxes: List<List<Double>>,
         textBoxes: List<List<Double>>? = null,
@@ -1513,7 +1669,15 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         customBoundaries: List<com.wip.kpsd.TextBoundary>? = null,
         visionResult: VisionResult? = null,
         categories: List<String>? = null,
-        defaultVisibleClasses: List<OcrCategory> = listOf(OcrCategory.speech, OcrCategory.sfx, OcrCategory.none),
+        defaultVisibleClasses: List<OcrCategory> = listOf(
+            OcrCategory.speech,
+            OcrCategory.sfx,
+            OcrCategory.text,
+            OcrCategory.balloon,
+            OcrCategory.watermark,
+            OcrCategory.non_text,
+            OcrCategory.none
+        ),
         cleanPatches: List<String>? = null
     ): Psd {
         val originalBaseImage = if (baseImageBmp != null) {
@@ -1549,7 +1713,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         val cleanPixelData: PixelData = if (cleanBmp != null) {
             val cleanFast = ensureFastImage(cleanBmp)
             val cleanFastResized = if (cleanFast.width != width || cleanFast.height != height) {
-                val resized = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+                val resized = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
                 val gClean = resized.createGraphics()
                 gClean.drawImage(cleanFast, 0, 0, width, height, null)
                 gClean.dispose()
@@ -1756,11 +1920,11 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
         if (settings.debugMode) {
             // 1. OCR Debug layer
-            val ocrDebugImg = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+            val ocrDebugImg = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
             val g2dOcr = ocrDebugImg.createGraphics()
             g2dOcr.setRenderingHint(
-                java.awt.RenderingHints.KEY_ANTIALIASING,
-                java.awt.RenderingHints.VALUE_ANTIALIAS_ON
+                RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON
             )
             drawOcrDebug(g2dOcr, boxDataList, effShapes)
             g2dOcr.dispose()
@@ -1770,11 +1934,11 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             // 2. Cleaner / Segmentation Debug layer
             if (effectiveVisionResult != null && effectiveVisionResult.objects.isNotEmpty()) {
                 val cleanerDebugImg =
-                    java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+                    BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
                 val g2dCleaner = cleanerDebugImg.createGraphics()
                 g2dCleaner.setRenderingHint(
-                    java.awt.RenderingHints.KEY_ANTIALIASING,
-                    java.awt.RenderingHints.VALUE_ANTIALIAS_ON
+                    RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON
                 )
                 drawCleanerDebug(g2dCleaner, effectiveVisionResult, width, height)
                 g2dCleaner.dispose()
@@ -1784,11 +1948,11 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
             // 3. Boundary Shapes Debug layer
             val boundaryDebugImg =
-                java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+                BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
             val g2dBoundary = boundaryDebugImg.createGraphics()
             g2dBoundary.setRenderingHint(
-                java.awt.RenderingHints.KEY_ANTIALIASING,
-                java.awt.RenderingHints.VALUE_ANTIALIAS_ON
+                RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON
             )
             drawBoundaryDebug(
                 g2dBoundary,
@@ -1804,11 +1968,11 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             boundaryDebugImg.flush()
 
             // 4. Combined preview image written to disk
-            val debugImgFile = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+            val debugImgFile = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
             val g2dFile = debugImgFile.createGraphics()
             g2dFile.setRenderingHint(
-                java.awt.RenderingHints.KEY_ANTIALIASING,
-                java.awt.RenderingHints.VALUE_ANTIALIAS_ON
+                RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON
             )
             g2dFile.drawImage(baseImage, 0, 0, null)
             if (effectiveVisionResult != null && effectiveVisionResult.objects.isNotEmpty()) {
@@ -1861,52 +2025,61 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                         val pData = bufferedImageToPixelData(pImg)
                         val pW = pImg.width
                         val pH = pImg.height
-                        if (pW == width && pH == height) {
-                            preparedCleanPatches.add(
-                                PreparedCleanPatch("clean_patch_${pIdx + 1}", 0, 0, height, width, pData, hidden = false)
-                            )
-                        } else {
-                            val idxMatch = Regex("patch_(\\d+)").find(pFile.nameWithoutExtension)?.groupValues?.get(1)?.toIntOrNull()
-                            val obj = if (idxMatch != null && effectiveVisionResult != null && idxMatch < effectiveVisionResult.objects.size) {
-                                effectiveVisionResult.objects[idxMatch]
-                            } else if (effectiveVisionResult != null) {
-                                effectiveVisionResult.objects.firstOrNull { o ->
-                                    val oW = ((o.box.xmax - o.box.xmin) * width).toInt()
-                                    val oH = ((o.box.ymax - o.box.ymin) * height).toInt()
-                                    kotlin.math.abs(oW - pW) <= 2 && kotlin.math.abs(oH - pH) <= 2
-                                }
-                            } else null
-                            val topPx = if (obj != null) (obj.box.ymin * height).toInt().coerceIn(0, maxOf(0, height - pH)) else 0
-                            val leftPx = if (obj != null) (obj.box.xmin * width).toInt().coerceIn(0, maxOf(0, width - pW)) else 0
-
-                            val objLabel = obj?.label?.trim()?.lowercase() ?: "none"
-                            val matchedOcr = matchedResults?.firstOrNull { it?.matchedBalloon == obj }
-                            val ocrCat = if (matchedOcr != null) {
-                                processedData.categories.getOrNull(matchedOcr.textIndex)?.trim()?.lowercase()
-                            } else null
-
-                            val patchCategory = when {
-                                ocrCat != null && ocrCat in setOf("speech", "sfx", "non_text", "none") -> ocrCat
-                                objLabel == "sfx" -> "sfx"
-                                objLabel in setOf("speech", "balloon", "dialogue") -> "speech"
-                                pFile.nameWithoutExtension.contains("sfx", ignoreCase = true) -> "sfx"
-                                else -> if (allowedClassNames.contains(objLabel)) objLabel else "speech"
+                        val nameMatch = Regex("patch_(\\d+)(?:_([a-zA-Z_]+))?").find(pFile.nameWithoutExtension)
+                        val idxMatch = nameMatch?.groupValues?.get(1)?.toIntOrNull()
+                        val nameLabel = nameMatch?.groups?.get(2)?.value?.lowercase()?.ifBlank { null }
+                        val obj = if (idxMatch != null && effectiveVisionResult != null && idxMatch < effectiveVisionResult.objects.size) {
+                            effectiveVisionResult.objects[idxMatch]
+                        } else if (effectiveVisionResult != null) {
+                            effectiveVisionResult.objects.firstOrNull { o ->
+                                val oW = ((o.box.xmax - o.box.xmin) * width).toInt()
+                                val oH = ((o.box.ymax - o.box.ymin) * height).toInt()
+                                kotlin.math.abs(oW - pW) <= 2 && kotlin.math.abs(oH - pH) <= 2
                             }
+                        } else null
 
-                            val isPatchVisible = allowedClassNames.contains(patchCategory) || allowedClassNames.contains(objLabel)
+                        val topPx = if (pW == width && pH == height) {
+                            0
+                        } else if (obj != null) {
+                            (obj.box.ymin * height).toInt().coerceIn(0, maxOf(0, height - pH))
+                        } else 0
 
-                            preparedCleanPatches.add(
-                                PreparedCleanPatch(
-                                    name = "clean_patch_${pIdx + 1}",
-                                    top = topPx,
-                                    left = leftPx,
-                                    bottom = topPx + pH,
-                                    right = leftPx + pW,
-                                    pixelData = pData,
-                                    hidden = !isPatchVisible
-                                )
-                            )
+                        val leftPx = if (pW == width && pH == height) {
+                            0
+                        } else if (obj != null) {
+                            (obj.box.xmin * width).toInt().coerceIn(0, maxOf(0, width - pW))
+                        } else 0
+
+                        val bottomPx = if (pW == width && pH == height) height else topPx + pH
+                        val rightPx = if (pW == width && pH == height) width else leftPx + pW
+
+                        val objLabel = nameLabel ?: obj?.label?.trim()?.lowercase() ?: "none"
+                        val matchedOcr = matchedResults?.firstOrNull { it.matchedBalloon == obj }
+                        val ocrCat = if (matchedOcr != null) {
+                            processedData.categories.getOrNull(matchedOcr.textIndex)?.trim()?.lowercase()
+                        } else null
+
+                        val patchCategory = when {
+                            ocrCat != null && ocrCat in setOf("speech", "sfx", "text", "balloon", "watermark", "non_text", "none") -> ocrCat
+                            objLabel in setOf("speech", "sfx", "text", "balloon", "watermark", "non_text", "none") -> objLabel
+                            objLabel in setOf("dialogue") -> "speech"
+                            pFile.nameWithoutExtension.contains("sfx", ignoreCase = true) -> "sfx"
+                            else -> if (allowedClassNames.contains(objLabel)) objLabel else "speech"
                         }
+
+                        val isPatchVisible = allowedClassNames.contains(patchCategory) || allowedClassNames.contains(objLabel) || (nameLabel != null && allowedClassNames.contains(nameLabel))
+
+                        preparedCleanPatches.add(
+                            PreparedCleanPatch(
+                                name = "clean_patch_${pIdx + 1}",
+                                top = topPx,
+                                left = leftPx,
+                                bottom = bottomPx,
+                                right = rightPx,
+                                pixelData = pData,
+                                hidden = !isPatchVisible
+                            )
+                        )
                     }
                 }
             }
@@ -1928,6 +2101,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             group(name = "clean") {
                 if (cleanBmp != null || preparedCleanPatches.isEmpty()) {
                     layer(name = "clean_image") {
+                        if (preparedCleanPatches.isNotEmpty()) {
+                            hidden = true
+                        }
                         top = 0
                         left = 0
                         bottom = height
@@ -1992,9 +2168,10 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                     for ((index, text) in effTexts.withIndex()) {
                         if (isHallucinationOrEmpty(text)) continue
                         val itemCategory = processedData.categories.getOrNull(index)?.trim()?.lowercase() ?: "none"
-                        val isClassVisible = allowedClassNames.contains(itemCategory)
-                        val box = boxDataList[index]
                         val matched = matchedResults?.getOrNull(index)
+                        val objLabel = matched?.matchedBalloon?.label?.trim()?.lowercase()
+                        val isClassVisible = allowedClassNames.contains(itemCategory) || (objLabel != null && allowedClassNames.contains(objLabel))
+                        val box = boxDataList[index]
 
                         val ibTop = box.iby0.toInt()
                         val ibLeft = box.ibx0.toInt()
@@ -2032,6 +2209,16 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
 
                         val shape = effShapes.getOrNull(index) ?: "oval"
 
+                        val layout = resolveTextLayout(
+                            index = index,
+                            box = box,
+                            matched = matched,
+                            customBoundaries = customBoundaries,
+                            effShapes = effShapes,
+                            paddingPercentage = settings.paddingPercentage,
+                            rot = rot
+                        )
+
                         // Use first 20 characters of the text as the layer name
                         val textName = if (text.length > 20) text.substring(0, 20) else text.ifEmpty { "Testo $index" }
 
@@ -2039,31 +2226,15 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                             if (!isClassVisible) {
                                 hidden = true
                             }
-                            top = ibTop
-                            left = ibLeft
-                            bottom = ibBottom
-                            right = ibRight
+                            top = layout.top
+                            left = layout.left
+                            bottom = layout.bottom
+                            right = layout.right
                             shapeType = TextShapeType.BOX
-                            boxBounds = floatArrayOf(0f, 0f, boxWidth.toFloat(), boxHeight.toFloat())
-                            transform(cos, sin, -sin, cos, ibLeft.toDouble(), ibTop.toDouble())
+                            boxBounds = floatArrayOf(0f, 0f, layout.boxWidth.toFloat(), layout.boxHeight.toFloat())
+                            transform(cos, sin, -sin, cos, layout.tx, layout.ty)
 
-                            val bPadding = minOf(boxWidth, boxHeight) * settings.paddingPercentage
-                            var boundaryShape = customBoundaries?.getOrNull(index)
-                            if (boundaryShape == null && matched?.polygonPixels != null) {
-                                boundaryShape = PolygonTextBoundary(
-                                    polygon = matched.polygonPixels,
-                                    padding = bPadding,
-                                    visualCenter = matched.visualCenter
-                                )
-                            }
-                            if (boundaryShape == null) {
-                                boundaryShape = if (shape.equals("rectangular", ignoreCase = true)) {
-                                    com.wip.kpsd.RectangleBoundary(padding = bPadding)
-                                } else {
-                                    com.wip.kpsd.EllipseBoundary(padding = bPadding)
-                                }
-                            }
-                            this.boundaryShape = boundaryShape
+                            this.boundaryShape = layout.boundaryShape
 
                             wordBreak = com.wip.kpsd.WordBreak.NONE
                             verticalAlignment = com.wip.kpsd.VerticalAlignment.CENTER

@@ -1,5 +1,92 @@
 [
   {
+    "fromVersion": "1.4.0",
+    "toVersion": "1.5.0",
+    "capabilityMigrations": [
+      {
+        "oldName": "cleanImage",
+        "newName": "cleanImage",
+        "isDropInReplacement": true,
+        "portMigrations": [
+          { "oldName": "isolatedRegionsOnly", "newName": "isolated_regions" },
+          { "oldName": "outputCropPatches", "newName": "save_crop_patches" },
+          { "oldName": "split_regions", "newName": "save_crop_patches" },
+          { "oldName": "saveMask", "newName": "save_mask" },
+          { "oldName": "targetClasses", "newName": "clean_classes" }
+        ]
+      },
+      {
+        "oldName": "cleanChapter",
+        "newName": "cleanChapter",
+        "isDropInReplacement": true,
+        "portMigrations": [
+          { "oldName": "isolatedRegionsOnly", "newName": "isolated_regions" },
+          { "oldName": "outputCropPatches", "newName": "save_crop_patches" },
+          { "oldName": "split_regions", "newName": "save_crop_patches" },
+          { "oldName": "saveMasks", "newName": "save_mask" },
+          { "oldName": "saveMask", "newName": "save_mask" },
+          { "oldName": "targetClasses", "newName": "clean_classes" }
+        ]
+      },
+      {
+        "oldName": "cleanImageHybrid",
+        "newName": "cleanImage",
+        "isDropInReplacement": true,
+        "portMigrations": [
+          { "oldName": "isolatedRegionsOnly", "newName": "isolated_regions" },
+          { "oldName": "outputCropPatches", "newName": "save_crop_patches" },
+          { "oldName": "saveMask", "newName": "save_mask" },
+          { "oldName": "targetClasses", "newName": "clean_classes" }
+        ]
+      },
+      {
+        "oldName": "cleanImagePatchesOnly",
+        "newName": "cleanImage",
+        "isDropInReplacement": true,
+        "portMigrations": [
+          { "oldName": "targetClasses", "newName": "clean_classes" }
+        ]
+      },
+      {
+        "oldName": "cleanImagePatchesOnlyHybrid",
+        "newName": "cleanImage",
+        "isDropInReplacement": true,
+        "portMigrations": [
+          { "oldName": "targetClasses", "newName": "clean_classes" }
+        ]
+      },
+      {
+        "oldName": "cleanChapterHybrid",
+        "newName": "cleanChapter",
+        "isDropInReplacement": true,
+        "portMigrations": [
+          { "oldName": "isolatedRegionsOnly", "newName": "isolated_regions" },
+          { "oldName": "outputCropPatches", "newName": "save_crop_patches" },
+          { "oldName": "saveMasks", "newName": "save_mask" },
+          { "oldName": "targetClasses", "newName": "clean_classes" }
+        ]
+      },
+      {
+        "oldName": "cleanChapterPatchesOnly",
+        "newName": "cleanChapter",
+        "isDropInReplacement": true,
+        "portMigrations": [
+          { "oldName": "targetClasses", "newName": "clean_classes" }
+        ]
+      },
+      {
+        "oldName": "cleanChapterPatchesOnlyHybrid",
+        "newName": "cleanChapter",
+        "isDropInReplacement": true,
+        "portMigrations": [
+          { "oldName": "targetClasses", "newName": "clean_classes" }
+        ]
+      }
+    ],
+    "settingMigrations": [],
+    "objectMigrations": []
+  },
+  {
     "fromVersion": "1.3.1",
     "toVersion": "1.4.0",
     "capabilityMigrations": [],

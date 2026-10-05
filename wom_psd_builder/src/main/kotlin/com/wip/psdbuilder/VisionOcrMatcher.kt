@@ -202,6 +202,18 @@ object VisionOcrMatcher {
     }
 
     /**
+     * Determines whether a Vision segmented object label represents a speech/thought balloon container.
+     * Excludes text, speech, sound effects (sfx), watermarks, and non-text elements.
+     */
+    fun isBalloonContainer(label: String): Boolean {
+        val l = label.lowercase().trim()
+        if (l.contains("balloon") || l.contains("bubble")) return true
+        if (l in setOf("text", "speech", "sfx", "watermark", "non_text", "none", "panel", "character", "face")) return false
+        return l.contains("circular") || l.contains("irregular") || l.contains("jagged") ||
+                l.contains("rectangular") || l.contains("spiky")
+    }
+
+    /**
      * Matches all OCR items against available Vision balloon segmentations.
      */
     fun match(
@@ -213,15 +225,9 @@ object VisionOcrMatcher {
         imageHeight: Double,
         matchThreshold: Double = 0.25
     ): List<MatchedBalloonText> {
-        val candidateObjects = visionObjects?.filter { obj ->
-            val label = obj.label.trim().lowercase()
-            !label.contains("watermark")
+        val balloonObjects = visionObjects?.filter { obj ->
+            isBalloonContainer(obj.label)
         } ?: emptyList()
-
-        val balloonObjects = candidateObjects.filter { obj ->
-            val label = obj.label.trim().lowercase()
-            label != "text"
-        }.ifEmpty { candidateObjects }
 
         val results = mutableListOf<MatchedBalloonText>()
 

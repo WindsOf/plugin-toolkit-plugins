@@ -7,11 +7,14 @@ import com.wip.ocrAI.models.AdvancedAIModel
 import com.wip.ocrAI.models.OcrDownloadModel
 import com.wip.ocrAI.models.OcrIASettings
 import com.wip.ocrAI.models.OcrQuantization
+import com.wip.common.models.DetectionBox
+import com.wip.common.models.SegmentedObject
 import org.junit.Test
 import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.PluginLogger
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -613,6 +616,103 @@ class OcrIATest {
         assertEquals(1, bracketedRegions.size)
         assertEquals("dialogue text", bracketedRegions[0].text)
         assertEquals("speech", bracketedRegions[0].category)
+    }
+
+    @Test
+    fun testOcrClassificationInstructions() {
+        val rule = OcrClassificationInstructions.BALLOON_CONTAINER_SPEECH_RULE
+        assertTrue(rule.contains("inside a speech/thought balloon, bubble, or dedicated dialogue container"))
+        assertTrue(rule.contains("ALWAYS classify it as 'speech'"))
+
+        val qwenRules = OcrClassificationInstructions.QWEN_CLASSIFICATION_RULES
+        assertTrue(qwenRules.contains(rule))
+        assertTrue(qwenRules.contains("{speech}"))
+        assertTrue(qwenRules.contains("{sfx}"))
+
+        val koogRules = OcrClassificationInstructions.KOOG_CLASSIFICATION_RULES
+        assertTrue(koogRules.contains(rule))
+        assertTrue(koogRules.contains("'speech'"))
+        assertTrue(koogRules.contains("'sfx'"))
+
+        val qwenPrompt = UnlimitedOcrRunner.getQwenSystemPrompt(classifyText = true)
+        assertTrue(qwenPrompt.contains(rule))
+
+        val qwenCropPrompt = UnlimitedOcrRunner.getQwenCropSystemPrompt(classifyText = true)
+        assertTrue(qwenCropPrompt.contains(rule))
+
+        // When classifyText is false, prompts should NOT contain classification overhead
+        val unclassifiedPrompt = UnlimitedOcrRunner.getQwenSystemPrompt(classifyText = false)
+        assertFalse(unclassifiedPrompt.contains("{speech}"))
+        assertFalse(unclassifiedPrompt.contains("{sfx}"))
+        assertTrue(unclassifiedPrompt.contains("[x1, y1, x2, y2] extracted_text"))
+
+        val unclassifiedCropPrompt = UnlimitedOcrRunner.getQwenCropSystemPrompt(classifyText = false)
+        assertFalse(unclassifiedCropPrompt.contains("{speech}"))
+        assertFalse(unclassifiedCropPrompt.contains("{sfx}"))
+        assertTrue(unclassifiedCropPrompt.contains("[x1, y1, x2, y2] extracted_text"))
+    }
+
+    @Test
+    fun testUntaggedCoordinatesParsingWithDefaultCategory() {
+        val context = io.mockk.mockk<PluginContext>(relaxed = true)
+        val hostFs = io.mockk.mockk<HostFileSystem>(relaxed = true)
+        val runner = UnlimitedOcrRunner(context, hostFs, OcrIASettings())
+
+        // Standard Qwen output without classification tag
+        // [top_left_x, top_left_y, bottom_right_x, bottom_right_y]
+        val raw = "[353, 184, 393, 514] What are you looking at?!"
+        val regions = runner.parseOcrOutput(raw, 1000.0, 1000.0, defaultCategory = "speech")
+        assertEquals(1, regions.size)
+        assertEquals("What are you looking at?!", regions[0].text)
+        assertEquals("speech", regions[0].category)
+        assertEquals(184.0, regions[0].ymin)
+        assertEquals(353.0, regions[0].xmin)
+        assertEquals(514.0, regions[0].ymax)
+        assertEquals(393.0, regions[0].xmax)
+
+        // Multiple lines of untagged coordinates inheriting sfx category from crop
+        val multiRaw = """
+            [100, 200, 300, 400] BOOM!
+            [500, 600, 700, 800] CRASH!!
+        """.trimIndent()
+        val sfxRegions = runner.parseOcrOutput(multiRaw, 1000.0, 1000.0, defaultCategory = "sfx")
+        assertEquals(2, sfxRegions.size)
+        assertEquals("BOOM!", sfxRegions[0].text)
+        assertEquals("sfx", sfxRegions[0].category)
+        assertEquals("CRASH!!", sfxRegions[1].text)
+        assertEquals("sfx", sfxRegions[1].category)
+    }
+
+    @Test
+    fun testComputeCropRegionsPreservesReclassifiedLabels() {
+        val objects = listOf(
+            SegmentedObject(
+                box = DetectionBox(ymin = 0.1, xmin = 0.1, ymax = 0.3, xmax = 0.3),
+                label = "speech",
+                confidence = 0.95
+            ),
+            SegmentedObject(
+                box = DetectionBox(ymin = 0.5, xmin = 0.5, ymax = 0.7, xmax = 0.7),
+                label = "sfx",
+                confidence = 0.90
+            ),
+            SegmentedObject(
+                box = DetectionBox(ymin = 0.8, xmin = 0.8, ymax = 0.9, xmax = 0.9),
+                label = "watermark", // should be ignored
+                confidence = 0.85
+            )
+        )
+
+        val crops = VisionCutoutHelper.computeCropRegions(
+            objects = objects,
+            imageWidth = 1000,
+            imageHeight = 1000,
+            paddingPx = 50
+        )
+
+        assertEquals(2, crops.size)
+        assertEquals("speech", crops[0].category)
+        assertEquals("sfx", crops[1].category)
     }
 }
 

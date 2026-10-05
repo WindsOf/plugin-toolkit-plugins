@@ -43,7 +43,7 @@ import kotlin.math.max
 @PluginInfo(
     id = "com.wip.vision",
     name = "WOM Vision",
-    version = "1.1.0",
+    version = "1.1.1",
     description = "Object detection and instance segmentation plugin using YOLO and RF-DETR.",
     supportedOs = [OS.WINDOWS, OS.LINUX]
 )
@@ -309,6 +309,12 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
             defaultValue = "\"NONE\""
         )
         try_to_reclassify_elements: VisionReclassificationMode = VisionReclassificationMode.NONE,
+        @CapabilityParam(
+            description = "Save cropped text ROI images used for vision LLM reclassification to disk for debugging and prompt refinement",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        saveReclassificationCrops: Boolean = false,
         context: PluginContext,
         hostFs: HostFileSystem
     ): VisionResult {
@@ -659,12 +665,19 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
             iosThreshold = iosThreshold
         )
 
+        val cropsFolder = if (saveReclassificationCrops) {
+            val base = if (outputDir.isNotBlank()) File(outputDir) else inputFile.parentFile ?: File(".")
+            File(base, "reclassification_crops").apply { if (!exists()) mkdirs() }
+        } else null
+
         // Stage 3: Optional Text Reclassification (speech / sfx / non_text) via Vision LLM crop analysis
         val reclassifiedObjects = VisionTextReclassifier.reclassifyTextElements(
             image = baseImage,
             objects = deduplicatedObjects,
             mode = try_to_reclassify_elements,
-            context = context
+            context = context,
+            debugCropsDir = cropsFolder,
+            pageName = inputFile.nameWithoutExtension
         )
 
         var savedMaskPath: String? = null
@@ -807,6 +820,12 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
             defaultValue = "\"NONE\""
         )
         try_to_reclassify_elements: VisionReclassificationMode = VisionReclassificationMode.NONE,
+        @CapabilityParam(
+            description = "Save cropped text ROI images used for vision LLM reclassification to disk for debugging and prompt refinement",
+            defaultValue = "false",
+            isAdvanced = true
+        )
+        saveReclassificationCrops: Boolean = false,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterVisionResult {
@@ -848,6 +867,7 @@ class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
                 drawTileGrid = drawTileGrid,
                 drawSegmentationRois = drawSegmentationRois,
                 try_to_reclassify_elements = try_to_reclassify_elements,
+                saveReclassificationCrops = saveReclassificationCrops,
                 outputDir = outputDir,
                 context = context,
                 hostFs = hostFs
