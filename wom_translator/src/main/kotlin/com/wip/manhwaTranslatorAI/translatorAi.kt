@@ -171,7 +171,7 @@ enum class TranslationTargetClass {
 @PluginInfo(
     id = "com.wip.manhwa_translator_ai",
     name = "WOM Translator",
-    version = "1.8.0",
+    version = "1.8.1",
     description = "Translate text from Manhwa/Manga into Italian using Google AI, DeepSeek, or Z.AI via Koog",
     supportedOs = [OS.WINDOWS]
 )

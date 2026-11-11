@@ -1,3 +1,12 @@
+Version: 1.8.1
+Date: 2026-11-06
+Fixed:
+  - Fixed dictionary generation with DeepSeek v4 pro where output resulted in "[File]" instead of the full dictionary content.
+  - Hardened Lore Master prompt instructions: explicitly prohibited "[File]" and bracketed placeholders, and removed confusing placeholder syntax in template schemas.
+  - Added automatic recovery retry to request the full 4-block dictionary if a model generates a placeholder string.
+  - Added safety guard in dictionary saver to prevent overwriting existing dictionary files on disk when a placeholder is returned.
+  - Sanitized incoming currentDictionary to ignore previous "[File]" placeholder contents and prevent cascading placeholder loops.
+-------------------------------------------------------------------------------------------------
 Version: 1.8.0
 Date: 2026-10-03
 Added:

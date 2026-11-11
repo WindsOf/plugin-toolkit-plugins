@@ -10,11 +10,13 @@ import com.wip.common.models.OcrCategory
 import com.wip.common.models.OcrTextFilter
 import com.wip.common.models.VisionResult
 import com.wip.common.models.sortedNaturally
+import com.wip.kpsd.EffectiveTextLayout
 import com.wip.kpsd.EllipseBoundary
 import com.wip.kpsd.Justification
 import com.wip.kpsd.KPsd
 import com.wip.kpsd.Layer
 import com.wip.kpsd.PixelData
+import com.wip.kpsd.PolygonBoundary
 import com.wip.kpsd.Psd
 import com.wip.kpsd.PsdBounds
 import com.wip.kpsd.RectangleBoundary
@@ -1369,18 +1371,6 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         }
     }
 
-    data class EffectiveTextLayout(
-        val boundaryShape: com.wip.kpsd.TextBoundary,
-        val top: Int,
-        val left: Int,
-        val bottom: Int,
-        val right: Int,
-        val boxWidth: Int,
-        val boxHeight: Int,
-        val tx: Double,
-        val ty: Double
-    )
-
     private fun resolveTextLayout(
         index: Int,
         box: BoxData,
@@ -1390,90 +1380,31 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         paddingPercentage: Float,
         rot: Double = 0.0
     ): EffectiveTextLayout {
-        val rawLeft = box.ibx0.toInt()
-        val rawTop = box.iby0.toInt()
-        val rawRight = box.ibx1.toInt()
-        val rawBottom = box.iby1.toInt()
-        val rawWidth = maxOf(1, rawRight - rawLeft)
-        val rawHeight = maxOf(1, rawBottom - rawTop)
-
-        val theta = Math.toRadians(rot)
-        val cos = kotlin.math.cos(theta)
-        val sin = kotlin.math.sin(theta)
-
         var boundaryShape = customBoundaries?.getOrNull(index)
+        val rawBounds = PsdBounds(box.ibx0.toFloat(), box.iby0.toFloat(), box.ibx1.toFloat(), box.iby1.toFloat())
+
         if (boundaryShape == null && matched?.polygonPixels != null) {
-            val bPadding = minOf(rawWidth, rawHeight) * paddingPercentage
-            boundaryShape = PolygonTextBoundary(
+            boundaryShape = PolygonBoundary(
                 polygon = matched.polygonPixels,
-                padding = bPadding,
-                visualCenter = matched.visualCenter
+                visualCenter = matched.visualCenter,
+                usePolylabel = true
             )
         }
         if (boundaryShape == null) {
             val shape = effShapes.getOrNull(index) ?: "oval"
-            val bPadding = minOf(rawWidth, rawHeight) * paddingPercentage
             boundaryShape = if (shape.equals("rectangular", ignoreCase = true)) {
-                RectangleBoundary(padding = bPadding)
+                RectangleBoundary(naturalBounds = rawBounds)
             } else {
-                EllipseBoundary(padding = bPadding)
+                EllipseBoundary(naturalBounds = rawBounds)
             }
         }
 
-        return if (boundaryShape is PolygonTextBoundary && boundaryShape.polygon.size >= 3) {
-            val poly = boundaryShape.polygon
-            val vCenter = boundaryShape.visualCenter ?: java.awt.geom.Point2D.Double(box.cx, box.cy)
-            val vcx = vCenter.x
-            val vcy = vCenter.y
-
-            val pMinX = poly.minOf { it.x }
-            val pMaxX = poly.maxOf { it.x }
-            val pMinY = poly.minOf { it.y }
-            val pMaxY = poly.maxOf { it.y }
-
-            val distLeft = maxOf(1.0, vcx - pMinX)
-            val distRight = maxOf(1.0, pMaxX - vcx)
-            val distTop = maxOf(1.0, vcy - pMinY)
-            val distBottom = maxOf(1.0, pMaxY - vcy)
-
-            val halfW = minOf(distLeft, distRight)
-            val halfH = minOf(distTop, distBottom)
-
-            val effBoxWidth = maxOf(1, (halfW * 2.0).toInt())
-            val effBoxHeight = maxOf(1, (halfH * 2.0).toInt())
-
-            val effLeft = (vcx - halfW).toInt()
-            val effTop = (vcy - halfH).toInt()
-            val effRight = effLeft + effBoxWidth
-            val effBottom = effTop + effBoxHeight
-
-            val tx = vcx - (cos * (effBoxWidth / 2.0) - sin * (effBoxHeight / 2.0))
-            val ty = vcy - (sin * (effBoxWidth / 2.0) + cos * (effBoxHeight / 2.0))
-
-            EffectiveTextLayout(
-                boundaryShape = boundaryShape,
-                top = effTop,
-                left = effLeft,
-                bottom = effBottom,
-                right = effRight,
-                boxWidth = effBoxWidth,
-                boxHeight = effBoxHeight,
-                tx = tx,
-                ty = ty
-            )
-        } else {
-            EffectiveTextLayout(
-                boundaryShape = boundaryShape,
-                top = rawTop,
-                left = rawLeft,
-                bottom = rawBottom,
-                right = rawRight,
-                boxWidth = rawWidth,
-                boxHeight = rawHeight,
-                tx = rawLeft.toDouble(),
-                ty = rawTop.toDouble()
-            )
-        }
+        return EffectiveTextLayout.compute(
+            boundary = boundaryShape,
+            rotation = rot,
+            paddingPercentage = paddingPercentage,
+            bounds = rawBounds
+        )
     }
 
     private fun drawBoundaryDebug(
@@ -1500,7 +1431,7 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             val bPadding = minOf(layout.boxWidth, layout.boxHeight) * paddingPercentage
 
             when (boundaryShape) {
-                is PolygonTextBoundary -> {
+                is PolygonBoundary -> {
                     val poly = boundaryShape.polygon
                     if (poly.size >= 3) {
                         val xPts = poly.map { it.x.toInt() }.toIntArray()

@@ -116,4 +116,47 @@ class PolygonTextBoundaryTest {
         assertEquals(30.0, vc.x, 1.0)
         assertEquals(30.0, vc.y, 1.0)
     }
+
+    @Test
+    fun testHorizontalSpanAndSymmetricWidth() {
+        val asymmetric = listOf(
+            Point2D.Double(100.0, 100.0),
+            Point2D.Double(500.0, 100.0),
+            Point2D.Double(500.0, 300.0),
+            Point2D.Double(100.0, 300.0)
+        )
+        val visualCenter = Point2D.Double(200.0, 200.0)
+        val boundary = PolygonTextBoundary(
+            polygon = asymmetric,
+            padding = 0f,
+            visualCenter = visualCenter
+        )
+        val bounds = PsdBounds(left = 100f, top = 100f, right = 500f, bottom = 300f)
+        val span = boundary.getAvailableSpan(0f, bounds)
+        // With bounds.width = 400 (maxHalf = 200), rightOffset (300) is clamped by bounds to 200f
+        assertEquals(-100f, span.leftOffset, 0.5f)
+        assertEquals(200f, span.rightOffset, 0.5f)
+        assertEquals(300f, span.width, 0.5f)
+        assertEquals(200f, span.symmetricWidth, 0.5f)
+    }
+
+    @Test
+    fun testPoleOfInaccessibilityFallback() {
+        val balloonWithTail = listOf(
+            Point2D.Double(0.0, 0.0),
+            Point2D.Double(100.0, 0.0),
+            Point2D.Double(100.0, 100.0),
+            Point2D.Double(20.0, 100.0),
+            Point2D.Double(0.0, 200.0),
+            Point2D.Double(0.0, 100.0)
+        )
+        val boundary = PolygonTextBoundary(
+            polygon = balloonWithTail,
+            usePolylabel = true
+        )
+        val vc = boundary.visualCenter
+        kotlin.test.assertNotNull(vc)
+        kotlin.test.assertTrue(vc.y < 80.0, "Polylabel visual center must stay inside main balloon body, got ${vc.y}")
+    }
 }
+

@@ -4,6 +4,10 @@ Fixed:
   - Fixed text layer centering when `PolygonTextBoundary` is available: dynamically centers the text box and transformation matrix around the polygon's visual center (`vcx, vcy`) rather than falling back to the geometric center of the OCR detection box.
   - Enhanced `PolygonTextBoundary.getAvailableWidth` to calculate symmetric available width relative to `centerX`, preventing text lines from overflowing asymmetric polygon contours.
   - Aligned boundary debug visualization to display the effective polygon text box centered on the visual center.
+Changed:
+  - Upgraded to KPsd 1.3.0: refactored `PolygonTextBoundary` to map to KPsd's first-class `PolygonBoundary`.
+  - Leveraged KPsd 1.3.0's built-in `EffectiveTextLayout.compute` for automated text layout and matrix transformations.
+  - Enabled Pole of Inaccessibility (Polylabel) algorithm (`usePolylabel = true`) for optimal centering inside irregular speech balloons with tails.
 -------------------------------------------------------------------------------------------------
 Version: 5.5.2
 Date: 2026-10-04

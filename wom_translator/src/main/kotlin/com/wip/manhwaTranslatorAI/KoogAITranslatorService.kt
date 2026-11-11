@@ -878,17 +878,61 @@ class KoogAITranslatorService(
     }
 
     /**
+     * Checks whether the given dictionary content is a placeholder (such as "[File]", "[Nuovo file]",
+     * empty string, or generic bracketed placeholder) rather than actual dictionary markdown content.
+     */
+    fun isPlaceholderDictionary(content: String?): Boolean {
+        if (content.isNullOrBlank()) return true
+        val trimmed = content.trim()
+
+        // Match direct placeholders like [File], [File: ...], [Nuovo File], [File di contesto], [Documento], etc.
+        val placeholderPattern = Regex(
+            """^\[\s*(?:file|document|documento|attachment|allegato|download|nuovo\s+file|nuovo\s+contesto|nuovo\s+dizionario|context|dictionary)(?:\s*:[^\]]*)?\s*\]$""",
+            RegexOption.IGNORE_CASE
+        )
+        if (placeholderPattern.matches(trimmed)) return true
+
+        // Match bracketed placeholders like [Incolla qui...], [Same as before], [Rest of file...], [Contenuto invariato]
+        val genericBracketPattern = Regex(
+            """^\[\s*(?:incolla|paste|same|resto|contenuto|testo|unchanged|as\s+above|file|vedi|omissis)\b[^\]]*\]$""",
+            RegexOption.IGNORE_CASE
+        )
+        if (genericBracketPattern.matches(trimmed)) return true
+
+        // Check for presence of the standard block headers
+        val hasLoreHeader = trimmed.contains("=== LORE & GLOSSARIO FISSO ===", ignoreCase = true)
+        val hasBufferHeader = trimmed.contains("=== BUFFER EVENTI RECENTI ===", ignoreCase = true)
+        val hasArchiveHeader = trimmed.contains("=== CRONOLOGIA REMOTA & ARCHIVIO ===", ignoreCase = true)
+        val hasCharactersHeader = trimmed.contains("=== REGISTRO PERSONAGGI ATTIVI ===", ignoreCase = true)
+
+        val blockCount = listOf(hasLoreHeader, hasBufferHeader, hasArchiveHeader, hasCharactersHeader).count { it }
+
+        // If it doesn't contain at least one essential block header (especially lore or buffer)
+        if (blockCount == 0) {
+            // Very short content without headers or bare word "File"
+            if (trimmed.length < 80 || trimmed.lines().size <= 3) {
+                return true
+            }
+            if (trimmed.equals("file", ignoreCase = true) || trimmed.equals("[file]", ignoreCase = true)) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    /**
      * Parses the LLM response from the Lore Master prompt into changelog and clean markdown dictionary.
      */
     fun parseDictionaryUpdateResponse(rawResponse: String): DictionaryUpdateResult {
-        // Strip thinking blocks if present
+        // Strip thinking blocks if present (both closed and unclosed tags)
         val cleaned = rawResponse.replace(
-            Regex("<(thought|thinking|think)>.*?</\\1>", RegexOption.DOT_MATCHES_ALL), ""
+            Regex("<(thought|thinking|think)>(?:.*?</\\1>|.*$)", RegexOption.DOT_MATCHES_ALL), ""
         ).trim()
 
         // 1. Separate Changelog and Dictionary sections
         val contextHeaderRegex = Regex(
-            "(?i)^#+\\s*(?:NUOVO\\s+FILE\\s+DI\\s+CONTESTO|NUOVO\\s+CONTESTO|NUOVO\\s+DIZIONARIO|FILE\\s+DI\\s+CONTESTO|CONTESTO\\s+AGGIORNATO).*$",
+            "(?i)^#+\\s*(?:NUOVO\\s+(?:DIZIONARIO(?:\\s+AGGIORNATO)?|FILE\\s+DI\\s+CONTESTO|CONTESTO)|DIZIONARIO\\s+AGGIORNATO|CONTESTO\\s+AGGIORNATO|FILE\\s+DI\\s+CONTESTO|NUOVO\\s+TESTO\\s+DEL\\s+DIZIONARIO|TESTO\\s+DEL\\s+DIZIONARIO).*$",
             RegexOption.MULTILINE
         )
         val match = contextHeaderRegex.find(cleaned)
@@ -923,7 +967,7 @@ class KoogAITranslatorService(
         val fenceRegex = Regex("```(?:markdown|md)?\\s*\\n?([\\s\\S]*?)```", RegexOption.IGNORE_CASE)
         val fenceMatch = fenceRegex.find(dictionaryPart)
 
-        val extractedDict = if (fenceMatch != null) {
+        var extractedDict = if (fenceMatch != null) {
             fenceMatch.groupValues[1].trim()
         } else {
             // Strip any dangling opening/closing fences
@@ -931,6 +975,15 @@ class KoogAITranslatorService(
                 .replace(Regex("^```(?:markdown|md)?\\s*", RegexOption.IGNORE_CASE), "")
                 .replace(Regex("```\\s*$"), "")
                 .trim()
+        }
+
+        // If extractedDict has a leading placeholder line like "[File]" followed by actual dictionary content:
+        if (extractedDict.contains("=== LORE & GLOSSARIO FISSO ===") ||
+            extractedDict.contains("=== BUFFER EVENTI RECENTI ===")) {
+            extractedDict = extractedDict.replace(
+                Regex("""^\[\s*(?:file|document|documento)(?:\s*:[^\]]*)?\s*\]\s*""", RegexOption.IGNORE_CASE),
+                ""
+            ).trim()
         }
 
         return DictionaryUpdateResult(
@@ -1236,7 +1289,7 @@ class KoogAITranslatorService(
         }
 
         // 1. Resolve current dictionary content
-        val currentDictionaryContent = if (!currentDictionary.isNullOrBlank()) {
+        val rawDictionaryContent = if (!currentDictionary.isNullOrBlank()) {
             try {
                 val file = File(currentDictionary)
                 if (file.exists() && file.isFile) file.readText() else currentDictionary
@@ -1244,6 +1297,15 @@ class KoogAITranslatorService(
                 currentDictionary
             }
         } else ""
+
+        val currentDictionaryContent = if (isPlaceholderDictionary(rawDictionaryContent)) {
+            if (rawDictionaryContent.isNotBlank()) {
+                logger.warn("[TranslatorAI] Current dictionary content is a placeholder ('${rawDictionaryContent.trim()}'). Treating as empty initial context to prevent propagating placeholders.")
+            }
+            ""
+        } else {
+            rawDictionaryContent
+        }
 
         // 2. Resolve chapter summary
         var effectiveChapterSummary = ""
@@ -1300,12 +1362,19 @@ class KoogAITranslatorService(
 
             IL TUO OBIETTIVO:
             Riceverai in input:
-            1. Il FILE DI CONTESTO ATTUALE (in formato Markdown).
+            1. Il DIZIONARIO / CONTESTO ATTUALE (in formato Markdown).
             2. L'ANALISI / SUNTO DEL NUOVO CAPITOLO da integrare (dal testo o dal visual extractor).
 
             DEVI PRODURRE IN USCITA:
             1. Un breve SUNTO DELLE MODIFICHE (Changelog essenziale).
-            2. Il NUOVO FILE DI CONTESTO intero e formattato, pronto per essere sovrascritto.
+            2. Il NUOVO DIZIONARIO AGGIORNATO intero e formattato, pronto per essere salvato.
+
+            AVVISO CRITICO FONDAMENTALE SULL'OUTPUT:
+            - SEI UN MODELLO TESTUALE VIA API. NON HAI ALCUNA CAPACITÀ DI ALLEGARE FILE ESTERNI, ARTEFATTI O DOWNLOAD.
+            - NON PUOI FORNIRE UN FILE FISICO: L'UNICO MODO PER SALVARE IL DIZIONARIO È SCRIVERE IL TESTO INTEGRALE E LETTERALE ALL'INTERNO DELLA TUA RISPOSTA.
+            - DIVIETO ASSOLUTO DI PLACEHOLDER: È SEVERAMENTE VIETATO rispondere con stringhe segnaposto come '[File]', '[File: ...]', '[Nuovo file]', '[Contenuto invariato]', '...', o qualsiasi altro placeholder tra parentesi quadre.
+            - Se scrivi '[File]' o un segnaposto, l'intera pipeline fallirà. DEVI SCRIVERE IL TESTO COMPLETO, RIGA PER RIGA.
+            - DEVI RISCRIVERE PER INTERO TUTTI E 4 I BLOCCHI: riporta per intero sia tutte le voci mantenute dal contesto precedente sia le nuove voci e gli aggiornamenti. NON omettere o abbreviare alcuna riga.
 
             REGOLE FERREE DI STRUTTURA:
             1. MANTIENI LA STRUTTURA ESATTA DEI 4 BLOCCHI:
@@ -1329,23 +1398,33 @@ class KoogAITranslatorService(
                - Specifica SEMPRE il genere grammaticale italiano assegnato (es. "mana = maschile", "lancia = femminile").
 
             5. FORMATO DI OUTPUT RICHIESTO:
-            Restituisci la risposta ESATTAMENTE in questo schema senza preamboli né spiegazioni aggiuntive:
+            Restituisci la risposta ESATTAMENTE in questo schema senza preamboli né spiegazioni aggiuntive (NON SCRIVERE '[File]', scrivi il testo integrale di ogni blocco):
 
             # CHILOMETRO / MODIFICHE APPORTATE
-            - Rimosso dal buffer: Cap. X (spostato in archivio: "[sintesi]")
+            - Rimosso dal buffer: Cap. X (spostato in archivio: "sintesi")
             - Aggiunto al buffer: Cap. Y
-            - Variazioni Personaggi / Glossario: [eventuali modifiche o "Nessuna variazione"]
+            - Variazioni Personaggi / Glossario: eventuali modifiche o "Nessuna variazione"
 
-            # NUOVO FILE DI CONTESTO
+            # NUOVO DIZIONARIO AGGIORNATO
             ```markdown
-            [Incolla qui l'intero file aggiornato rispettando il template identico dei 4 blocchi]
+            === LORE & GLOSSARIO FISSO ===
+            (trascrivi qui per intero tutte le voci del glossario)
+
+            === CRONOLOGIA REMOTA & ARCHIVIO ===
+            (trascrivi qui per intero la cronologia remota e l'archivio)
+
+            === BUFFER EVENTI RECENTI ===
+            (trascrivi qui per intero i capitoli recenti con il nuovo capitolo integrato)
+
+            === REGISTRO PERSONAGGI ATTIVI ===
+            (trascrivi qui per intero tutti i personaggi attivi con genere, ruolo e registro)
             ```
         """.trimIndent()
 
         val contextInputText = if (currentDictionaryContent.isNotBlank()) {
-            "=== FILE DI CONTESTO ATTUALE ===\n$currentDictionaryContent\n=== FINE FILE DI CONTESTO ATTUALE ==="
+            "=== DIZIONARIO / CONTESTO ATTUALE ===\n$currentDictionaryContent\n=== FINE DIZIONARIO / CONTESTO ATTUALE ==="
         } else {
-            "=== FILE DI CONTESTO ATTUALE ===\n(Nessun contesto precedente fornito. Crea il file di contesto iniziale con i 4 blocchi richiesti basandoti su questo capitolo.)\n=== FINE FILE DI CONTESTO ATTUALE ==="
+            "=== DIZIONARIO / CONTESTO ATTUALE ===\n(Nessun contesto precedente fornito. Crea il file di contesto iniziale con i 4 blocchi richiesti basandoti su questo capitolo.)\n=== FINE DIZIONARIO / CONTESTO ATTUALE ==="
         }
 
         val chapterInfoText = if (!chapterNumber.isNullOrBlank()) {
@@ -1467,8 +1546,70 @@ class KoogAITranslatorService(
             content
         }
 
-        val parsed = parseDictionaryUpdateResponse(rawResponse)
+        var parsed = parseDictionaryUpdateResponse(rawResponse)
         logger.info("[TranslatorAI] Dictionary Update Changelog:\n${parsed.changelog}")
+
+        // Check if the LLM returned a placeholder like "[File]" or incomplete dictionary
+        if (isPlaceholderDictionary(parsed.updatedDictionary)) {
+            logger.warn("[TranslatorAI] Model $finalModelId generated a placeholder dictionary ('${parsed.updatedDictionary.take(80)}'). Executing automatic recovery request to retrieve full dictionary text...")
+            val recoveryPrompt = prompt(
+                id = "lore-master-recover-placeholder",
+                params = dictParams
+            ) {
+                user {
+                    text(
+                        """
+                        $promptInstructions
+
+                        === CONTESTO ORIGINALE RICHIESTO ===
+                        $userMessage
+
+                        === RISPOSTA PRECEDENTE (INCOMPLETA) ===
+                        $rawResponse
+
+                        === ERRORE DA CORREGGERE IMMEDIATAMENTE ===
+                        ATTENZIONE CRITICA: Nella risposta precedente hai fornito un segnaposto ('${parsed.updatedDictionary}') invece del testo completo del dizionario!
+                        Non hai accesso a sistemi di file esterni o download e non puoi usare il segnaposto '[File]'.
+                        Genera ORA il testo INTEGRALE del dizionario aggiornato racchiuso in un blocco ```markdown ... ``` con TUTTI e 4 i blocchi:
+                        === LORE & GLOSSARIO FISSO ===
+                        === CRONOLOGIA REMOTA & ARCHIVIO ===
+                        === BUFFER EVENTI RECENTI ===
+                        === REGISTRO PERSONAGGI ATTIVI ===
+                        Scrivi per esteso ogni singola voce. È TASSATIVAMENTE VIETATO scrivere '[File]' o usare omissioni.
+                        """.trimIndent()
+                    )
+                }
+            }
+            try {
+                val recoveryResponse = retryWithBackoff {
+                    val responses = executor.execute(recoveryPrompt, model)
+                    val content = responses.joinToString("\n") { it.content }.trim()
+                    if (debugLogging || settings.debugLogging == true) {
+                        logger.info("[DEBUG] Recovery raw LLM response:\n$content")
+                    }
+                    content
+                }
+                val recoveryParsed = parseDictionaryUpdateResponse(recoveryResponse)
+                if (!isPlaceholderDictionary(recoveryParsed.updatedDictionary)) {
+                    logger.info("[TranslatorAI] Successfully recovered full dictionary text from model retry.")
+                    parsed = if (recoveryParsed.changelog.isNotBlank() && recoveryParsed.changelog != "Nessuna variazione specificata") {
+                        recoveryParsed
+                    } else {
+                        recoveryParsed.copy(changelog = parsed.changelog)
+                    }
+                } else {
+                    logger.error("[TranslatorAI] Recovery attempt also returned a placeholder dictionary: '${recoveryParsed.updatedDictionary.take(80)}'")
+                }
+            } catch (e: Exception) {
+                logger.error("[TranslatorAI] Recovery attempt failed with exception: ${e.message}")
+            }
+        }
+
+        if (isPlaceholderDictionary(parsed.updatedDictionary)) {
+            val msg = "Model generated a placeholder dictionary ('${parsed.updatedDictionary}') instead of full content. Update aborted to prevent corrupting dictionary."
+            logger.error("[TranslatorAI] $msg")
+            throw IllegalStateException(msg)
+        }
 
         // 4. Save to disk if requested (outputFile toggle is true)
         val shouldSave = outputFile ?: true
@@ -1497,6 +1638,12 @@ class KoogAITranslatorService(
         outputDir: String,
         chapterNumber: String? = null
     ): Pair<String, String> {
+        if (isPlaceholderDictionary(parsed.updatedDictionary)) {
+            val msg = "Cannot save dictionary: updatedDictionary is a placeholder ('${parsed.updatedDictionary}')."
+            logger.error("[TranslatorAI] $msg")
+            throw IllegalArgumentException(msg)
+        }
+
         val outDir = File(outputDir)
         hostFs.createDirectory(outDir.absolutePath)
 

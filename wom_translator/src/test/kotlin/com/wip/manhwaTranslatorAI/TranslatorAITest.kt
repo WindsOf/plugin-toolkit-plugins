@@ -783,6 +783,154 @@ class TranslatorAITest {
     }
 
     @Test
+    fun testIsPlaceholderDictionary() {
+        val service = KoogAITranslatorService(
+            io.mockk.mockk<PluginContext>(relaxed = true),
+            TranslatorAISettings(),
+            io.mockk.mockk<HostFileSystem>(relaxed = true)
+        )
+
+        assertTrue(service.isPlaceholderDictionary("[File]"))
+        assertTrue(service.isPlaceholderDictionary("[file]"))
+        assertTrue(service.isPlaceholderDictionary("[FILE]"))
+        assertTrue(service.isPlaceholderDictionary("  [File]  "))
+        assertTrue(service.isPlaceholderDictionary("[File: dictionary.md]"))
+        assertTrue(service.isPlaceholderDictionary("[Nuovo file di contesto]"))
+        assertTrue(service.isPlaceholderDictionary("[Incolla qui l'intero file aggiornato]"))
+        assertTrue(service.isPlaceholderDictionary("[Contenuto invariato]"))
+        assertTrue(service.isPlaceholderDictionary("[Rest of file unchanged]"))
+        assertTrue(service.isPlaceholderDictionary(""))
+        assertTrue(service.isPlaceholderDictionary("   "))
+        assertTrue(service.isPlaceholderDictionary(null))
+        assertTrue(service.isPlaceholderDictionary("File"))
+        assertTrue(service.isPlaceholderDictionary("file"))
+
+        val validDict = """
+            === LORE & GLOSSARIO FISSO ===
+            mana = termine maschile
+
+            === CRONOLOGIA REMOTA & ARCHIVIO ===
+            - Cap. 200: Evento remoto
+
+            === BUFFER EVENTI RECENTI ===
+            - Cap. 241: Evento recente
+
+            === REGISTRO PERSONAGGI ATTIVI ===
+            - Arthur: maschio, protagonista
+        """.trimIndent()
+        assertFalse(service.isPlaceholderDictionary(validDict))
+    }
+
+    @Test
+    fun testParseDictionaryUpdateResponseWithDeepSeekPlaceholderFile() {
+        val service = KoogAITranslatorService(
+            io.mockk.mockk<PluginContext>(relaxed = true),
+            TranslatorAISettings(),
+            io.mockk.mockk<HostFileSystem>(relaxed = true)
+        )
+
+        val raw = """
+            # CHILOMETRO / MODIFICHE APPORTATE
+            - Rimosso dal buffer: Cap. 237 (spostato in archivio: "Virion crolla")
+            - Aggiunto al buffer: Cap. 242
+            - Variazioni Personaggi / Glossario: Jinwoo aggiunto
+
+            # NUOVO FILE DI CONTESTO
+            ```markdown
+            [File]
+            ```
+        """.trimIndent()
+
+        val parsed = service.parseDictionaryUpdateResponse(raw)
+        assertTrue(parsed.changelog.contains("Rimosso dal buffer: Cap. 237"))
+        assertTrue(parsed.changelog.contains("Aggiunto al buffer: Cap. 242"))
+        assertEquals("[File]", parsed.updatedDictionary)
+        assertTrue(service.isPlaceholderDictionary(parsed.updatedDictionary))
+    }
+
+    @Test
+    fun testParseDictionaryUpdateResponseWithNuovoDizionarioAggiornatoHeader() {
+        val service = KoogAITranslatorService(
+            io.mockk.mockk<PluginContext>(relaxed = true),
+            TranslatorAISettings(),
+            io.mockk.mockk<HostFileSystem>(relaxed = true)
+        )
+
+        val raw = """
+            # CHILOMETRO / MODIFICHE APPORTATE
+            - Aggiunto al buffer: Cap. 242
+
+            # NUOVO DIZIONARIO AGGIORNATO
+            ```markdown
+            === LORE & GLOSSARIO FISSO ===
+            mana = termine maschile
+
+            === BUFFER EVENTI RECENTI ===
+            - Cap. 242: Battaglia finale
+            ```
+        """.trimIndent()
+
+        val parsed = service.parseDictionaryUpdateResponse(raw)
+        assertTrue(parsed.changelog.contains("Aggiunto al buffer: Cap. 242"))
+        assertTrue(parsed.updatedDictionary.contains("=== LORE & GLOSSARIO FISSO ==="))
+        assertTrue(parsed.updatedDictionary.contains("=== BUFFER EVENTI RECENTI ==="))
+        assertFalse(service.isPlaceholderDictionary(parsed.updatedDictionary))
+    }
+
+    @Test
+    fun testParseDictionaryUpdateResponseCleansLeadingFilePrefix() {
+        val service = KoogAITranslatorService(
+            io.mockk.mockk<PluginContext>(relaxed = true),
+            TranslatorAISettings(),
+            io.mockk.mockk<HostFileSystem>(relaxed = true)
+        )
+
+        val raw = """
+            # CHILOMETRO / MODIFICHE APPORTATE
+            - Aggiunto al buffer: Cap. 242
+
+            # NUOVO DIZIONARIO AGGIORNATO
+            ```markdown
+            [File]
+            === LORE & GLOSSARIO FISSO ===
+            mana = termine maschile
+
+            === BUFFER EVENTI RECENTI ===
+            - Cap. 242: Battaglia finale
+            ```
+        """.trimIndent()
+
+        val parsed = service.parseDictionaryUpdateResponse(raw)
+        assertFalse(parsed.updatedDictionary.startsWith("[File]"))
+        assertTrue(parsed.updatedDictionary.startsWith("=== LORE & GLOSSARIO FISSO ==="))
+        assertFalse(service.isPlaceholderDictionary(parsed.updatedDictionary))
+    }
+
+    @Test
+    fun testSaveDictionaryFilesRejectsPlaceholder() = kotlinx.coroutines.runBlocking {
+        val service = KoogAITranslatorService(
+            io.mockk.mockk<PluginContext>(relaxed = true),
+            TranslatorAISettings(),
+            io.mockk.mockk<HostFileSystem>(relaxed = true)
+        )
+
+        val placeholderResult = DictionaryUpdateResult(
+            changelog = "Changelog text",
+            updatedDictionary = "[File]"
+        )
+
+        val exception = try {
+            service.saveDictionaryFiles(placeholderResult, "dummy/output/dir")
+            null
+        } catch (e: Exception) {
+            e
+        }
+        assertNotNull(exception, "Expected IllegalArgumentException when saving placeholder dictionary")
+        assertTrue(exception is IllegalArgumentException)
+        assertTrue(exception.message?.contains("placeholder") == true)
+    }
+
+    @Test
     fun testTestApiConnectionActionShowsToast() = kotlinx.coroutines.runBlocking {
         val plugin = TranslatorAI(TranslatorAISettings(deepseekApiKey = "dummy-key", googleApiKey = "dummy-google"))
         val toasts = mutableListOf<String>()
