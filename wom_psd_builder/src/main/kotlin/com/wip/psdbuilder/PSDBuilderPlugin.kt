@@ -10,6 +10,7 @@ import com.wip.common.models.OcrCategory
 import com.wip.common.models.OcrTextFilter
 import com.wip.common.models.VisionResult
 import com.wip.common.models.sortedNaturally
+import com.wip.kpsd.AutoFit
 import com.wip.kpsd.EffectiveTextLayout
 import com.wip.kpsd.EllipseBoundary
 import com.wip.kpsd.Justification
@@ -23,6 +24,8 @@ import com.wip.kpsd.RectangleBoundary
 import com.wip.kpsd.TextBoundary
 import com.wip.kpsd.TextShapeType
 import com.wip.kpsd.Units
+import com.wip.kpsd.VerticalAlignment
+import com.wip.kpsd.WordBreak
 import com.wip.kpsd.psd
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -154,13 +157,34 @@ data class PSDBuilderSettings(
         defaultValue = "0.10",
         required = true
     )
-    val paddingPercentage: Float = 0.10f
+    val paddingPercentage: Float = 0.10f,
+
+    @PluginSetting(
+        description = "Default word breaking and hyphenation strategy (NONE, HYPHENATE, BREAK_WORD). Syncs Photoshop's auto-hyphenation flag.",
+        defaultValue = "\"NONE\"",
+        required = false
+    )
+    val wordBreak: PsdWordBreak? = PsdWordBreak.NONE,
+
+    @PluginSetting(
+        description = "Allow text to wrap onto multiple lines inside the bounding box. When disabled, text stays on a single auto-fitted centered line.",
+        defaultValue = "true",
+        required = false
+    )
+    val allowLineWrapping: Boolean? = true,
+
+    @PluginSetting(
+        description = "Allow KPsd to insert hardcoded line breaks (\\r) to fit balloon contours. When disabled, preserves original text without automatic line breaks.",
+        defaultValue = "true",
+        required = false
+    )
+    val insertHardcodedNewlines: Boolean? = true
 )
 
 @PluginInfo(
     id = "com.wip.psdbuilder.native",
     name = "WOM PSD Builder",
-    version = "5.5.3",
+    version = "5.6.0",
     description = "A plugin that builds layered PSD files natively in Kotlin.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
@@ -275,6 +299,21 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         ),
         @CapabilityParam(description = "Element classifications (speech, sfx, non_text, none)") categories: List<String>? = null,
         @CapabilityParam(description = "Optional list of cleaned crop patch image paths") cleanPatches: List<String>? = null,
+        @CapabilityParam(
+            description = "Word breaking and hyphenation strategy (DEFAULT uses plugin setting; NONE, HYPHENATE, BREAK_WORD). Syncs Photoshop's auto-hyphenation flag.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) wordBreak: WordBreakMode? = WordBreakMode.DEFAULT,
+        @CapabilityParam(
+            description = "Allow text to wrap onto multiple lines inside the bounding box (DEFAULT uses plugin setting). When DISABLED, keeps text on a single auto-fitted centered line.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) allowLineWrapping: FeatureToggleMode? = FeatureToggleMode.DEFAULT,
+        @CapabilityParam(
+            description = "Allow KPsd to insert hardcoded line breaks (\\r) to fit balloon contours (DEFAULT uses plugin setting). When DISABLED, preserves original text without hardcoded newlines.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) insertHardcodedNewlines: FeatureToggleMode? = FeatureToggleMode.DEFAULT,
         context: PluginContext,
         hostFs: HostFileSystem
     ): PSDBuildResult {
@@ -319,7 +358,10 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             shapes = shapes,
             visionResult = resolvedVisionResult,
             categories = categories,
-            defaultVisibleClasses = default_visible_classes
+            defaultVisibleClasses = default_visible_classes,
+            wordBreak = resolveWordBreak(wordBreak),
+            allowLineWrapping = resolveAllowLineWrapping(allowLineWrapping),
+            insertHardcodedNewlines = resolveInsertHardcodedNewlines(insertHardcodedNewlines)
         )
         val psdBytes = withContext(Dispatchers.Default) {
             KPsd.write(psd, compress = false)
@@ -381,6 +423,21 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             OcrCategory.none
         ),
         @CapabilityParam(description = "Optional list of cleaned crop patch image paths") cleanPatches: List<String>? = null,
+        @CapabilityParam(
+            description = "Word breaking and hyphenation strategy (DEFAULT uses plugin setting; NONE, HYPHENATE, BREAK_WORD). Syncs Photoshop's auto-hyphenation flag.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) wordBreak: WordBreakMode? = WordBreakMode.DEFAULT,
+        @CapabilityParam(
+            description = "Allow text to wrap onto multiple lines inside the bounding box (DEFAULT uses plugin setting). When DISABLED, keeps text on a single auto-fitted centered line.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) allowLineWrapping: FeatureToggleMode? = FeatureToggleMode.DEFAULT,
+        @CapabilityParam(
+            description = "Allow KPsd to insert hardcoded line breaks (\\r) to fit balloon contours (DEFAULT uses plugin setting). When DISABLED, preserves original text without hardcoded newlines.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) insertHardcodedNewlines: FeatureToggleMode? = FeatureToggleMode.DEFAULT,
         context: PluginContext,
         hostFs: HostFileSystem
     ): PSDBuildResult {
@@ -407,6 +464,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             default_visible_classes = default_visible_classes,
             categories = ocrData.categories,
             cleanPatches = cleanPatches ?: cleanResult?.clean,
+            wordBreak = wordBreak,
+            allowLineWrapping = allowLineWrapping,
+            insertHardcodedNewlines = insertHardcodedNewlines,
             context = context,
             hostFs = hostFs
         )
@@ -461,6 +521,21 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             OcrCategory.none
         ),
         @CapabilityParam(description = "Optional list of cleaned crop patch image paths") cleanPatches: List<String>? = null,
+        @CapabilityParam(
+            description = "Word breaking and hyphenation strategy (DEFAULT uses plugin setting; NONE, HYPHENATE, BREAK_WORD). Syncs Photoshop's auto-hyphenation flag.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) wordBreak: WordBreakMode? = WordBreakMode.DEFAULT,
+        @CapabilityParam(
+            description = "Allow text to wrap onto multiple lines inside the bounding box (DEFAULT uses plugin setting). When DISABLED, keeps text on a single auto-fitted centered line.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) allowLineWrapping: FeatureToggleMode? = FeatureToggleMode.DEFAULT,
+        @CapabilityParam(
+            description = "Allow KPsd to insert hardcoded line breaks (\\r) to fit balloon contours (DEFAULT uses plugin setting). When DISABLED, preserves original text without hardcoded newlines.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) insertHardcodedNewlines: FeatureToggleMode? = FeatureToggleMode.DEFAULT,
         context: PluginContext,
         hostFs: HostFileSystem
     ): PSDBuildResult {
@@ -484,6 +559,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             default_visible_classes = default_visible_classes,
             categories = ocrData.categories,
             cleanPatches = cleanPatches ?: cleanResult?.clean,
+            wordBreak = wordBreak,
+            allowLineWrapping = allowLineWrapping,
+            insertHardcodedNewlines = insertHardcodedNewlines,
             context = context,
             hostFs = hostFs
         )
@@ -560,6 +638,21 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         ),
         @CapabilityParam(description = "Element classifications") categories: List<String>? = null,
         @CapabilityParam(description = "Optional list of cleaned crop patch image paths across pages") cleanPatches: List<String>? = null,
+        @CapabilityParam(
+            description = "Word breaking and hyphenation strategy (DEFAULT uses plugin setting; NONE, HYPHENATE, BREAK_WORD). Syncs Photoshop's auto-hyphenation flag.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) wordBreak: WordBreakMode? = WordBreakMode.DEFAULT,
+        @CapabilityParam(
+            description = "Allow text to wrap onto multiple lines inside the bounding box (DEFAULT uses plugin setting). When DISABLED, keeps text on a single auto-fitted centered line.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) allowLineWrapping: FeatureToggleMode? = FeatureToggleMode.DEFAULT,
+        @CapabilityParam(
+            description = "Allow KPsd to insert hardcoded line breaks (\\r) to fit balloon contours (DEFAULT uses plugin setting). When DISABLED, preserves original text without hardcoded newlines.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) insertHardcodedNewlines: FeatureToggleMode? = FeatureToggleMode.DEFAULT,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterPSDBuildResult {
@@ -865,7 +958,10 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                             borderColors = if (safeBorderColors != null) pageBorderColors else null,
                             visionResult = pageVisionResult,
                             categories = if (safeCategories != null) pageCategories else null,
-                            defaultVisibleClasses = default_visible_classes
+                            defaultVisibleClasses = default_visible_classes,
+                            wordBreak = resolveWordBreak(wordBreak),
+                            allowLineWrapping = resolveAllowLineWrapping(allowLineWrapping),
+                            insertHardcodedNewlines = resolveInsertHardcodedNewlines(insertHardcodedNewlines)
                         )
                         mergedBmp?.flush()
                         mergedCleanBmp?.flush()
@@ -945,6 +1041,21 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             OcrCategory.none
         ),
         @CapabilityParam(description = "Optional list of cleaned crop patch image paths across pages") cleanPatches: List<String>? = null,
+        @CapabilityParam(
+            description = "Word breaking and hyphenation strategy (DEFAULT uses plugin setting; NONE, HYPHENATE, BREAK_WORD). Syncs Photoshop's auto-hyphenation flag.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) wordBreak: WordBreakMode? = WordBreakMode.DEFAULT,
+        @CapabilityParam(
+            description = "Allow text to wrap onto multiple lines inside the bounding box (DEFAULT uses plugin setting). When DISABLED, keeps text on a single auto-fitted centered line.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) allowLineWrapping: FeatureToggleMode? = FeatureToggleMode.DEFAULT,
+        @CapabilityParam(
+            description = "Allow KPsd to insert hardcoded line breaks (\\r) to fit balloon contours (DEFAULT uses plugin setting). When DISABLED, preserves original text without hardcoded newlines.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) insertHardcodedNewlines: FeatureToggleMode? = FeatureToggleMode.DEFAULT,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterPSDBuildResult {
@@ -972,6 +1083,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             default_visible_classes = default_visible_classes,
             categories = ocrData.categories,
             cleanPatches = cleanPatches ?: cleanChapterResult?.clean,
+            wordBreak = wordBreak,
+            allowLineWrapping = allowLineWrapping,
+            insertHardcodedNewlines = insertHardcodedNewlines,
             context = context,
             hostFs = hostFs
         )
@@ -1030,6 +1144,21 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             OcrCategory.none
         ),
         @CapabilityParam(description = "Optional list of cleaned crop patch image paths across pages") cleanPatches: List<String>? = null,
+        @CapabilityParam(
+            description = "Word breaking and hyphenation strategy (DEFAULT uses plugin setting; NONE, HYPHENATE, BREAK_WORD). Syncs Photoshop's auto-hyphenation flag.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) wordBreak: WordBreakMode? = WordBreakMode.DEFAULT,
+        @CapabilityParam(
+            description = "Allow text to wrap onto multiple lines inside the bounding box (DEFAULT uses plugin setting). When DISABLED, keeps text on a single auto-fitted centered line.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) allowLineWrapping: FeatureToggleMode? = FeatureToggleMode.DEFAULT,
+        @CapabilityParam(
+            description = "Allow KPsd to insert hardcoded line breaks (\\r) to fit balloon contours (DEFAULT uses plugin setting). When DISABLED, preserves original text without hardcoded newlines.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) insertHardcodedNewlines: FeatureToggleMode? = FeatureToggleMode.DEFAULT,
         context: PluginContext,
         hostFs: HostFileSystem
     ): ChapterPSDBuildResult {
@@ -1054,6 +1183,9 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             default_visible_classes = default_visible_classes,
             categories = ocrData.categories,
             cleanPatches = cleanPatches ?: cleanChapterResult?.clean,
+            wordBreak = wordBreak,
+            allowLineWrapping = allowLineWrapping,
+            insertHardcodedNewlines = insertHardcodedNewlines,
             context = context,
             hostFs = hostFs
         )
@@ -1119,6 +1251,21 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         )
         cleanImagePath: String? = null,
         @CapabilityParam(description = "Optional Cleaner result containing the cleaned image path") cleanResult: CleanerResult? = null,
+        @CapabilityParam(
+            description = "Word breaking and hyphenation strategy (DEFAULT uses plugin setting; NONE, HYPHENATE, BREAK_WORD). Syncs Photoshop's auto-hyphenation flag.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) wordBreak: WordBreakMode? = WordBreakMode.DEFAULT,
+        @CapabilityParam(
+            description = "Allow text to wrap onto multiple lines inside the bounding box (DEFAULT uses plugin setting). When DISABLED, keeps text on a single auto-fitted centered line.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) allowLineWrapping: FeatureToggleMode? = FeatureToggleMode.DEFAULT,
+        @CapabilityParam(
+            description = "Allow KPsd to insert hardcoded line breaks (\\r) to fit balloon contours (DEFAULT uses plugin setting). When DISABLED, preserves original text without hardcoded newlines.",
+            defaultValue = "\"DEFAULT\"",
+            isAdvanced = true
+        ) insertHardcodedNewlines: FeatureToggleMode? = FeatureToggleMode.DEFAULT,
         context: PluginContext,
         hostFs: HostFileSystem
     ): PSDBuildResult {
@@ -1209,7 +1356,10 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             shapes = shapes,
             textColors = textColors,
             hasBorder = hasBorderList,
-            borderColors = borderColors
+            borderColors = borderColors,
+            wordBreak = resolveWordBreak(wordBreak),
+            allowLineWrapping = resolveAllowLineWrapping(allowLineWrapping),
+            insertHardcodedNewlines = resolveInsertHardcodedNewlines(insertHardcodedNewlines)
         )
         baseImage.flush()
         val psdBytes = withContext(Dispatchers.Default) {
@@ -1580,6 +1730,15 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
         }
     }
 
+    private fun resolveWordBreak(override: WordBreakMode?): WordBreak =
+        (override ?: WordBreakMode.DEFAULT).resolve(settings.wordBreak).toKpsd()
+
+    private fun resolveAllowLineWrapping(override: FeatureToggleMode?): Boolean =
+        (override ?: FeatureToggleMode.DEFAULT).resolve(settings.allowLineWrapping, fallback = true)
+
+    private fun resolveInsertHardcodedNewlines(override: FeatureToggleMode?): Boolean =
+        (override ?: FeatureToggleMode.DEFAULT).resolve(settings.insertHardcodedNewlines, fallback = true)
+
     suspend fun buildPsdObject(
         imagePath: String? = null,
         baseImageBmp: BufferedImage? = null,
@@ -1609,7 +1768,10 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
             OcrCategory.non_text,
             OcrCategory.none
         ),
-        cleanPatches: List<String>? = null
+        cleanPatches: List<String>? = null,
+        wordBreak: WordBreak = (settings.wordBreak ?: PsdWordBreak.NONE).toKpsd(),
+        allowLineWrapping: Boolean = settings.allowLineWrapping ?: true,
+        insertHardcodedNewlines: Boolean = settings.insertHardcodedNewlines ?: true
     ): Psd {
         val originalBaseImage = if (baseImageBmp != null) {
             baseImageBmp
@@ -2149,11 +2311,20 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                             paddingPercentage = settings.paddingPercentage,
                             rot = rot
                         )
+                        val textConfig = TextLayoutHelper.resolveLayerTextConfig(
+                            text = text,
+                            layout = layout,
+                            fontName = fName,
+                            initialFontSize = initialFontSize,
+                            wordBreak = wordBreak,
+                            allowLineWrapping = allowLineWrapping,
+                            insertHardcodedNewlines = insertHardcodedNewlines
+                        )
 
                         // Use first 20 characters of the text as the layer name
                         val textName = if (text.length > 20) text.substring(0, 20) else text.ifEmpty { "Testo $index" }
 
-                        textLayer(name = textName, textValue = text) {
+                        textLayer(name = textName, textValue = textConfig.textValue) {
                             if (!isClassVisible) {
                                 hidden = true
                             }
@@ -2162,23 +2333,30 @@ class PSDBuilderPlugin(val settings: PSDBuilderSettings = PSDBuilderSettings()) 
                             bottom = layout.bottom
                             right = layout.right
                             shapeType = TextShapeType.BOX
-                            boxBounds = floatArrayOf(0f, 0f, layout.boxWidth.toFloat(), layout.boxHeight.toFloat())
+                            boxBounds = textConfig.boxBounds
+                            if (textConfig.boundaryShape == null) {
+                                textTop = textConfig.textTop
+                                textBottom = textConfig.textBottom
+                            }
                             transform(cos, sin, -sin, cos, layout.tx, layout.ty)
 
-                            this.boundaryShape = layout.boundaryShape
+                            this.boundaryShape = textConfig.boundaryShape
 
-                            wordBreak = com.wip.kpsd.WordBreak.NONE
-                            verticalAlignment = com.wip.kpsd.VerticalAlignment.CENTER
+                            this.wordBreak = wordBreak
+                            verticalAlignment = VerticalAlignment.CENTER
 
                             style {
                                 font(fName)
-                                this.fontSize = initialFontSize.toFloat()
-                                autoFit = com.wip.kpsd.AutoFit(minSize = 8f, maxSize = initialFontSize.toFloat())
+                                this.fontSize = textConfig.fontSize
+                                if (textConfig.boundaryShape != null) {
+                                    autoFit = AutoFit(minSize = 8f, maxSize = textConfig.fontSize)
+                                }
                                 fillColor(textColor.r, textColor.g, textColor.b)
                             }
 
                             paragraphStyle {
                                 justification = Justification.CENTER
+                                autoHyphenate = textConfig.autoHyphenate
                             }
 
                             if (hasStroke && borderSize > 0) {

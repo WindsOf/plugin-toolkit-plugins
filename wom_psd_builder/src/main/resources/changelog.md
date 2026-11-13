@@ -1,3 +1,10 @@
+Version: 5.6.0
+Date: 2026-11-13
+Added:
+  - Added hyphenation and word-breaking control (`wordBreak`: `NONE`, `HYPHENATE`, `BREAK_WORD`) in both `PSDBuilderSettings` and advanced capability parameters (`WordBreakMode`), automatically syncing Photoshop's `ParagraphStyle.autoHyphenate` flag.
+  - Added `allowLineWrapping` setting and advanced capability parameter (`FeatureToggleMode`) to toggle between multi-line balloon wrapping and single-line auto-fitted centered text.
+  - Added `insertHardcodedNewlines` setting and advanced capability parameter (`FeatureToggleMode`) to prevent KPsd from inserting hardcoded `\r` line breaks while still preserving AutoFit font sizing and vertical centering.
+-------------------------------------------------------------------------------------------------
 Version: 5.5.3
 Date: 2026-10-05
 Fixed:
