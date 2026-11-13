@@ -1,3 +1,9 @@
+Version: 1.1.2
+Date: 2026-11-12
+Fixed:
+  - Fixed missing plugin settings in manifest to restore setting visibility in the main app.
+  - Added self-healing fallback in `VisionSettings.sanitize()` ensuring adaptive dynamic ROI expansion and shifted tiling defaults are restored when host settings payloads are uninitialized.
+-------------------------------------------------------------------------------------------------
 Version: 1.1.1
 Date: 2026-10-04
 Added:

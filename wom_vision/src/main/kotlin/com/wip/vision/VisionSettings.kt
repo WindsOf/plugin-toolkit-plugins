@@ -47,4 +47,27 @@ data class VisionSettings(
         required = true
     )
     val borderTouchThresholdPx: Int = 3
-)
+) {
+    /**
+     * Sanitizes settings against uninitialized or zero-defaulted values.
+     * When settings are not passed by the host app or when KSP generates primitive fallbacks (0 / false),
+     * this ensures the plugin falls back to safe and intended defaults rather than silently disabling features.
+     */
+    fun sanitize(): VisionSettings {
+        val isEmptyKspDefaults = !enableShiftedTiling &&
+            detectionTilingPasses == 0 &&
+            !enableDynamicRoiExpansion &&
+            maxRoiExpansionRetries == 0 &&
+            roiExpansionRatio == 0.0 &&
+            borderTouchThresholdPx == 0
+        if (isEmptyKspDefaults) {
+            return VisionSettings()
+        }
+        return copy(
+            detectionTilingPasses = if (detectionTilingPasses <= 0) 2 else detectionTilingPasses,
+            maxRoiExpansionRetries = if (maxRoiExpansionRetries <= 0) 1 else maxRoiExpansionRetries,
+            roiExpansionRatio = if (roiExpansionRatio <= 0.0) 0.25 else roiExpansionRatio,
+            borderTouchThresholdPx = if (borderTouchThresholdPx <= 0) 3 else borderTouchThresholdPx
+        )
+    }
+}

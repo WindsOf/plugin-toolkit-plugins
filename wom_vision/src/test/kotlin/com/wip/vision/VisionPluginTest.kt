@@ -261,6 +261,45 @@ class VisionPluginTest {
     }
 
     @Test
+    fun testVisionSettingsSanitizeAndEmptyKspFallbackRecovery() {
+        // When host app passes empty settings, KSP generates primitive zero/false values
+        val emptyKspSettings = VisionSettings(
+            enableShiftedTiling = false,
+            detectionTilingPasses = 0,
+            enableDynamicRoiExpansion = false,
+            maxRoiExpansionRetries = 0,
+            roiExpansionRatio = 0.0,
+            borderTouchThresholdPx = 0
+        )
+        val sanitized = emptyKspSettings.sanitize()
+        assertTrue(sanitized.enableShiftedTiling, "Should restore enableShiftedTiling default")
+        assertEquals(2, sanitized.detectionTilingPasses, "Should restore detectionTilingPasses default")
+        assertTrue(sanitized.enableDynamicRoiExpansion, "Should restore enableDynamicRoiExpansion default")
+        assertEquals(1, sanitized.maxRoiExpansionRetries, "Should restore maxRoiExpansionRetries default")
+        assertEquals(0.25, sanitized.roiExpansionRatio, "Should restore roiExpansionRatio default")
+        assertEquals(3, sanitized.borderTouchThresholdPx, "Should restore borderTouchThresholdPx default")
+
+        // When user legitimately sets enableShiftedTiling to false in UI
+        val userExplicitDisabled = VisionSettings(
+            enableShiftedTiling = false,
+            detectionTilingPasses = 2,
+            enableDynamicRoiExpansion = true,
+            maxRoiExpansionRetries = 1,
+            roiExpansionRatio = 0.25,
+            borderTouchThresholdPx = 3
+        )
+        val sanitizedUser = userExplicitDisabled.sanitize()
+        assertFalse(sanitizedUser.enableShiftedTiling, "Explicit false should be respected")
+        assertEquals(2, sanitizedUser.detectionTilingPasses)
+
+        // VisionPlugin constructor should automatically sanitize
+        val pluginWithEmptySettings = VisionPlugin(settings = emptyKspSettings)
+        assertTrue(pluginWithEmptySettings.settings.enableShiftedTiling)
+        assertTrue(pluginWithEmptySettings.settings.enableDynamicRoiExpansion)
+        assertEquals(2, pluginWithEmptySettings.settings.detectionTilingPasses)
+    }
+
+    @Test
     fun testVisionSettingsAndShiftedTilingExecution() {
         val customSettings = VisionSettings(
             enableShiftedTiling = true,

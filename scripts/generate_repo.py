@@ -235,7 +235,7 @@ def generate_repo(name: str, url: str, output_dir: str, clean: bool = False, tar
         target_pkg = base_pkg
         display_name = base_name
         display_desc = base_desc
-        gradle_wrapper = "gradlew.bat" if os.name == "nt" else "./gradlew"
+        gradle_wrapper = str((root_path / ("gradlew.bat" if os.name == "nt" else "gradlew")).resolve())
         gradle_args = [gradle_wrapper, f":{plugin_dir.name}:clean", f":{plugin_dir.name}:jar", "--no-configuration-cache"] if clean else [gradle_wrapper, f":{plugin_dir.name}:jar"]
         target_jar_filename = f"{plugin_dir.name}-{base_version}.jar"
 
@@ -263,6 +263,20 @@ def generate_repo(name: str, url: str, output_dir: str, clean: bool = False, tar
                             print(f"  [WARN] Cached JAR for {target_pkg} failed integrity check ({_zip_err}). Forcing rebuild.")
 
                         if jar_is_valid:
+                            try:
+                                with open(manifest_path, "r", encoding="utf-8") as _mf:
+                                    _m_data = json.load(_mf)
+                                src_has_settings = any(
+                                    "@PluginSetting" in p.read_text(encoding="utf-8", errors="ignore")
+                                    for p in (plugin_dir / "src").rglob("*.kt")
+                                )
+                                if src_has_settings and not _m_data.get("settings"):
+                                    print(f"  [WARN] Cached manifest for {target_pkg} is missing settings defined in source. Forcing rebuild.")
+                                    jar_is_valid = False
+                            except Exception:
+                                pass
+
+                        if jar_is_valid:
                             print(f"  -> Reusing existing build for {target_pkg} v{base_version}")
                             repo_plugins.append(prev_p)
                             should_build = False
@@ -283,6 +297,10 @@ def generate_repo(name: str, url: str, output_dir: str, clean: bool = False, tar
         build_manifest = plugin_dir / "build" / "resources" / "main" / "META-INF" / "manifest.json"
         if build_manifest.exists():
             manifest_path = build_manifest
+        else:
+            ksp_manifest = plugin_dir / "build" / "generated" / "ksp" / "main" / "resources" / "META-INF" / "manifest.json"
+            if ksp_manifest.exists():
+                manifest_path = ksp_manifest
 
         if not manifest_path or not manifest_path.exists():
             print(f"  [ERROR] No manifest.json found for {plugin_dir.name}, skipping.")
@@ -290,6 +308,18 @@ def generate_repo(name: str, url: str, output_dir: str, clean: bool = False, tar
 
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
+
+        # Ensure manifest has settings if KSP generated them
+        if not manifest.get("settings"):
+            ksp_manifest = plugin_dir / "build" / "generated" / "ksp" / "main" / "resources" / "META-INF" / "manifest.json"
+            if ksp_manifest.exists() and ksp_manifest != manifest_path:
+                try:
+                    with open(ksp_manifest, "r", encoding="utf-8") as kf:
+                        ksp_data = json.load(kf)
+                        if ksp_data.get("settings"):
+                            manifest["settings"] = ksp_data["settings"]
+                except Exception:
+                    pass
 
         # Fix optional settings in manifest
         optional_settings = find_optional_settings(plugin_dir)

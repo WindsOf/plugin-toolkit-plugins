@@ -43,11 +43,12 @@ import kotlin.math.max
 @PluginInfo(
     id = "com.wip.vision",
     name = "WOM Vision",
-    version = "1.1.1",
+    version = "1.1.2",
     description = "Object detection and instance segmentation plugin using YOLO and RF-DETR.",
     supportedOs = [OS.WINDOWS, OS.LINUX]
 )
-class VisionPlugin(val settings: VisionSettings = VisionSettings()) {
+class VisionPlugin(settings: VisionSettings = VisionSettings()) {
+    val settings: VisionSettings = settings.sanitize()
 
     init {
         try {
