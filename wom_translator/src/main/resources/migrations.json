@@ -1,5 +1,10 @@
 [
   {
+    "fromVersion": "1.8.1",
+    "toVersion": "1.8.2",
+    "capabilityMigrations": []
+  },
+  {
     "fromVersion": "1.7.0",
     "toVersion": "1.8.0",
     "capabilityMigrations": []

@@ -586,8 +586,8 @@ class TranslatorAITest {
             assertTrue(chapterChangelogFile.exists(), "Chapter-specific changelog file should exist")
             assertTrue(chapterChangelogFile.readText().contains("Virion in archivio"))
 
-            assertTrue(legacyDict.exists(), "Legacy dizionario_aggiornato.md should exist")
-            assertTrue(legacyChangelog.exists(), "Legacy dizionario_changelog.txt should exist")
+            assertFalse(legacyDict.exists(), "Legacy dizionario_aggiornato.md must no longer be written")
+            assertFalse(legacyChangelog.exists(), "Legacy dizionario_changelog.txt must no longer be written")
         } finally {
             tempDir.deleteRecursively()
         }
@@ -904,6 +904,61 @@ class TranslatorAITest {
         assertFalse(parsed.updatedDictionary.startsWith("[File]"))
         assertTrue(parsed.updatedDictionary.startsWith("=== LORE & GLOSSARIO FISSO ==="))
         assertFalse(service.isPlaceholderDictionary(parsed.updatedDictionary))
+    }
+
+    private fun newService() = KoogAITranslatorService(
+        io.mockk.mockk<PluginContext>(relaxed = true),
+        TranslatorAISettings(),
+        io.mockk.mockk<HostFileSystem>(relaxed = true)
+    )
+
+    @Test
+    fun testExtractAssistantContentDropsReasoning() {
+        val responses = listOf(
+            ai.koog.prompt.message.Message.Reasoning(
+                content = "Dobbiamo produrre output secondo schema...",
+                metaInfo = ai.koog.prompt.message.ResponseMetaInfo.Empty
+            ),
+            ai.koog.prompt.message.Message.Assistant(
+                content = "# CHILOMETRO / MODIFICHE APPORTATE\n- Aggiunto al buffer: Cap. 72",
+                metaInfo = ai.koog.prompt.message.ResponseMetaInfo.Empty
+            )
+        )
+        val content = newService().extractAssistantContent(responses)
+        assertFalse(content.contains("Dobbiamo"))
+        assertTrue(content.contains("Aggiunto al buffer: Cap. 72"))
+    }
+
+    @Test
+    fun testParseDictionaryUpdateResponseIgnoresLeakedReasoning() {
+        val raw = """
+            Dobbiamo aggiornare il Changelog in "# CHILOMETRO / MODIFICHE APPORTATE":
+            # NUOVO DIZIONARIO AGGIORNATO
+            ragionamento sporco sul formato
+
+            # CHILOMETRO / MODIFICHE APPORTATE
+            - Aggiunto al buffer: Cap. 72
+
+            # NUOVO DIZIONARIO AGGIORNATO
+            ```markdown
+            === LORE & GLOSSARIO FISSO ===
+            mana = maschile
+
+            === BUFFER EVENTI RECENTI ===
+            - Cap. 72: Battaglia
+            ```
+        """.trimIndent()
+        val parsed = newService().parseDictionaryUpdateResponse(raw)
+        assertEquals("- Aggiunto al buffer: Cap. 72", parsed.changelog)
+        assertTrue(parsed.updatedDictionary.startsWith("=== LORE & GLOSSARIO FISSO ==="))
+        assertFalse(parsed.updatedDictionary.contains("ragionamento"))
+    }
+
+    @Test
+    fun testIsPlaceholderDictionaryDetectsTemplateFiller() {
+        val service = newService()
+        assertTrue(service.isPlaceholderDictionary("=== LORE & GLOSSARIO FISSO ===\n...\n"))
+        assertTrue(service.isPlaceholderDictionary("=== LORE & GLOSSARIO FISSO ===\n(trascrivi qui per intero tutte le voci)\n\n=== BUFFER EVENTI RECENTI ===\n..."))
     }
 
     @Test

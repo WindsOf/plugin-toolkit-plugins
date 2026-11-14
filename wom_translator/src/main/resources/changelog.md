@@ -1,3 +1,14 @@
+Version: 1.8.2
+Date: 2026-11-13
+Fixed:
+  - Fixed dictionary update with DeepSeek v4 pro: the model's reasoning text was written into changelog.md and dictionary.md. Only the final assistant answer is now used (reasoning messages are discarded).
+  - Hardened the dictionary response parser: when the output contains the section headers more than once, the last (real) ones are used, and the changelog only contains the text after its header.
+  - Dictionaries made only of template filler ("...", "(trascrivi qui ...)") are now detected as placeholders and trigger the automatic recovery request.
+Removed:
+  - Duplicate legacy output files `dizionario_aggiornato.md` and `dizionario_changelog.txt` are no longer written. Use `dictionary.md` and `changelog.md` (plus `changelog_<chapter>.md`).
+Migration:
+  - If you read `dizionario_aggiornato.md` / `dizionario_changelog.txt`, switch to `dictionary.md` / `changelog.md` in the same output directory.
+-------------------------------------------------------------------------------------------------
 Version: 1.8.1
 Date: 2026-11-06
 Fixed:

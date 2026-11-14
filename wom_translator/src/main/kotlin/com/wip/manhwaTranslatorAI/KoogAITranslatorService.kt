@@ -7,6 +7,7 @@ import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
 import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
+import ai.koog.prompt.message.Message
 import ai.koog.prompt.params.LLMParams
 import com.wip.common.inference.deepseek.DeepSeekManager
 import com.wip.common.inference.llm.ReasoningEffortLevel
@@ -638,7 +639,7 @@ class KoogAITranslatorService(
             logger.info("Sending translation request for chunk $chunkIndex (${chunk.size} strings)...")
             val responses = executor.execute(translatePrompt, model)
 
-            var rawResponse = responses.joinToString("\n") { it.content }.trim()
+            var rawResponse = extractAssistantContent(responses)
 
             if (debugLogging || settings.debugLogging == true) {
                 logger.info("[DEBUG] Chunk $chunkIndex raw LLM response:\n$rawResponse")
@@ -825,7 +826,7 @@ class KoogAITranslatorService(
                 }
 
                 val responses = executor.execute(summaryPrompt, model)
-                val summary = responses.joinToString("\n") { it.content }.trim()
+                val summary = extractAssistantContent(responses)
 
                 // Strip thinking blocks if present
                 val cleanedSummary = summary.replace(
@@ -878,6 +879,31 @@ class KoogAITranslatorService(
     }
 
     /**
+     * Joins only the final assistant answer of an LLM response.
+     * Reasoning/thinking messages (e.g. DeepSeek `reasoning_content`) are dropped, otherwise the
+     * model's chain-of-thought ends up in the generated changelog and dictionary files.
+     */
+    internal fun extractAssistantContent(responses: List<Message.Response>): String {
+        val answers = responses.filterIsInstance<Message.Assistant>()
+        val selected = answers.ifEmpty { responses.filterNot { it is Message.Reasoning } }
+        return selected.joinToString("\n") { it.content }.trim()
+    }
+
+    /**
+     * Checks whether the dictionary only contains the block headers filled with template filler such as
+     * "..." or "(trascrivi qui ...)" instead of real entries.
+     */
+    private fun isTemplateFillerOnly(content: String): Boolean {
+        val bodyLines = content.lines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("===") }
+        if (bodyLines.isEmpty()) return false
+        val ellipsis = Regex("^[-*\\s]*(?:\\.{3,}|\u2026)$")
+        val transcribeHint = Regex("^\\(\\s*trascrivi\\b.*\\)$", RegexOption.IGNORE_CASE)
+        return bodyLines.all { ellipsis.matches(it) || transcribeHint.matches(it) }
+    }
+
+    /**
      * Checks whether the given dictionary content is a placeholder (such as "[File]", "[Nuovo file]",
      * empty string, or generic bracketed placeholder) rather than actual dictionary markdown content.
      */
@@ -908,6 +934,8 @@ class KoogAITranslatorService(
         val blockCount = listOf(hasLoreHeader, hasBufferHeader, hasArchiveHeader, hasCharactersHeader).count { it }
 
         // If it doesn't contain at least one essential block header (especially lore or buffer)
+        if (blockCount > 0 && isTemplateFillerOnly(trimmed)) return true
+
         if (blockCount == 0) {
             // Very short content without headers or bare word "File"
             if (trimmed.length < 80 || trimmed.lines().size <= 3) {
@@ -930,22 +958,24 @@ class KoogAITranslatorService(
             Regex("<(thought|thinking|think)>(?:.*?</\\1>|.*$)", RegexOption.DOT_MATCHES_ALL), ""
         ).trim()
 
-        // 1. Separate Changelog and Dictionary sections
+        // 1. Separate Changelog and Dictionary sections.
+        // Models that leak their reasoning as plain text may mention the headers several times:
+        // the real answer is always the LAST occurrence.
         val contextHeaderRegex = Regex(
             "(?i)^#+\\s*(?:NUOVO\\s+(?:DIZIONARIO(?:\\s+AGGIORNATO)?|FILE\\s+DI\\s+CONTESTO|CONTESTO)|DIZIONARIO\\s+AGGIORNATO|CONTESTO\\s+AGGIORNATO|FILE\\s+DI\\s+CONTESTO|NUOVO\\s+TESTO\\s+DEL\\s+DIZIONARIO|TESTO\\s+DEL\\s+DIZIONARIO).*$",
             RegexOption.MULTILINE
         )
-        val match = contextHeaderRegex.find(cleaned)
+        val match = contextHeaderRegex.findAll(cleaned).lastOrNull()
 
         var changelogPart: String
-        var dictionaryPart: String
+        val dictionaryPart: String
 
         if (match != null) {
             changelogPart = cleaned.substring(0, match.range.first).trim()
             dictionaryPart = cleaned.substring(match.range.last + 1).trim()
         } else {
-            // Fallback: look for the first 4-block header: "=== LORE & GLOSSARIO FISSO ==="
-            val loreIndex = cleaned.indexOf("=== LORE & GLOSSARIO FISSO ===")
+            // Fallback: split on the last "=== LORE & GLOSSARIO FISSO ===" block header
+            val loreIndex = cleaned.lastIndexOf("=== LORE & GLOSSARIO FISSO ===")
             if (loreIndex != -1) {
                 changelogPart = cleaned.substring(0, loreIndex).trim()
                 dictionaryPart = cleaned.substring(loreIndex).trim()
@@ -955,13 +985,15 @@ class KoogAITranslatorService(
             }
         }
 
-        // Clean up changelog part (remove leading "# CHILOMETRO / MODIFICHE APPORTATE" or similar headers)
-        changelogPart = changelogPart
-            .replace(
-                Regex("(?i)^#+\\s*(?:CHILOMETRO|CHANGELOG|MODIFICHE(?:\\s+APPORTATE)?)[^\r\n]*", RegexOption.MULTILINE),
-                ""
-            )
-            .trim()
+        // Keep only the text after the last changelog header, dropping any preamble/reasoning before it.
+        val changelogHeaderRegex =
+            Regex("(?i)^#+\\s*(?:CHILOMETRO|CHANGELOG|MODIFICHE(?:\\s+APPORTATE)?)[^\\r\\n]*", RegexOption.MULTILINE)
+        val changelogHeader = changelogHeaderRegex.findAll(changelogPart).lastOrNull()
+        changelogPart = if (changelogHeader != null) {
+            changelogPart.substring(changelogHeader.range.last + 1).trim()
+        } else {
+            changelogPart.trim()
+        }
 
         // 2. Extract markdown from dictionaryPart (stripping code fences)
         val fenceRegex = Regex("```(?:markdown|md)?\\s*\\n?([\\s\\S]*?)```", RegexOption.IGNORE_CASE)
@@ -1370,6 +1402,7 @@ class KoogAITranslatorService(
             2. Il NUOVO DIZIONARIO AGGIORNATO intero e formattato, pronto per essere salvato.
 
             AVVISO CRITICO FONDAMENTALE SULL'OUTPUT:
+            - NON SCRIVERE RAGIONAMENTI, ANALISI O BOZZE NELLA RISPOSTA: la risposta deve contenere SOLO i due blocchi richiesti (changelog e dizionario).
             - SEI UN MODELLO TESTUALE VIA API. NON HAI ALCUNA CAPACITÀ DI ALLEGARE FILE ESTERNI, ARTEFATTI O DOWNLOAD.
             - NON PUOI FORNIRE UN FILE FISICO: L'UNICO MODO PER SALVARE IL DIZIONARIO È SCRIVERE IL TESTO INTEGRALE E LETTERALE ALL'INTERNO DELLA TUA RISPOSTA.
             - DIVIETO ASSOLUTO DI PLACEHOLDER: È SEVERAMENTE VIETATO rispondere con stringhe segnaposto come '[File]', '[File: ...]', '[Nuovo file]', '[Contenuto invariato]', '...', o qualsiasi altro placeholder tra parentesi quadre.
@@ -1539,7 +1572,7 @@ class KoogAITranslatorService(
         logger.info("[TranslatorAI] Requesting dictionary update from model: $finalModelId...")
         val rawResponse = retryWithBackoff {
             val responses = executor.execute(dictPrompt, model)
-            val content = responses.joinToString("\n") { it.content }.trim()
+            val content = extractAssistantContent(responses)
             if (debugLogging || settings.debugLogging == true) {
                 logger.info("[DEBUG] Dictionary update raw LLM response:\n$content")
             }
@@ -1583,7 +1616,7 @@ class KoogAITranslatorService(
             try {
                 val recoveryResponse = retryWithBackoff {
                     val responses = executor.execute(recoveryPrompt, model)
-                    val content = responses.joinToString("\n") { it.content }.trim()
+                    val content = extractAssistantContent(responses)
                     if (debugLogging || settings.debugLogging == true) {
                         logger.info("[DEBUG] Recovery raw LLM response:\n$content")
                     }
@@ -1631,7 +1664,8 @@ class KoogAITranslatorService(
 
     /**
      * Saves updated dictionary and changelog as separated files in the output directory.
-     * Also writes backwards-compatible legacy files and optional chapter-specific changelog.
+     * Writes dictionary.md, changelog.md and an optional chapter-specific changelog_<chapter>.md.
+     * Legacy duplicates (dizionario_aggiornato.md, dizionario_changelog.txt) are no longer written.
      */
     suspend fun saveDictionaryFiles(
         parsed: DictionaryUpdateResult,
@@ -1652,22 +1686,10 @@ class KoogAITranslatorService(
         hostFs.writeTextFile(dictFile.absolutePath, parsed.updatedDictionary)
         logger.info("[TranslatorAI] Saved updated dictionary to: ${dictFile.absolutePath}")
 
-        // Legacy dictionary file for backwards compatibility
-        val legacyDictFile = File(outDir, "dizionario_aggiornato.md")
-        if (legacyDictFile.canonicalPath != dictFile.canonicalPath) {
-            hostFs.writeTextFile(legacyDictFile.absolutePath, parsed.updatedDictionary)
-        }
-
         // 2) Primary changelog file
         val changelogFile = File(outDir, "changelog.md")
         hostFs.writeTextFile(changelogFile.absolutePath, parsed.changelog)
         logger.info("[TranslatorAI] Saved dictionary changelog to: ${changelogFile.absolutePath}")
-
-        // Legacy changelog file for backwards compatibility
-        val legacyChangelogFile = File(outDir, "dizionario_changelog.txt")
-        if (legacyChangelogFile.canonicalPath != changelogFile.canonicalPath) {
-            hostFs.writeTextFile(legacyChangelogFile.absolutePath, parsed.changelog)
-        }
 
         // If chapterNumber is provided, also save chapter-specific changelog
         if (!chapterNumber.isNullOrBlank()) {
