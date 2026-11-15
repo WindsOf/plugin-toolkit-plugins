@@ -1,0 +1,12 @@
+[
+  {
+    "fromVersion": "1.0.0",
+    "toVersion": "1.0.1",
+    "capabilityMigrations": []
+  },
+  {
+    "fromVersion": "1.0.1",
+    "toVersion": "1.0.2",
+    "capabilityMigrations": []
+  }
+]
