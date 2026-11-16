@@ -2,6 +2,7 @@ package com.wip.mangauploader
 
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -10,8 +11,12 @@ import org.wip.plugintoolkit.api.HostFileSystem
 import org.wip.plugintoolkit.api.PluginFileSystem
 import org.wip.plugintoolkit.api.PluginLogger
 import org.wip.plugintoolkit.api.PluginStorage
+import org.wip.plugintoolkit.api.ProgressData
 import org.wip.plugintoolkit.api.RelativePath
 import org.wip.plugintoolkit.api.ScopedFileSystem
+import org.wip.plugintoolkit.api.sdui.CapabilityJobSnapshot
+import org.wip.plugintoolkit.api.sdui.CapabilityJobStatus
+import java.io.File
 import java.util.UUID
 
 /** Builds a validated [RelativePath] (throws on traversal attempts). */
@@ -261,7 +266,8 @@ object LibraryOps {
                 volume = remote.volume.orEmpty().trim(),
                 title = remote.title.orEmpty().trim(),
                 language = language.trim().ifEmpty { local?.mdSnapshot?.language ?: "en" },
-                pageSignature = preservedSig
+                pageSignature = preservedSig,
+                pageCount = remote.pageCount
             )
             result = upsertChapter(
                 result,
@@ -354,13 +360,20 @@ class PageImporter(
             pluginFs: PluginFileSystem,
             chapterId: String,
             originalName: String,
-            bytes: ByteArray
+            bytes: ByteArray,
+            remoteUrl: String? = null
         ): PageRef {
             val cleanExt = extension(originalName).takeIf { it in IMAGE_EXTENSIONS } ?: "png"
             val id = newId("pg")
             val stored = "chapters/$chapterId/$id.$cleanExt"
             pluginFs.writeFile(relPath(stored), bytes).getOrThrow()
-            return PageRef(id = id, storedPath = stored, originalName = originalName)
+            return PageRef(
+                id = id,
+                storedPath = stored,
+                originalName = originalName,
+                remoteUrl = remoteUrl,
+                contentHash = sha256Hex(bytes)
+            )
         }
 
         /** Wraps remote image URLs as remote-backed [PageRef] entries without downloading bytes eagerly. */
@@ -387,10 +400,219 @@ class PageImporter(
     }
 }
 
+/** Formats a byte count cleanly for UI status messages, logs, and transfer summaries. */
+fun formatByteCount(bytes: Long): String = when {
+    bytes >= 1024L * 1024L -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
+    bytes >= 1024L -> "${bytes / 1024L} KB"
+    else -> "$bytes B"
+}
+
+/** Summary of a local image cache inspection / prune pass under `chapters/`. */
+data class CachePruneResult(
+    val remainingBytes: Long,
+    val orphanFilesRemoved: Int = 0,
+    val evictedChapters: Int = 0,
+    val freedBytes: Long = 0L
+)
+
+/**
+ * Manages cached chapter page image files stored under `chapters/` in plugin data storage.
+ * - Cleans orphaned files not referenced by any chapter page in `library.json` (and heals stale
+ *   post-publish mixed `pages` lists).
+ * - When the total size exceeds [maxCacheMb] (> 0), evicts oldest already-published chapters that
+ *   have confirmed remote URLs and no unpushed local edits, converting them back to remote-only.
+ * - Unpublished drafts and protected chapters are never deleted.
+ */
+object ImageCacheManager {
+    suspend fun measureBytes(fs: ScopedFileSystem, library: Library): Long =
+        discoverCachedFiles(fs, library).values.sum()
+
+    suspend fun prune(
+        fs: ScopedFileSystem,
+        store: LibraryStore,
+        maxCacheMb: Int,
+        logger: PluginLogger? = null,
+        protectedChapterIds: Set<String> = emptySet(),
+        maxBytesOverride: Long? = null
+    ): CachePruneResult {
+        var library = store.load()
+
+        // Heal any pre-v1.0.8 chapter that still holds a mixed remote+local draft matching its
+        // already-published Cubari snapshot so its temporary local files can be reclaimed as orphans.
+        val healIds = library.chapters.filter(::isPublishedStaleMixedChapter).mapTo(mutableSetOf()) { it.id }
+        if (healIds.isNotEmpty()) {
+            library = store.mutate { current ->
+                var next = current
+                for (ch in current.chapters) {
+                    if (ch.id in healIds && isPublishedStaleMixedChapter(ch)) {
+                        next = LibraryOps.upsertChapter(next, ch.copy(pages = emptyList()))
+                    }
+                }
+                next
+            }
+        }
+
+        val discovered = discoverCachedFiles(fs, library)
+        val remaining = discovered.toMutableMap()
+        val referenced = referencedPaths(library)
+
+        var orphanCount = 0
+        var freedBytes = 0L
+        for ((path, size) in discovered) {
+            if (path !in referenced) {
+                if (runCatching { fs.deleteFile(relPath(path)).isSuccess }.getOrDefault(false)) {
+                    remaining.remove(path)
+                    orphanCount++
+                    freedBytes += size
+                }
+            }
+        }
+
+        val limitBytes = maxBytesOverride ?: if (maxCacheMb > 0) maxCacheMb.toLong() * 1024L * 1024L else 0L
+        var totalBytes = remaining.values.sum()
+        val evictedModes = linkedMapOf<String, Boolean>() // chapterId -> clearPagesList
+
+        if (limitBytes > 0L && totalBytes > limitBytes) {
+            val candidates = library.chapters
+                .filter { ch -> ch.id !in protectedChapterIds && ch.pages.any { it.isLocal } && isSafeToEvict(ch) }
+                .sortedBy { it.cubariUpdatedAtEpochSec ?: it.cubariPublishedAtEpochSec ?: it.mangadexUpdatedAtEpochSec ?: it.createdAtEpochSec }
+
+            for (ch in candidates) {
+                if (totalBytes <= limitBytes) break
+                val chPaths = ch.pages.mapNotNull { it.storedPath.takeIf(String::isNotBlank) }.toSet()
+                val otherReferenced = library.chapters
+                    .filter { it.id != ch.id && it.id !in evictedModes }
+                    .flatMap { it.pages }
+                    .mapNotNull { it.storedPath.takeIf(String::isNotBlank) }
+                    .toSet()
+
+                var chFreed = 0L
+                for (path in chPaths) {
+                    if (path !in otherReferenced) {
+                        val size = remaining[path] ?: 0L
+                        if (runCatching { fs.deleteFile(relPath(path)).isSuccess }.getOrDefault(false)) {
+                            remaining.remove(path)
+                            chFreed += size
+                        }
+                    }
+                }
+                if (chFreed > 0L || chPaths.isNotEmpty()) {
+                    totalBytes = (totalBytes - chFreed).coerceAtLeast(0L)
+                    freedBytes += chFreed
+                    evictedModes[ch.id] = ch.isOnCubari && ch.cubariPageUrls.size == ch.pages.size
+                }
+            }
+
+            if (evictedModes.isNotEmpty()) {
+                store.mutate { current ->
+                    var next = current
+                    for ((chId, clearList) in evictedModes) {
+                        val ch = next.chapterById(chId) ?: continue
+                        if (!isSafeToEvict(ch)) continue
+                        val updatedPages = if (clearList) emptyList() else ch.pages.map { it.copy(storedPath = "") }
+                        next = LibraryOps.upsertChapter(next, ch.copy(pages = updatedPages))
+                    }
+                    next
+                }
+            }
+        }
+
+        pruneEmptyDiskDirs(fs)
+        if (orphanCount > 0 || evictedModes.isNotEmpty()) {
+            logger?.info(
+                "Cache prune complete: removed $orphanCount orphan(s), evicted ${evictedModes.size} chapter(s), " +
+                    "freed $freedBytes byte(s), remaining $totalBytes byte(s)"
+            )
+        }
+        return CachePruneResult(
+            remainingBytes = totalBytes,
+            orphanFilesRemoved = orphanCount,
+            evictedChapters = evictedModes.size,
+            freedBytes = freedBytes
+        )
+    }
+
+    private fun isPublishedStaleMixedChapter(ch: Chapter): Boolean =
+        ch.isOnCubari &&
+            ch.pages.isNotEmpty() &&
+            ch.pages.any { it.isRemoteOnly } &&
+            !ChangeDetector.hasPageChanges(ch.pages, ch.cubariSnapshot?.pageSignature, true, ch.cubariSnapshot?.pageHashes)
+
+    private fun isSafeToEvict(ch: Chapter): Boolean {
+        val noUnpushedCubariEdits = !ch.isOnCubari ||
+            !ChangeDetector.hasPageChanges(ch.pages, ch.cubariSnapshot?.pageSignature, true, ch.cubariSnapshot?.pageHashes)
+        val cubariBacked = ch.isOnCubari && ch.cubariPageUrls.size == ch.pages.size && noUnpushedCubariEdits
+        val allRemoteUrlBacked = ch.pages.isNotEmpty() && ch.pages.all { !it.remoteUrl.isNullOrBlank() } && noUnpushedCubariEdits
+        return cubariBacked || allRemoteUrlBacked
+    }
+
+    private fun referencedPaths(library: Library): Set<String> =
+        library.chapters.flatMap { it.pages }
+            .mapNotNull { it.storedPath.takeIf(String::isNotBlank) }
+            .toSet()
+
+    private suspend fun discoverCachedFiles(fs: ScopedFileSystem, library: Library): Map<String, Long> {
+        val sizes = linkedMapOf<String, Long>()
+        val basePath = fs.getBasePath()
+        val chaptersDir = File(basePath, "chapters")
+        if (chaptersDir.isDirectory) {
+            val baseFile = File(basePath)
+            chaptersDir.walkTopDown().filter { it.isFile }.forEach { file ->
+                val rel = baseFile.toPath().relativize(file.toPath()).toString().replace('\\', '/')
+                sizes[rel] = file.length()
+            }
+            return sizes
+        }
+        val dirs = buildSet {
+            library.chapters.forEach { add("chapters/${it.id}") }
+            library.chapters.flatMap { it.pages }.forEach { p ->
+                val sp = p.storedPath
+                if (sp.startsWith("chapters/")) {
+                    sp.substringBeforeLast('/', "").takeIf { it.isNotEmpty() }?.let { add(it) }
+                }
+            }
+        }
+        for (dir in dirs) {
+            val entries = runCatching { fs.listFiles(relPath(dir)) }.getOrDefault(emptyList())
+            for (entry in entries) {
+                val rel = if (entry.contains('/')) entry else "$dir/$entry"
+                if (rel.startsWith("chapters/") && rel !in sizes) {
+                    val size = runCatching { fs.readFile(relPath(rel))?.size?.toLong() }.getOrNull() ?: 0L
+                    sizes[rel] = size
+                }
+            }
+        }
+        for (ch in library.chapters) {
+            for (p in ch.pages) {
+                val sp = p.storedPath
+                if (sp.startsWith("chapters/") && sp !in sizes) {
+                    val data = runCatching { fs.readFile(relPath(sp)) }.getOrNull()
+                    if (data != null) sizes[sp] = data.size.toLong()
+                }
+            }
+        }
+        return sizes
+    }
+
+    private fun pruneEmptyDiskDirs(fs: ScopedFileSystem) {
+        val chaptersDir = File(fs.getBasePath(), "chapters")
+        if (!chaptersDir.isDirectory) return
+        chaptersDir.listFiles()?.forEach { child ->
+            if (child.isDirectory && child.listFiles()?.isEmpty() == true) {
+                runCatching { child.delete() }
+            }
+        }
+    }
+}
+
 /** Persists per-(chapter, source) remote image inspection reports inside plugin storage. */
 class RemotePagesStore(private val storage: PluginStorage) {
     suspend fun save(report: RemoteChapterPages) {
         storage.put(key(report.chapterId, report.source), json.encodeToJsonElement(RemoteChapterPages.serializer(), report))
+    }
+
+    suspend fun remove(chapterId: String, source: String) {
+        storage.remove(key(chapterId, source))
     }
 
     suspend fun loadAll(): Map<String, RemoteChapterPages> =
@@ -425,5 +647,130 @@ class ArubaFoldersStore(private val storage: PluginStorage) {
     companion object {
         private const val KEY = "aruba_scanned_folders"
         private val json = Json { ignoreUnknownKeys = true }
+    }
+}
+
+@Serializable
+data class PersistedProgress(
+    val fraction: Float? = null,
+    val current: Double? = null,
+    val total: Double? = null,
+    val unit: String? = null,
+    val message: String? = null
+) {
+    fun toProgressData(): ProgressData =
+        if (current != null && total != null && total > 0.0) ProgressData.ratio(current, total, unit, message)
+        else ProgressData.indeterminate(message)
+
+    companion object {
+        fun from(p: ProgressData): PersistedProgress = PersistedProgress(
+            fraction = p.fraction,
+            current = p.current,
+            total = p.total,
+            unit = p.unit,
+            message = p.message
+        )
+    }
+}
+
+@Serializable
+data class PersistedJobRecord(
+    val jobId: String,
+    val capabilityName: String,
+    val status: CapabilityJobStatus = CapabilityJobStatus.QUEUED,
+    val primaryProgress: PersistedProgress? = null,
+    val secondaryProgress: PersistedProgress? = null,
+    val subProgress: Map<String, PersistedProgress> = emptyMap(),
+    val recentLogs: List<String> = emptyList(),
+    val errorMessage: String? = null,
+    val startedAtEpochMs: Long? = null,
+    val completedAtEpochMs: Long? = null
+) {
+    val isTerminal: Boolean
+        get() = status == CapabilityJobStatus.COMPLETED ||
+            status == CapabilityJobStatus.FAILED ||
+            status == CapabilityJobStatus.CANCELLED
+
+    fun toSnapshot(): CapabilityJobSnapshot = CapabilityJobSnapshot(
+        jobId = jobId,
+        capabilityName = capabilityName,
+        status = status,
+        primaryProgress = primaryProgress?.toProgressData(),
+        secondaryProgress = secondaryProgress?.toProgressData(),
+        subProgress = subProgress.mapValues { it.value.toProgressData() },
+        recentLogs = recentLogs,
+        errorMessage = errorMessage,
+        startedAtEpochMs = startedAtEpochMs,
+        completedAtEpochMs = completedAtEpochMs
+    )
+
+    companion object {
+        fun from(snap: CapabilityJobSnapshot, fallbackStartedMs: Long? = null): PersistedJobRecord = PersistedJobRecord(
+            jobId = snap.jobId,
+            capabilityName = snap.capabilityName,
+            status = snap.status,
+            primaryProgress = snap.primaryProgress?.let(PersistedProgress::from),
+            secondaryProgress = snap.secondaryProgress?.let(PersistedProgress::from),
+            subProgress = snap.subProgress.mapValues { PersistedProgress.from(it.value) },
+            recentLogs = snap.recentLogs.takeLast(10),
+            errorMessage = snap.errorMessage,
+            startedAtEpochMs = snap.startedAtEpochMs ?: fallbackStartedMs,
+            completedAtEpochMs = snap.completedAtEpochMs
+        )
+    }
+}
+
+/** Persists launched capability job snapshots across UI session close/reopen cycles. */
+class PersistedJobStore(private val storage: PluginStorage) {
+    suspend fun loadAll(): List<PersistedJobRecord> = MUTEX.withLock {
+        loadUnlocked()
+    }
+
+    suspend fun upsert(snapshot: CapabilityJobSnapshot, fallbackStartedMs: Long? = null) = MUTEX.withLock {
+        val current = loadUnlocked().associateBy { it.jobId }.toMutableMap()
+        val existingStart = current[snapshot.jobId]?.startedAtEpochMs
+        current[snapshot.jobId] = PersistedJobRecord.from(snapshot, existingStart ?: fallbackStartedMs)
+        saveUnlocked(current.values.toList())
+    }
+
+    suspend fun syncAll(snapshots: List<CapabilityJobSnapshot>, fallbackStartedMs: Long? = null) = MUTEX.withLock {
+        if (snapshots.isEmpty()) return@withLock
+        val current = loadUnlocked().associateBy { it.jobId }.toMutableMap()
+        for (snap in snapshots) {
+            val existingStart = current[snap.jobId]?.startedAtEpochMs
+            current[snap.jobId] = PersistedJobRecord.from(snap, existingStart ?: fallbackStartedMs)
+        }
+        saveUnlocked(current.values.toList())
+    }
+
+    suspend fun removeByIds(jobIds: Set<String>) = MUTEX.withLock {
+        if (jobIds.isEmpty()) return@withLock
+        val next = loadUnlocked().filterNot { it.jobId in jobIds }
+        saveUnlocked(next)
+    }
+
+    suspend fun clearTerminal() = MUTEX.withLock {
+        val activeOnly = loadUnlocked().filterNot { it.isTerminal }
+        saveUnlocked(activeOnly)
+    }
+
+    private suspend fun loadUnlocked(): List<PersistedJobRecord> {
+        val elem = storage.get(KEY) ?: return emptyList()
+        return runCatching { json.decodeFromJsonElement(ListSerializer(PersistedJobRecord.serializer()), elem) }
+            .getOrDefault(emptyList())
+    }
+
+    private suspend fun saveUnlocked(records: List<PersistedJobRecord>) {
+        val trimmed = records
+            .sortedBy { it.startedAtEpochMs ?: Long.MAX_VALUE }
+            .takeLast(MAX_RECORDS)
+        storage.put(KEY, json.encodeToJsonElement(ListSerializer(PersistedJobRecord.serializer()), trimmed))
+    }
+
+    companion object {
+        private const val KEY = "persisted_jobs"
+        private const val MAX_RECORDS = 25
+        private val MUTEX = Mutex()
+        private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     }
 }

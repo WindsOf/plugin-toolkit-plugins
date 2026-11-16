@@ -222,6 +222,28 @@ class UploaderActions(
         "Group: ${group.name} ($groupId)"
     }
 
+    suspend fun pruneLocalCache(protectedChapterIds: Set<String> = emptySet()): CachePruneResult {
+        val res = ImageCacheManager.prune(
+            fs = context.fileSystem,
+            store = libraryStore,
+            maxCacheMb = config.maxCacheMb,
+            logger = context.logger,
+            protectedChapterIds = protectedChapterIds
+        )
+        val summary = buildString {
+            append("Cache: ${formatByteCount(res.remainingBytes)} used")
+            if (res.orphanFilesRemoved > 0 || res.evictedChapters > 0) {
+                append(
+                    " (removed ${res.orphanFilesRemoved} orphan(s), " +
+                        "evicted ${res.evictedChapters} chapter(s), freed ${formatByteCount(res.freedBytes)})"
+                )
+            }
+        }
+        diagnostics.put("cache", Diagnostic(true, summary, services.clock.nowEpochSec()))
+        context.showToast(summary)
+        return res
+    }
+
     private suspend fun saveSession(tokens: MdTokens, profile: MdProfile) {
         context.updateSetting(SettingKeys.MD_ACCESS_TOKEN, tokens.accessToken)
         if (tokens.refreshToken.isNotBlank()) context.updateSetting(SettingKeys.MD_REFRESH_TOKEN, tokens.refreshToken)

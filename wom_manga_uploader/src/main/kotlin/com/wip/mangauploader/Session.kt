@@ -1,5 +1,6 @@
 package com.wip.mangauploader
 
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.channelFlow
@@ -8,6 +9,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
+import org.wip.plugintoolkit.api.sdui.CapabilityJobSnapshot
 import org.wip.plugintoolkit.api.sdui.CapabilityJobStatus
 import org.wip.plugintoolkit.api.sdui.UiEvent
 import org.wip.plugintoolkit.api.sdui.UiNodeTree
@@ -31,17 +33,60 @@ private val INT_SETTING_KEYS = setOf(
 internal fun runMangaUploaderSession(
     context: UiSessionContext,
     events: Flow<UiEvent>,
-    services: ServiceFactory = MangaUploaderServices.factory
+    services: ServiceFactory = MangaUploaderServices.factory,
+    reattachTimeoutMs: Long = 1_500L
 ): Flow<UiNodeTree> = channelFlow {
     val store = LibraryStore(context.fileSystem, context.logger)
     val diagnosticsStore = DiagnosticsStore(context.storage)
     val remotePagesStore = RemotePagesStore(context.storage)
     val arubaFoldersStore = ArubaFoldersStore(context.storage)
+    val persistedJobStore = PersistedJobStore(context.storage)
     val importer = PageImporter(context.fileSystem, context.hostFileSystem, context.logger)
     val stateFlow = MutableStateFlow(UiState())
+    val historicalJobsState = MutableStateFlow<Map<String, CapabilityJobSnapshot>>(emptyMap())
+    val reattachedJobsState = MutableStateFlow<Map<String, CapabilityJobSnapshot>>(emptyMap())
     val lastJobStatuses = mutableMapOf<String, CapabilityJobStatus>()
     val pendingEchoes = mutableMapOf<String, JsonElement?>()
     var lastObservedSettings = context.settingsFlow.value
+
+    fun mergeJobs(
+        historical: Map<String, CapabilityJobSnapshot>,
+        reattached: Map<String, CapabilityJobSnapshot>,
+        liveSession: List<CapabilityJobSnapshot>
+    ): List<CapabilityJobSnapshot> {
+        val byId = LinkedHashMap<String, CapabilityJobSnapshot>(historical.size + reattached.size + liveSession.size)
+        historical.forEach { (id, snap) -> byId[id] = snap }
+        reattached.forEach { (id, snap) -> byId[id] = snap }
+        liveSession.forEach { snap -> byId[snap.jobId] = snap }
+        return byId.values.sortedWith(
+            compareBy<CapabilityJobSnapshot> { it.startedAtEpochMs ?: Long.MAX_VALUE }.thenBy { it.jobId }
+        )
+    }
+
+    suspend fun launchTrackedCapability(
+        capabilityName: String,
+        parameters: Map<String, JsonElement>,
+        runInBackgroundQueue: Boolean = true
+    ): String {
+        val startedMs = services.clock.nowEpochSec() * 1000L
+        val jobId = context.launchCapability(
+            capabilityName = capabilityName,
+            parameters = parameters,
+            runInBackgroundQueue = runInBackgroundQueue
+        )
+        if (jobId.isNotBlank()) {
+            persistedJobStore.upsert(
+                CapabilityJobSnapshot(
+                    jobId = jobId,
+                    capabilityName = capabilityName,
+                    status = CapabilityJobStatus.QUEUED,
+                    startedAtEpochMs = startedMs
+                ),
+                fallbackStartedMs = startedMs
+            )
+        }
+        return jobId
+    }
 
     fun currentConfig(): MangaUploaderConfig = MangaUploaderConfig.from(context.settingsFlow.value)
 
@@ -107,10 +152,20 @@ internal fun runMangaUploaderSession(
                 ?: st.activeChapterId?.takeIf { id -> seriesChapters.any { it.id == id } }
                 ?: seriesChapters.firstOrNull()?.id
             val nextChapter = lib.chapterById(nextChapterId)
-            val pagesChanged = st.library.chapterById(nextChapterId)?.pages != nextChapter?.pages
+            val prevChapter = st.library.chapterById(nextChapterId)
+            val pagesChanged = prevChapter?.pages != nextChapter?.pages ||
+                prevChapter?.cubariPageUrls != nextChapter?.cubariPageUrls
             val keepDirty = !(forceDraftRefresh && pagesChanged) &&
                 st.chapterDraft != null && st.chapterDraft.chapterId == nextChapterId && st.chapterDraft.dirty
             val nextDraft = if (keepDirty) st.chapterDraft else openChapterDraft(nextChapter, st.chapterDraft?.revision ?: 0)
+            val activeSource = nextChapterId?.let { st.remoteSourceByChapter[it] }
+                ?: UiSelectors.defaultRemoteSource(nextChapter, nextSeriesId?.let { lib.seriesById(it) })
+            val validPageIds = UiSelectors.unifiedPages(
+                nextDraft,
+                nextChapter,
+                nextChapterId?.let { remotes["$it:$activeSource"] },
+                activeSource
+            ).mapTo(mutableSetOf()) { it.id }
             st.copy(
                 loaded = true,
                 library = lib,
@@ -119,6 +174,8 @@ internal fun runMangaUploaderSession(
                 activeChapterId = nextChapterId,
                 checkedChapterIds = st.checkedChapterIds.filterTo(mutableSetOf()) { lib.chapterById(it) != null },
                 chapterDraft = nextDraft,
+                selectedPageId = st.selectedPageId?.takeIf { it in validPageIds },
+                previewPageId = st.previewPageId?.takeIf { it in validPageIds },
                 diagnostics = diags,
                 remotePages = remotes
             )
@@ -181,7 +238,7 @@ internal fun runMangaUploaderSession(
             context.showToast("Open a chapter first")
             return
         }
-        context.launchCapability(
+        launchTrackedCapability(
             capabilityName = "fetchChapterPages",
             parameters = mapOf(
                 "seriesId" to JsonPrimitive(ch.seriesId),
@@ -255,7 +312,7 @@ internal fun runMangaUploaderSession(
         var queued = 0
         for (id in chapterIds) {
             val ch = lib.chapterById(id) ?: continue
-            context.launchCapability(
+            launchTrackedCapability(
                 capabilityName = "publishToArubaAndCubari",
                 parameters = mapOf(
                     "seriesId" to JsonPrimitive(ch.seriesId),
@@ -274,14 +331,22 @@ internal fun runMangaUploaderSession(
             context.showToast("Stage 2 locked — log in & set MangaDex group in Settings & Locks")
             return
         }
+        val activeMdJobs = mergeJobs(historicalJobsState.value, reattachedJobsState.value, context.capabilityJobs.value)
+            .filter { it.capabilityName == "publishToMangaDex" && !it.isTerminal }
+        if (activeMdJobs.isNotEmpty()) {
+            context.showToast("A MangaDex upload operation is already running or queued — wait for it to finish (single upload session limit)")
+            return
+        }
+        val uniqueIds = chapterIds.distinct()
+        if (uniqueIds.isEmpty()) return
         val activeId = stateFlow.value.chapterDraft?.chapterId
-        if (activeId != null && activeId in chapterIds) persistChapterDraft()
+        if (activeId != null && activeId in uniqueIds) persistChapterDraft()
         val lib = stateFlow.value.library
         val cfg = currentConfig()
         val now = services.clock.nowEpochSec()
 
         if (!bypassHold) {
-            val holding = chapterIds.mapNotNull { lib.chapterById(it) }.filter { ch ->
+            val holding = uniqueIds.mapNotNull { lib.chapterById(it) }.filter { ch ->
                 ChangeDetector.planMangaDexPush(ch, cfg.mdLanguage).kind != TargetPushKind.METADATA_ONLY
             }.mapNotNull { ch ->
                 val series = lib.seriesById(ch.seriesId)
@@ -297,7 +362,7 @@ internal fun runMangaUploaderSession(
                         confirm = Confirm(
                             kind = ConfirmKind.PUSH_DURING_HOLD,
                             message = "Preview hold is still active for: $summary. Push to MangaDex anyway?",
-                            chapterIds = chapterIds
+                            chapterIds = uniqueIds
                         )
                     )
                 }
@@ -306,9 +371,9 @@ internal fun runMangaUploaderSession(
         }
 
         var queued = 0
-        for (id in chapterIds) {
+        for (id in uniqueIds) {
             val ch = lib.chapterById(id) ?: continue
-            context.launchCapability(
+            launchTrackedCapability(
                 capabilityName = "publishToMangaDex",
                 parameters = mapOf(
                     "seriesId" to JsonPrimitive(ch.seriesId),
@@ -339,7 +404,7 @@ internal fun runMangaUploaderSession(
             context.showToast("Sync locked — configure Stage 1 & MangaDex login first")
             return
         }
-        context.launchCapability(
+        launchTrackedCapability(
             capabilityName = "syncMangaDexToCubari",
             parameters = mapOf(
                 "seriesId" to JsonPrimitive(seriesId),
@@ -385,12 +450,15 @@ internal fun runMangaUploaderSession(
             context.showToast("Set a MangaDex manga ID on the series first")
             return
         }
-        val key = normalizeChapterKey(ch.number)
-        if (key.isEmpty()) {
+        val keys = listOfNotNull(
+            normalizeChapterKey(ch.number).takeIf { it.isNotEmpty() },
+            ch.mdSnapshot?.number?.let(::normalizeChapterKey)?.takeIf { it.isNotEmpty() }
+        ).distinct()
+        if (keys.isEmpty()) {
             context.showToast("Set a chapter number before pulling from MangaDex")
             return
         }
-        launchMangaDexSync(series.id, key, scanOnly = false, backfillAll = false)
+        launchMangaDexSync(series.id, keys.joinToString(","), scanOnly = false, backfillAll = false)
     }
 
     suspend fun replaceOrAppendPages(paths: List<String>, replace: Boolean) {
@@ -590,6 +658,12 @@ internal fun runMangaUploaderSession(
             action.startsWith(Ids.ACT_JOB_PAUSE) -> context.pauseCapabilityJob(action.removePrefix(Ids.ACT_JOB_PAUSE))
             action.startsWith(Ids.ACT_JOB_RESUME) -> context.resumeCapabilityJob(action.removePrefix(Ids.ACT_JOB_RESUME))
             action.startsWith(Ids.ACT_JOB_CANCEL) -> context.cancelCapabilityJob(action.removePrefix(Ids.ACT_JOB_CANCEL))
+            action == Ids.ACT_CLEAR_JOB_HISTORY -> {
+                persistedJobStore.clearTerminal()
+                historicalJobsState.value = emptyMap()
+                reattachedJobsState.update { map -> map.filterValues { !it.isTerminal } }
+                context.showToast("Cleared finished job history")
+            }
 
             action == Ids.ACT_NEW_CHAPTER -> {
                 val seriesId = stateFlow.value.activeSeriesId ?: run {
@@ -765,7 +839,7 @@ internal fun runMangaUploaderSession(
                     context.showToast("Cubari locked — configure GitHub settings first")
                     return
                 }
-                context.launchCapability(
+                launchTrackedCapability(
                     capabilityName = "syncCubariGitRepo",
                     parameters = mapOf("push" to JsonPrimitive(false)),
                     runInBackgroundQueue = true
@@ -824,7 +898,7 @@ internal fun runMangaUploaderSession(
                 } else {
                     stateFlow.value.activeSeriesId ?: return
                 }
-                context.launchCapability(
+                launchTrackedCapability(
                     capabilityName = "publishToArubaAndCubari",
                     parameters = mapOf(
                         "seriesId" to JsonPrimitive(seriesId),
@@ -834,6 +908,52 @@ internal fun runMangaUploaderSession(
                     runInBackgroundQueue = true
                 )
                 context.showToast("Queued series metadata push to Cubari")
+            }
+
+            action == Ids.ACT_LOAD_REMOTE_META -> {
+                val st = stateFlow.value
+                val chId = st.activeChapterId ?: return
+                val ch = st.library.chapterById(chId) ?: return
+                val src = selectedRemoteSource(chId)
+                if (src == UploaderWorkers.SOURCE_MANGADEX) {
+                    val snap = ch.mdSnapshot ?: run {
+                        context.showToast("No MangaDex metadata snapshot available yet — run Scan MangaDex first")
+                        return
+                    }
+                    stateFlow.update { cur ->
+                        val draft = cur.chapterDraft?.takeIf { it.chapterId == chId } ?: return@update cur
+                        cur.copy(
+                            chapterDraft = draft.copy(
+                                number = snap.number.ifBlank { draft.number },
+                                volume = snap.volume,
+                                title = snap.title,
+                                dirty = true,
+                                revision = draft.revision + 1
+                            )
+                        )
+                    }
+                    persistChapterDraft()
+                    context.showToast("Loaded Ch. ${snap.number.ifBlank { ch.number }} metadata from MangaDex")
+                } else {
+                    val snap = ch.cubariSnapshot ?: run {
+                        context.showToast("No Cubari metadata snapshot available yet")
+                        return
+                    }
+                    stateFlow.update { cur ->
+                        val draft = cur.chapterDraft?.takeIf { it.chapterId == chId } ?: return@update cur
+                        cur.copy(
+                            chapterDraft = draft.copy(
+                                number = snap.key.ifBlank { draft.number },
+                                volume = snap.volume,
+                                title = snap.title,
+                                dirty = true,
+                                revision = draft.revision + 1
+                            )
+                        )
+                    }
+                    persistChapterDraft()
+                    context.showToast("Loaded Ch. ${snap.key.ifBlank { ch.number }} metadata from Cubari")
+                }
             }
 
             action == Ids.ACT_REVERT_CHAPTER_CUBARI -> {
@@ -893,7 +1013,7 @@ internal fun runMangaUploaderSession(
                         seriesDraft = it.seriesDraft?.copy(series = updatedSeries)
                     )
                 }
-                context.launchCapability(
+                launchTrackedCapability(
                     capabilityName = "uploadOrRemoveCubariCover",
                     parameters = mapOf(
                         "seriesId" to JsonPrimitive(updatedSeries.id),
@@ -908,7 +1028,7 @@ internal fun runMangaUploaderSession(
             action == Ids.ACT_COVER_REMOVE -> {
                 val draft = stateFlow.value.seriesDraft ?: return
                 if (draft.isNew) return
-                context.launchCapability(
+                launchTrackedCapability(
                     capabilityName = "uploadOrRemoveCubariCover",
                     parameters = mapOf(
                         "seriesId" to JsonPrimitive(draft.series.id),
@@ -993,7 +1113,7 @@ internal fun runMangaUploaderSession(
                 Ids.ACT_TEST_REPO, Ids.ACT_MD_LOGIN, Ids.ACT_MD_LOGIN_BROWSER,
                 Ids.ACT_MD_VERIFY, Ids.ACT_MD_LOGOUT, Ids.ACT_CHECK_GROUP,
                 Ids.ACT_MD_CHECK_SESSION,
-                Ids.ACT_TEST_STORAGE, Ids.ACT_SCAN_ARUBA_FOLDERS
+                Ids.ACT_TEST_STORAGE, Ids.ACT_SCAN_ARUBA_FOLDERS, Ids.ACT_PRUNE_CACHE
             ) -> launch {
                 val actions = UploaderActions(context, services)
                 when (action) {
@@ -1006,8 +1126,9 @@ internal fun runMangaUploaderSession(
                     Ids.ACT_MD_CHECK_SESSION -> actions.checkMangaDexUploadSession()
                     Ids.ACT_TEST_STORAGE -> actions.testArubaStorage()
                     Ids.ACT_SCAN_ARUBA_FOLDERS -> actions.scanArubaFolders()
+                    Ids.ACT_PRUNE_CACHE -> actions.pruneLocalCache(protectedChapterIds = setOfNotNull(stateFlow.value.activeChapterId))
                 }
-                reloadFromDisk()
+                reloadFromDisk(forceDraftRefresh = action == Ids.ACT_PRUNE_CACHE)
                 stateFlow.update { st ->
                     val refreshedDraft = st.seriesDraft?.let { sd ->
                         val updated = st.library.seriesById(sd.series.id)
@@ -1031,24 +1152,78 @@ internal fun runMangaUploaderSession(
         }
     }
 
-    launch { reloadFromDisk() }
+    suspend fun handleTerminalJobTransitions(jobs: List<CapabilityJobSnapshot>) {
+        val transitioned = jobs.filter { job ->
+            val prev = lastJobStatuses[job.jobId]
+            lastJobStatuses[job.jobId] = job.status
+            job.isTerminal && prev != job.status
+        }
+        if (transitioned.isNotEmpty()) {
+            val refreshDraft = transitioned.any {
+                it.capabilityName == "fetchChapterPages" ||
+                    it.capabilityName == "syncCubariGitRepo" ||
+                    it.capabilityName == "syncMangaDexToCubari" ||
+                    it.capabilityName == "publishToArubaAndCubari" ||
+                    it.capabilityName == "publishToMangaDex"
+            }
+            reloadFromDisk(forceDraftRefresh = refreshDraft)
+        }
+    }
 
-    // Synchronise library when background capabilities finish/fail and bump settingsRevision on external setting edits.
+    launch {
+        ImageCacheManager.prune(
+            fs = context.fileSystem,
+            store = store,
+            maxCacheMb = MangaUploaderConfig.from(context.settings).maxCacheMb,
+            logger = context.logger
+        )
+        reloadFromDisk()
+        val saved = persistedJobStore.loadAll()
+        if (saved.isEmpty()) return@launch
+        val terminalSaved = saved.filter { it.isTerminal }
+        if (terminalSaved.isNotEmpty()) {
+            historicalJobsState.update { cur ->
+                cur + terminalSaved.associate { it.jobId to it.toSnapshot() }
+            }
+        }
+        saved.filterNot { it.isTerminal }.forEach { rec ->
+            lastJobStatuses[rec.jobId] = rec.status
+            launch {
+                if (context.capabilityJobs.value.any { it.jobId == rec.jobId }) return@launch
+                var sawAny = false
+                val collector = launch {
+                    context.observeCapabilityJob(rec.jobId).collect { snap ->
+                        if (!sawAny) {
+                            sawAny = true
+                            context.logger.info("Reattached to persisted capability job ${rec.jobId} (${rec.capabilityName}, status=${snap.status})")
+                        }
+                        reattachedJobsState.update { it + (rec.jobId to snap) }
+                        persistedJobStore.upsert(snap, fallbackStartedMs = rec.startedAtEpochMs)
+                        handleTerminalJobTransitions(listOf(snap))
+                    }
+                }
+                val deadline = launch {
+                    delay(reattachTimeoutMs)
+                    if (!sawAny) collector.cancel()
+                }
+                collector.join()
+                deadline.cancel()
+                if (!sawAny) {
+                    context.logger.info("Skipping persisted job ${rec.jobId} (${rec.capabilityName}): no longer active on host")
+                    persistedJobStore.removeByIds(setOf(rec.jobId))
+                }
+            }
+        }
+    }
+
+    // Synchronise library & persist live capability progress/status for cross-session Queue tracking.
     launch {
         context.capabilityJobs.collect { jobs ->
-            val transitioned = jobs.filter { job ->
-                val prev = lastJobStatuses[job.jobId]
-                lastJobStatuses[job.jobId] = job.status
-                job.isTerminal && prev != job.status
+            if (jobs.isNotEmpty()) {
+                val nowMs = services.clock.nowEpochSec() * 1000L
+                persistedJobStore.syncAll(jobs, fallbackStartedMs = nowMs)
             }
-            if (transitioned.isNotEmpty()) {
-                val refreshDraft = transitioned.any {
-                    it.capabilityName == "fetchChapterPages" ||
-                        it.capabilityName == "syncCubariGitRepo" ||
-                        it.capabilityName == "syncMangaDexToCubari"
-                }
-                reloadFromDisk(forceDraftRefresh = refreshDraft)
-            }
+            handleTerminalJobTransitions(jobs)
         }
     }
 
@@ -1214,7 +1389,7 @@ internal fun runMangaUploaderSession(
                                     val lib = stateFlow.value.library
                                     for (id in confirm.chapterIds) {
                                         val ch = lib.chapterById(id) ?: continue
-                                        context.launchCapability(
+                                        launchTrackedCapability(
                                             capabilityName = "publishToArubaAndCubari",
                                             parameters = mapOf(
                                                 "seriesId" to JsonPrimitive(ch.seriesId),
@@ -1264,7 +1439,7 @@ internal fun runMangaUploaderSession(
                                         )
                                     }
                                     if (ok) {
-                                        context.launchCapability(
+                                        launchTrackedCapability(
                                             capabilityName = "syncCubariGitRepo",
                                             parameters = mapOf("push" to JsonPrimitive(false)),
                                             runInBackgroundQueue = true
@@ -1345,11 +1520,17 @@ internal fun runMangaUploaderSession(
         }
     }
 
-    combine(stateFlow, context.capabilityJobs, context.settingsFlow, context.locksFlow) { st, jobs, settings, locks ->
+    combine(
+        stateFlow,
+        context.capabilityJobs,
+        reattachedJobsState,
+        historicalJobsState,
+        combine(context.settingsFlow, context.locksFlow, ::Pair)
+    ) { st, liveJobs, reattached, historical, (settings, locks) ->
         MangaUploaderRenderer.render(
             RenderModel(
                 state = st,
-                jobs = jobs,
+                jobs = mergeJobs(historical, reattached, liveJobs),
                 settings = settings,
                 locks = locks,
                 nowEpochSec = services.clock.nowEpochSec()

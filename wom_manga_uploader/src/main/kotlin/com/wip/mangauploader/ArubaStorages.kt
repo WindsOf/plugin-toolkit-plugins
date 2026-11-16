@@ -80,6 +80,19 @@ class SftpStorage(private val config: ArubaConfig, private val logger: PluginLog
         c.channel.put(ByteArrayInputStream(bytes), remotePath, ChannelSftp.OVERWRITE)
     }
 
+    override suspend fun rename(fromPath: String, toPath: String) {
+        if (fromPath == toPath) return
+        withConnection { c ->
+            mkdirs(c.channel, toPath.substringBeforeLast('/', ""))
+            try {
+                c.channel.rename(fromPath, toPath)
+            } catch (_: SftpException) {
+                runCatching { c.channel.rm(toPath) }
+                c.channel.rename(fromPath, toPath)
+            }
+        }
+    }
+
     override suspend fun delete(remotePath: String) = withConnection { c ->
         try {
             c.channel.rm(remotePath)
@@ -188,6 +201,40 @@ class FtpStorage(private val config: ArubaConfig, private val logger: PluginLogg
         } finally {
             runCatching { c.changeWorkingDirectory(origin ?: "/") }
         }
+    }
+
+    override suspend fun rename(fromPath: String, toPath: String) {
+        val cleanFrom = normalizeFtpPath(fromPath)
+        val cleanTo = normalizeFtpPath(toPath)
+        if (cleanFrom == cleanTo) return
+        withConnection { c ->
+            val origin = runCatching { c.printWorkingDirectory() }.getOrNull()
+            try {
+                val resolvedFrom = resolveFtpFilePath(c, cleanFrom)
+                val dstParent = cleanTo.substringBeforeLast('/', "")
+                val dstParentResolved = if (dstParent.isNotBlank()) enterOrCreateDir(c, dstParent) else ""
+                val dstName = cleanTo.substringAfterLast('/')
+                val resolvedTo = if (dstParentResolved.isNotBlank()) "${dstParentResolved.trimEnd('/')}/$dstName" else dstName
+                if (resolvedFrom == resolvedTo) return@withConnection
+                if (!c.rename(resolvedFrom, resolvedTo)) {
+                    // FTPReply 550/553 occurs on servers that forbid overwriting an existing file via RNTO.
+                    runCatching { c.deleteFile(resolvedTo) }
+                    if (!c.rename(resolvedFrom, resolvedTo)) {
+                        throw java.io.IOException("FTP rename failed ($resolvedFrom -> $resolvedTo): ${c.replyString.trim()}")
+                    }
+                }
+            } finally {
+                runCatching { c.changeWorkingDirectory(origin ?: "/") }
+            }
+        }
+    }
+
+    private fun resolveFtpFilePath(client: FTPClient, clean: String): String {
+        val parent = clean.substringBeforeLast('/', "")
+        if (parent.isBlank()) return clean
+        val name = clean.substringAfterLast('/')
+        val resolvedParent = resolveExistingFtpPath(client, parent)
+        return "${resolvedParent.trimEnd('/')}/$name"
     }
 
     override suspend fun delete(remotePath: String) = withConnection { c ->

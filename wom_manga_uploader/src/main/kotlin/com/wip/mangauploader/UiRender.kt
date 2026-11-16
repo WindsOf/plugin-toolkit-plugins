@@ -1,6 +1,7 @@
 package com.wip.mangauploader
 
 import kotlinx.serialization.json.JsonElement
+import org.wip.plugintoolkit.api.ProgressData
 import org.wip.plugintoolkit.api.sdui.AssetReference
 import org.wip.plugintoolkit.api.sdui.CapabilityJobSnapshot
 import org.wip.plugintoolkit.api.sdui.CapabilityJobStatus
@@ -121,14 +122,17 @@ object Ids {
     const val ACT_MD_FORCE_CANCEL_SESSION = "mangadex_force_cancel_upload_session"
     const val ACT_CHECK_GROUP = "check_group"
     const val ACT_TEST_STORAGE = "test_storage"
+    const val ACT_PRUNE_CACHE = "prune_local_cache"
     const val ACT_RESET_PREVIEW = "reset_preview_defaults"
     const val ACT_PUSH_SERIES_META = "push_series_meta"
     const val ACT_REVERT_CHAPTER_CUBARI = "revert_chapter_cubari"
     const val ACT_REVERT_SERIES_CUBARI = "revert_series_cubari"
+    const val ACT_LOAD_REMOTE_META = "load_remote_meta"
     const val ACT_ANCHOR = "set_anchor:"
     const val ACT_JOB_PAUSE = "job_pause:"
     const val ACT_JOB_RESUME = "job_resume:"
     const val ACT_JOB_CANCEL = "job_cancel:"
+    const val ACT_CLEAR_JOB_HISTORY = "clear_job_history"
 
     fun card(target: String) = "card_$target"
 }
@@ -201,11 +205,29 @@ object MangaUploaderRenderer {
             modifier = UiModifier.fillMaxWidth().padding(SpacingSize.SMALL).background(SemanticColor.SURFACE_CONTAINER)
         ) {
             text("Manga Uploader", id = "brand_title", role = TypographyRole.TITLE_MEDIUM)
-            val activeJobs = m.jobs.count { !it.isTerminal }
+            val activeJobList = m.jobs.filter { !it.isTerminal }
+            val activeJobs = activeJobList.size
+            val mdUploadBusy = m.jobs.any { it.capabilityName == "publishToMangaDex" && !it.isTerminal }
+            val queueTooltip = if (activeJobList.isEmpty()) {
+                "Monitor background jobs, byte/speed/ETA progress, and logs"
+            } else {
+                val summary = activeJobList.take(2).joinToString("; ") { j ->
+                    val p = j.primaryProgress
+                    val pct = p?.fraction?.let { "${(it * 100).toInt()}%" } ?: p?.message ?: j.status.name
+                    "${j.capabilityName} ($pct)"
+                }
+                val more = if (activeJobList.size > 2) " +${activeJobList.size - 2} more" else ""
+                "Active ($activeJobs): $summary$more — click to open Queue sliders & logs"
+            }
             buttonGroup(id = Ids.NAV_VIEWS) {
-                MainView.entries.forEach {
-                    val label = if (it == MainView.QUEUE && activeJobs > 0) "${it.label} ($activeJobs)" else it.label
-                    item(key = it.key, label = label, action = Ids.ACT_VIEW + it.key, selected = it == m.state.view)
+                MainView.entries.forEach { view ->
+                    val label = if (view == MainView.QUEUE && activeJobs > 0) "${view.label} ($activeJobs)" else view.label
+                    val tip = when (view) {
+                        MainView.WORKSPACE -> "Browse series, edit chapter metadata & pages, and push/sync"
+                        MainView.SETTINGS -> "Configure Cubari/GitHub, Aruba FTP/SFTP, MangaDex OAuth, and upload limits"
+                        MainView.QUEUE -> queueTooltip
+                    }
+                    item(key = view.key, label = label, action = Ids.ACT_VIEW + view.key, selected = view == m.state.view, tooltip = tip)
                 }
             }
             // Dotless, colour-coded readiness group: clicking jumps to the matching settings card.
@@ -230,7 +252,12 @@ object MangaUploaderRenderer {
                 iconName = "publish", menuTooltip = "Bulk actions for checked chapters"
             ) {
                 item("push_cubari", "Push Checked ($checkedCount) -> Cubari", Ids.ACT_PUSH_CUBARI, "cloud_upload", enabled = checkedCount > 0 && m.isUnlocked(LockKeys.STAGE1))
-                item("push_mangadex", "Push Checked ($checkedCount) -> MangaDex", Ids.ACT_PUSH_MANGADEX, "upload", enabled = checkedCount > 0 && m.isUnlocked(LockKeys.STAGE2))
+                item(
+                    "push_mangadex",
+                    if (mdUploadBusy) "Push Checked -> MangaDex (Uploading...)" else "Push Checked ($checkedCount) -> MangaDex",
+                    Ids.ACT_PUSH_MANGADEX, "upload",
+                    enabled = checkedCount > 0 && !mdUploadBusy && m.isUnlocked(LockKeys.STAGE2)
+                )
                 item("pull_missing", "Pull Checked ($checkedCount) <- MangaDex", Ids.ACT_PULL_MISSING, "cloud_download", enabled = checkedCount > 0 && m.isUnlocked(LockKeys.SYNC), startsSection = true)
                 item("backfill_all", "Backfill All Missing <- MangaDex...", Ids.ACT_BACKFILL_ALL, "sync", enabled = hasSeries && m.isUnlocked(LockKeys.SYNC))
                 item("resync_cubari", "Resync Cubari Repo", Ids.ACT_SYNC_REPO, "sync", enabled = m.isUnlocked(LockKeys.CUBARI), startsSection = true)
@@ -275,8 +302,11 @@ object MangaUploaderRenderer {
                 text("Series (${s.library.series.size})", id = "series_title", role = TypographyRole.TITLE_MEDIUM)
                 if (syncing) badge("Syncing...", id = "badge_syncing", color = SemanticColor.INFO_CONTAINER)
                 spacer(id = "series_header_spacer", modifier = UiModifier.weight(1f))
-                button("Resync", id = "btn_sync_repo_ws", action = Ids.ACT_SYNC_REPO, isTonal = true, isPrimary = false, iconName = "sync",
-                    modifier = UiModifier.enabled(m.isUnlocked(LockKeys.CUBARI)))
+                iconButton(
+                    "sync", id = "btn_sync_repo_ws", action = Ids.ACT_SYNC_REPO,
+                    tooltip = "Resync Cubari Git repository and Aruba series folders",
+                    modifier = UiModifier.enabled(m.isUnlocked(LockKeys.CUBARI))
+                )
             }
             textInput(id = Ids.SERIES_SEARCH, text = s.seriesSearch, label = "Search series", modifier = UiModifier.fillMaxWidth())
             row(id = "series_sort_filter_row", spacing = SpacingSize.EXTRA_SMALL, modifier = UiModifier.fillMaxWidth()) {
@@ -451,12 +481,24 @@ object MangaUploaderRenderer {
         val s = m.state
         val chapter = s.library.chapterById(draft.chapterId)
         val series = s.library.seriesById(chapter?.seriesId)
+        val selectedSource = chapter?.let { s.remoteSourceByChapter[it.id] ?: UiSelectors.defaultRemoteSource(it, series) }
+            ?: UploaderWorkers.SOURCE_CUBARI
         scrollableColumn(
             id = "col_inspector", spacing = SpacingSize.SMALL,
             modifier = UiModifier.fillMaxSize().padding(SpacingSize.SMALL).background(SemanticColor.SURFACE_CONTAINER_LOW)
         ) {
             card(id = "card_chapter_meta", title = "Chapter", surfaceRole = SemanticColor.SURFACE_CONTAINER_HIGH, modifier = UiModifier.fillMaxWidth()) {
                 column(id = "chapter_meta_col", spacing = SpacingSize.SMALL, modifier = UiModifier.fillMaxWidth().padding(SpacingSize.SMALL)) {
+                    dropdown(
+                        id = Ids.REMOTE_SOURCE,
+                        selectedKey = selectedSource,
+                        options = linkedMapOf(
+                            UploaderWorkers.SOURCE_CUBARI to "Cubari / Aruba",
+                            UploaderWorkers.SOURCE_MANGADEX to "MangaDex"
+                        ),
+                        label = "Remote Source (Metadata & Pages)",
+                        modifier = UiModifier.fillMaxWidth()
+                    )
                     row(id = "chapter_meta_row", spacing = SpacingSize.SMALL, modifier = UiModifier.fillMaxWidth()) {
                         textInput(id = Ids.CH_VOLUME, text = draft.volume, label = "Volume", revision = draft.revision, modifier = UiModifier.weight(1f))
                         textInput(id = Ids.CH_NUMBER, text = draft.number, label = "Number", revision = draft.revision, modifier = UiModifier.weight(1f))
@@ -466,33 +508,34 @@ object MangaUploaderRenderer {
                         button("Save draft", id = "btn_save_draft", action = Ids.ACT_SAVE_DRAFT, isTonal = true, isPrimary = false, iconName = "save")
                         if (draft.dirty) badge("Unsaved", id = "badge_unsaved", color = SemanticColor.WARNING_CONTAINER)
                     }
-                    row(id = "chapter_links_row", spacing = SpacingSize.EXTRA_SMALL, modifier = UiModifier.fillMaxWidth()) {
-                        val cubariChUrl = UploaderLinks.cubariChapterUrl(m.config, series, chapter)
-                        val mdChUrl = UploaderLinks.mangadexChapterUrl(chapter)
-                        button(
-                            "Open Cubari", id = "btn_open_cubari_ch", action = Ids.ACT_OPEN_CUBARI_CHAPTER,
-                            isTonal = true, isPrimary = false, iconName = "open_in_browser",
-                            modifier = UiModifier.enabled(cubariChUrl != null)
+                    val cubariChUrl = UploaderLinks.cubariChapterUrl(m.config, series, chapter)
+                    val mdChUrl = UploaderLinks.mangadexChapterUrl(chapter)
+                    buttonGroup(id = "chapter_links_group", selectionMode = false, modifier = UiModifier.fillMaxWidth()) {
+                        item(
+                            key = "open_cubari_ch", label = "Open Cubari", action = Ids.ACT_OPEN_CUBARI_CHAPTER,
+                            iconName = "open_in_browser", enabled = cubariChUrl != null,
+                            tooltip = "Open this chapter in the Cubari reader"
                         )
-                        button(
-                            "Copy Cubari URL", id = "btn_copy_cubari_ch", action = Ids.ACT_COPY_CUBARI_CHAPTER,
-                            isTonal = true, isPrimary = false,
-                            modifier = UiModifier.enabled(cubariChUrl != null)
+                        item(
+                            key = "copy_cubari_ch", label = "Copy Cubari URL", action = Ids.ACT_COPY_CUBARI_CHAPTER,
+                            iconName = "content_copy", enabled = cubariChUrl != null,
+                            tooltip = "Copy Cubari chapter reader link to clipboard"
                         )
-                        button(
-                            "Open MangaDex", id = "btn_open_md_ch", action = Ids.ACT_OPEN_MANGADEX_CHAPTER,
-                            isTonal = true, isPrimary = false, iconName = "open_in_browser",
-                            modifier = UiModifier.enabled(mdChUrl != null)
+                        item(
+                            key = "open_md_ch", label = "Open MangaDex", action = Ids.ACT_OPEN_MANGADEX_CHAPTER,
+                            iconName = "open_in_browser", enabled = mdChUrl != null,
+                            tooltip = "Open this chapter on MangaDex in your browser"
                         )
-                        button(
-                            "Copy MD URL", id = "btn_copy_md_ch", action = Ids.ACT_COPY_MANGADEX_CHAPTER,
-                            isTonal = true, isPrimary = false,
-                            modifier = UiModifier.enabled(mdChUrl != null)
+                        item(
+                            key = "copy_md_ch", label = "Copy MD URL", action = Ids.ACT_COPY_MANGADEX_CHAPTER,
+                            iconName = "content_copy", enabled = mdChUrl != null,
+                            tooltip = "Copy MangaDex chapter link to clipboard"
                         )
                     }
                     text("Edits stay local until you push", id = "local_hint", role = TypographyRole.BODY_SMALL, color = SemanticColor.ON_SURFACE_VARIANT)
                     if (chapter != null) {
                         platformTimestampsBar(chapter)
+                        remoteSourceMetadataBar(m, chapter, draft, selectedSource)
                         chapterLocalChangesBanner(m, series, chapter, draft)
                     }
                 }
@@ -501,6 +544,69 @@ object MangaUploaderRenderer {
             targetActions(m, series, chapter, draft)
             pagesSection(m, draft)
         }
+    }
+
+    private fun UiContainerBuilder.remoteSourceMetadataBar(
+        m: RenderModel,
+        chapter: Chapter,
+        draft: ChapterDraft,
+        selectedSource: String
+    ) {
+        val isMd = selectedSource == UploaderWorkers.SOURCE_MANGADEX
+        val summary: String
+        val hasSnapshot: Boolean
+        if (isMd) {
+            val snap = chapter.mdSnapshot
+            hasSnapshot = snap != null
+            summary = if (snap == null) {
+                "MangaDex remote metadata: not synced yet (run Scan MangaDex)"
+            } else {
+                val pagesTxt = snap.pageCount?.let { " · $it pages" }.orEmpty()
+                "MangaDex remote: Ch. ${snap.number.ifBlank { "?" }} · Vol. ${snap.volume.ifBlank { "-" }} · \"${snap.title.ifBlank { "(untitled)" }}\" · ${snap.language}$pagesTxt"
+            }
+        } else {
+            val snap = chapter.cubariSnapshot
+            hasSnapshot = snap != null
+            summary = if (snap == null) {
+                "Cubari remote metadata: not published yet"
+            } else {
+                "Cubari remote: Ch. ${snap.key} · Vol. ${snap.volume.ifBlank { "-" }} · \"${snap.title.ifBlank { "(untitled)" }}\" · ${snap.pageUrls.size} pages"
+            }
+        }
+        row(
+            id = "chapter_remote_meta_row",
+            spacing = SpacingSize.SMALL,
+            modifier = UiModifier.fillMaxWidth().background(SemanticColor.SURFACE_CONTAINER).padding(SpacingSize.EXTRA_SMALL)
+        ) {
+            text(summary, id = "ch_remote_meta_summary", role = TypographyRole.BODY_SMALL, modifier = UiModifier.weight(1f))
+            if (hasSnapshot) {
+                val btnLabel = if (isMd) "Load Meta <- MD" else "Load Meta <- Cubari"
+                val tip = if (isMd) "Copy MangaDex remote title, volume, and number into the editable draft" else "Copy Cubari remote title, volume, and number into the editable draft"
+                iconButton("cloud_download", id = "btn_load_remote_meta", action = Ids.ACT_LOAD_REMOTE_META, tooltip = tip)
+                text(btnLabel, id = "lbl_load_remote_meta", role = TypographyRole.LABEL, color = SemanticColor.PRIMARY)
+            }
+        }
+        if (isMd && chapter.isOnCubari && chapter.isOnMangaDex) {
+            val mdSnap = chapter.mdSnapshot
+            val cubSnap = chapter.cubariSnapshot
+            if (mdSnap != null && cubSnap != null) {
+                val crossDiffs = buildList {
+                    if (normalizeChapterKey(cubSnap.key) != normalizeChapterKey(mdSnap.number)) add("number")
+                    if (cubSnap.volume.trim() != mdSnap.volume.trim()) add("volume")
+                    if (cubSnap.title.trim() != mdSnap.title.trim()) add("title")
+                    if (mdSnap.pageCount != null && cubSnap.pageUrls.isNotEmpty() && cubSnap.pageUrls.size != mdSnap.pageCount) add("page count")
+                }
+                if (crossDiffs.isNotEmpty()) {
+                    text(
+                        "Cubari vs MangaDex differ on: ${crossDiffs.joinToString()} — Push/Pull syncs both metadata & pages.",
+                        id = "ch_cross_platform_diff",
+                        role = TypographyRole.BODY_SMALL,
+                        color = SemanticColor.TERTIARY
+                    )
+                }
+            }
+        }
+        val _unused = m.config.mdLanguage + draft.chapterId // keep clean signature symmetry
     }
 
     private fun UiContainerBuilder.chapterLocalChangesBanner(m: RenderModel, series: Series?, chapter: Chapter, draft: ChapterDraft) {
@@ -589,13 +695,19 @@ object MangaUploaderRenderer {
             TargetPushKind.NEW_PUBLISH, null -> "Push Ch. -> MD"
         }
         val chLabel = chapter?.number?.takeIf { it.isNotBlank() }?.let { "Ch. $it" } ?: "Chapter"
+        val mdUploadActive = m.jobs.any { it.capabilityName == "publishToMangaDex" && !it.isTerminal }
+        val activeMdLabel = if (mdUploadActive) "Uploading to MD..." else mdPushLabel
         column(id = "chapter_actions_box", spacing = SpacingSize.EXTRA_SMALL, modifier = UiModifier.fillMaxWidth()) {
-            text("Single Chapter Actions ($chLabel only)", id = "ch_actions_header", role = TypographyRole.LABEL, color = SemanticColor.ON_SURFACE_VARIANT)
+            text(
+                if (mdUploadActive) "Single Chapter Actions ($chLabel only) · MangaDex upload active (1 session max)"
+                else "Single Chapter Actions ($chLabel only)",
+                id = "ch_actions_header", role = TypographyRole.LABEL, color = SemanticColor.ON_SURFACE_VARIANT
+            )
             row(id = "chapter_target_actions", spacing = SpacingSize.EXTRA_SMALL, modifier = UiModifier.fillMaxWidth()) {
                 button(cubariPushLabel, id = "btn_push_cubari", action = Ids.ACT_CH_PUSH_CUBARI, iconName = "cloud_upload",
                     modifier = UiModifier.enabled(m.isUnlocked(LockKeys.STAGE1)))
-                button(mdPushLabel, id = "btn_push_mangadex", action = Ids.ACT_CH_PUSH_MANGADEX, iconName = "upload", isTonal = true, isPrimary = false,
-                    modifier = UiModifier.enabled(m.isUnlocked(LockKeys.STAGE2)))
+                button(activeMdLabel, id = "btn_push_mangadex", action = Ids.ACT_CH_PUSH_MANGADEX, iconName = "upload", isTonal = true, isPrimary = false,
+                    modifier = UiModifier.enabled(!mdUploadActive && m.isUnlocked(LockKeys.STAGE2)))
                 button("Pull Ch. <- MD", id = "btn_pull_md", action = Ids.ACT_CH_PULL_MD, iconName = "cloud_download", isTonal = true, isPrimary = false,
                     modifier = UiModifier.enabled(m.isUnlocked(LockKeys.SYNC)))
                 button("Remove Ch...", id = "btn_remove", action = Ids.ACT_CH_REMOVE_CUBARI, iconName = "delete", isDestructive = true, isTonal = true, isPrimary = false,
@@ -638,42 +750,46 @@ object MangaUploaderRenderer {
                 row(id = "pages_header", spacing = SpacingSize.SMALL, modifier = UiModifier.fillMaxWidth()) {
                     text("Pages (${displayPages.size})", id = "pages_title", role = TypographyRole.TITLE_MEDIUM)
                     text(countsNote, id = "pages_counts", role = TypographyRole.BODY_SMALL, color = SemanticColor.ON_SURFACE_VARIANT)
+                    badge(sourceLabel, id = "pages_source_badge", color = SemanticColor.SURFACE_CONTAINER_HIGHEST)
                     spacer(id = "pages_header_spacer", modifier = UiModifier.weight(1f))
-                    button(
-                        "Sort (1..9)",
-                        id = "btn_sort_pages",
-                        action = Ids.ACT_SORT_PAGES,
-                        isTonal = true, isPrimary = false,
-                        iconName = "swap_vert",
-                        modifier = UiModifier.enabled(displayPages.size > 1)
-                    )
-                    button(
-                        if (s.gridExpanded) "Compact Grid" else "Expand Grid",
-                        id = "btn_toggle_expand_grid",
-                        action = Ids.ACT_TOGGLE_EXPAND_GRID,
-                        isTonal = true, isPrimary = false,
-                        iconName = if (s.gridExpanded) "collapse" else "expand",
-                        modifier = UiModifier.enabled(s.gridExpanded || displayPages.size > COMPACT_PAGE_LIMIT)
-                    )
+                    buttonGroup(id = "pages_header_actions", selectionMode = false) {
+                        item(
+                            key = "sort_pages", label = "Sort (1..9)", action = Ids.ACT_SORT_PAGES,
+                            iconName = "swap_vert", enabled = displayPages.size > 1,
+                            tooltip = "Naturally sort pages by filename (1, 2, ..., 10)"
+                        )
+                        item(
+                            key = "toggle_grid",
+                            label = if (s.gridExpanded) "Compact Grid" else "Expand Grid",
+                            action = Ids.ACT_TOGGLE_EXPAND_GRID,
+                            iconName = if (s.gridExpanded) "collapse" else "expand",
+                            enabled = s.gridExpanded || displayPages.size > COMPACT_PAGE_LIMIT,
+                            tooltip = if (s.gridExpanded) "Show compact preview grid (first $COMPACT_PAGE_LIMIT pages)" else "Show all pages and enable drag-and-drop reorder"
+                        )
+                    }
                 }
 
-                row(id = "pages_toolbar", spacing = SpacingSize.EXTRA_SMALL, modifier = UiModifier.fillMaxWidth()) {
-                    dropdown(
-                        id = Ids.REMOTE_SOURCE,
-                        selectedKey = selectedSource,
-                        options = linkedMapOf(
-                            UploaderWorkers.SOURCE_CUBARI to "Cubari / Aruba",
-                            UploaderWorkers.SOURCE_MANGADEX to "MangaDex"
-                        ),
-                        label = "Remote Source",
-                        modifier = UiModifier.weight(1f)
+                buttonGroup(id = "pages_toolbar", selectionMode = false, modifier = UiModifier.fillMaxWidth()) {
+                    item(
+                        key = "check_remote", label = "Check ($sourceLabel)", action = Ids.ACT_CHECK_REMOTE_PAGES,
+                        iconName = "search", enabled = canQuery,
+                        tooltip = "Verify remote image URLs & availability on $sourceLabel"
                     )
-                    button("Check", id = "btn_check_remote_pages", action = Ids.ACT_CHECK_REMOTE_PAGES, isTonal = true, isPrimary = false,
-                        iconName = "search", modifier = UiModifier.enabled(canQuery))
-                    button("Download All", id = "btn_load_remote_pages", action = Ids.ACT_LOAD_REMOTE_PAGES, isTonal = true, isPrimary = false,
-                        iconName = "cloud_download", modifier = UiModifier.enabled(canQuery))
-                    button("+ Append...", id = "btn_append_pages", action = Ids.ACT_APPEND_PAGES, isTonal = true, isPrimary = false, iconName = "add")
-                    button("Replace All...", id = "btn_replace_pages", action = Ids.ACT_REPLACE_PICK, isTonal = true, isPrimary = false, iconName = "swap_vert")
+                    item(
+                        key = "download_remote", label = "Download All", action = Ids.ACT_LOAD_REMOTE_PAGES,
+                        iconName = "cloud_download", enabled = canQuery,
+                        tooltip = "Download all remote images from $sourceLabel into the editable local draft"
+                    )
+                    item(
+                        key = "append_pages", label = "+ Append...", action = Ids.ACT_APPEND_PAGES,
+                        iconName = "add",
+                        tooltip = "Append local page image files to the end of this chapter"
+                    )
+                    item(
+                        key = "replace_pages", label = "Replace All...", action = Ids.ACT_REPLACE_PICK,
+                        iconName = "swap_vert",
+                        tooltip = "Pick image files to replace all current pages in this chapter"
+                    )
                 }
 
                 if (report != null) {
@@ -880,30 +996,26 @@ object MangaUploaderRenderer {
                     if (cubariLink != null) {
                         text("Cubari URL: $cubariLink", id = "series_cubari_url", role = TypographyRole.BODY_SMALL, color = SemanticColor.ON_SURFACE_VARIANT)
                     }
-                    row(id = "series_open_links_row", spacing = SpacingSize.SMALL) {
-                        button(
-                            "Open on Cubari", id = "btn_open_cubari_series",
-                            action = Ids.ACT_OPEN_CUBARI_SERIES,
-                            isTonal = true, isPrimary = false, iconName = "open_in_browser",
-                            modifier = UiModifier.enabled(cubariLink != null)
+                    buttonGroup(id = "series_links_group", selectionMode = false, modifier = UiModifier.fillMaxWidth()) {
+                        item(
+                            key = "open_cubari_series", label = "Open on Cubari", action = Ids.ACT_OPEN_CUBARI_SERIES,
+                            iconName = "open_in_browser", enabled = cubariLink != null,
+                            tooltip = "Open this series in the Cubari reader"
                         )
-                        button(
-                            "Copy Cubari URL", id = "btn_copy_cubari_series",
-                            action = Ids.ACT_COPY_CUBARI_SERIES,
-                            isTonal = true, isPrimary = false, iconName = "content_copy",
-                            modifier = UiModifier.enabled(cubariLink != null)
+                        item(
+                            key = "copy_cubari_series", label = "Copy Cubari URL", action = Ids.ACT_COPY_CUBARI_SERIES,
+                            iconName = "content_copy", enabled = cubariLink != null,
+                            tooltip = "Copy Cubari series URL to clipboard"
                         )
-                        button(
-                            "Open on MangaDex", id = "btn_open_md_series",
-                            action = Ids.ACT_OPEN_MANGADEX_SERIES,
-                            isTonal = true, isPrimary = false, iconName = "open_in_browser",
-                            modifier = UiModifier.enabled(mdLink != null)
+                        item(
+                            key = "open_md_series", label = "Open on MangaDex", action = Ids.ACT_OPEN_MANGADEX_SERIES,
+                            iconName = "open_in_browser", enabled = mdLink != null,
+                            tooltip = "Open this series page on MangaDex"
                         )
-                        button(
-                            "Copy MD URL", id = "btn_copy_md_series",
-                            action = Ids.ACT_COPY_MANGADEX_SERIES,
-                            isTonal = true, isPrimary = false, iconName = "content_copy",
-                            modifier = UiModifier.enabled(mdLink != null)
+                        item(
+                            key = "copy_md_series", label = "Copy MD URL", action = Ids.ACT_COPY_MANGADEX_SERIES,
+                            iconName = "content_copy", enabled = mdLink != null,
+                            tooltip = "Copy MangaDex series URL to clipboard"
                         )
                     }
                 }
@@ -983,12 +1095,26 @@ object MangaUploaderRenderer {
                     settingInput(m, SettingKeys.CUBARI_GROUP, "Group name", m.config.cubariGroupName, UiModifier.weight(1f))
                 }
                 row(id = "cubari_actions", spacing = SpacingSize.SMALL) {
-                    button("Test Repo", id = "btn_test_repo", action = Ids.ACT_TEST_REPO, isTonal = true, isPrimary = false, iconName = "sync")
-                    button("Sync Repo", id = "btn_sync_repo", action = Ids.ACT_SYNC_REPO, isTonal = true, isPrimary = false, iconName = "cloud_download",
-                        modifier = UiModifier.enabled(m.isUnlocked(LockKeys.CUBARI)))
-                    button("Restore from Git", id = "btn_restore_git", action = Ids.ACT_RESTORE_GIT, isTonal = true, isPrimary = false, isDestructive = true,
-                        iconName = "restore", modifier = UiModifier.enabled(m.isUnlocked(LockKeys.CUBARI)))
-                    button("Choose folder...", id = "btn_pick_repo", action = Ids.ACT_PICK_REPO, isTonal = true, isPrimary = false, iconName = "folder_open")
+                    buttonGroup(id = "cubari_actions_group", selectionMode = false) {
+                        item(
+                            key = "test_repo", label = "Test Repo", action = Ids.ACT_TEST_REPO, iconName = "sync",
+                            tooltip = "Test Git credentials and remote Cubari repository reachability"
+                        )
+                        item(
+                            key = "sync_repo", label = "Sync Repo", action = Ids.ACT_SYNC_REPO, iconName = "cloud_download",
+                            enabled = m.isUnlocked(LockKeys.CUBARI),
+                            tooltip = "Pull Cubari repository JSON files and refresh local library"
+                        )
+                        item(
+                            key = "restore_git", label = "Restore from Git", action = Ids.ACT_RESTORE_GIT, iconName = "restore",
+                            color = SemanticColor.ERROR_CONTAINER, enabled = m.isUnlocked(LockKeys.CUBARI),
+                            tooltip = "Clear stuck Git locks and hard-reset local repo clone to origin"
+                        )
+                        item(
+                            key = "pick_repo", label = "Choose folder...", action = Ids.ACT_PICK_REPO, iconName = "folder_open",
+                            tooltip = "Pick an existing local Cubari Git repository folder"
+                        )
+                    }
                     text("or drop a folder on this card", id = "cubari_drop_hint", role = TypographyRole.BODY_SMALL, color = SemanticColor.ON_SURFACE_VARIANT)
                 }
                 diagnostic(s, "cubari")
@@ -1000,12 +1126,24 @@ object MangaUploaderRenderer {
                     settingInput(m, SettingKeys.MD_USERNAME, "Username (password flow)", m.config.mdUsername, UiModifier.weight(1f))
                     settingInput(m, SettingKeys.MD_PASSWORD, "Password (password flow)", m.config.mdPassword, UiModifier.weight(1f), secret = true)
                 }
-                row(id = "md_auth_actions", spacing = SpacingSize.SMALL) {
-                    button("Browser OAuth", id = "btn_md_oauth", action = Ids.ACT_MD_LOGIN_BROWSER, iconName = "open_in_browser")
-                    button("Password Login", id = "btn_md_login", action = Ids.ACT_MD_LOGIN, isTonal = true, isPrimary = false, iconName = "key")
-                    button("Verify Token", id = "btn_md_verify", action = Ids.ACT_MD_VERIFY, isTonal = true, isPrimary = false, iconName = "check_circle")
-                    button("Log Out", id = "btn_md_logout", action = Ids.ACT_MD_LOGOUT, isTonal = true, isPrimary = false, iconName = "lock",
-                        modifier = UiModifier.enabled(m.config.isMangaDexAuthenticated))
+                buttonGroup(id = "md_auth_actions", selectionMode = false) {
+                    item(
+                        key = "md_oauth", label = "Browser OAuth", action = Ids.ACT_MD_LOGIN_BROWSER, iconName = "open_in_browser",
+                        tooltip = "Authenticate with MangaDex OAuth2 PKCE in your browser via loopback callback server"
+                    )
+                    item(
+                        key = "md_login", label = "Password Login", action = Ids.ACT_MD_LOGIN, iconName = "key",
+                        tooltip = "Authenticate using MangaDex Personal Client credentials and username/password"
+                    )
+                    item(
+                        key = "md_verify", label = "Verify Token", action = Ids.ACT_MD_VERIFY, iconName = "check_circle",
+                        tooltip = "Verify current MangaDex OAuth access/refresh tokens and fetch profile"
+                    )
+                    item(
+                        key = "md_logout", label = "Log Out", action = Ids.ACT_MD_LOGOUT, iconName = "lock",
+                        enabled = m.config.isMangaDexAuthenticated,
+                        tooltip = "Clear stored MangaDex OAuth tokens and profile"
+                    )
                 }
                 row(id = "md_tokens_row", spacing = SpacingSize.SMALL, modifier = UiModifier.fillMaxWidth()) {
                     settingInput(m, SettingKeys.MD_ACCESS_TOKEN, "OAuth access token", m.config.mdAccessToken, UiModifier.weight(1f), secret = true)
@@ -1035,9 +1173,16 @@ object MangaUploaderRenderer {
                     button("Check Group", id = "btn_check_group", action = Ids.ACT_CHECK_GROUP, isTonal = true, isPrimary = false, iconName = "check_circle")
                     settingInput(m, SettingKeys.MD_LANGUAGE, "Language (blank = all)", m.config.mdLanguage, UiModifier.width(180))
                 }
-                row(id = "md_upload_session_actions", spacing = SpacingSize.SMALL) {
-                    button("Check Upload Session", id = "btn_md_check_session", action = Ids.ACT_MD_CHECK_SESSION, isTonal = true, isPrimary = false, iconName = "fact_check")
-                    button("Force Cancel Upload Session", id = "btn_md_cancel_session", action = Ids.ACT_MD_FORCE_CANCEL_SESSION, isTonal = true, isPrimary = false, isDestructive = true, iconName = "cancel")
+                buttonGroup(id = "md_upload_session_actions", selectionMode = false) {
+                    item(
+                        key = "check_session", label = "Check Upload Session", action = Ids.ACT_MD_CHECK_SESSION, iconName = "fact_check",
+                        tooltip = "Check if MangaDex currently has an open upload session (sessions >= 2h old auto-close on upload)"
+                    )
+                    item(
+                        key = "cancel_session", label = "Force Cancel Upload Session", action = Ids.ACT_MD_FORCE_CANCEL_SESSION, iconName = "cancel",
+                        color = SemanticColor.ERROR_CONTAINER,
+                        tooltip = "Immediately close any open/stuck MangaDex upload session on your account"
+                    )
                 }
                 diagnostic(s, "mangadex")
                 diagnostic(s, "group")
@@ -1086,9 +1231,15 @@ object MangaUploaderRenderer {
                     settingInput(m, SettingKeys.CONCURRENT_DOWNLOADS, "Downloads", m.config.concurrentDownloads.toString(), UiModifier.weight(1f))
                     settingInput(m, SettingKeys.CONCURRENT_CONNECTIONS, "Connections", m.config.concurrentConnections.toString(), UiModifier.weight(1f))
                 }
-                row(id = "aruba_actions_row", spacing = SpacingSize.SMALL) {
-                    button("Test Storage", id = "btn_test_storage", action = Ids.ACT_TEST_STORAGE, isTonal = true, isPrimary = false, iconName = "sync")
-                    button("Scan Folders", id = "btn_scan_aruba_settings", action = Ids.ACT_SCAN_ARUBA_FOLDERS, isTonal = true, isPrimary = false, iconName = "folder_open")
+                buttonGroup(id = "aruba_actions_row", selectionMode = false) {
+                    item(
+                        key = "test_storage", label = "Test Storage", action = Ids.ACT_TEST_STORAGE, iconName = "sync",
+                        tooltip = "Verify Aruba FTP/SFTP/FTPS credentials and chapters directory access"
+                    )
+                    item(
+                        key = "scan_folders", label = "Scan Folders", action = Ids.ACT_SCAN_ARUBA_FOLDERS, iconName = "folder_open",
+                        tooltip = "Discover existing series folders under Aruba chapters path"
+                    )
                 }
                 diagnostic(s, "aruba")
             }
@@ -1096,8 +1247,16 @@ object MangaUploaderRenderer {
                 row(id = "preview_row", spacing = SpacingSize.SMALL, modifier = UiModifier.fillMaxWidth()) {
                     settingInput(m, SettingKeys.PREVIEW_HOURS, "Default preview hold (hours)", m.config.defaultPreviewHours.toString(), UiModifier.weight(1f))
                     buttonGroup(id = "preview_anchor_group") {
-                        item("mangadex", "MangaDex timestamp", Ids.ACT_ANCHOR + "mangadex", selected = m.config.previewAnchorLatestMangaDex)
-                        item("cubari", "Cubari timestamp", Ids.ACT_ANCHOR + "cubari", selected = !m.config.previewAnchorLatestMangaDex)
+                        item(
+                            "mangadex", "MangaDex timestamp", Ids.ACT_ANCHOR + "mangadex",
+                            selected = m.config.previewAnchorLatestMangaDex,
+                            tooltip = "Measure hold window from the latest published MangaDex chapter"
+                        )
+                        item(
+                            "cubari", "Cubari timestamp", Ids.ACT_ANCHOR + "cubari",
+                            selected = !m.config.previewAnchorLatestMangaDex,
+                            tooltip = "Measure hold window from each chapter's Cubari publish timestamp"
+                        )
                     }
                     button("Reset Defaults", id = "btn_reset_preview", action = Ids.ACT_RESET_PREVIEW, isTonal = true, isPrimary = false, iconName = "undo")
                 }
@@ -1105,6 +1264,11 @@ object MangaUploaderRenderer {
                     settingInput(m, SettingKeys.MAX_UPLOAD_KBPS, "Max upload KB/s (0 = unlimited)", m.config.maxUploadKbps.toString(), UiModifier.weight(1f))
                     settingInput(m, SettingKeys.MAX_DOWNLOAD_KBPS, "Max download KB/s (0 = unlimited)", m.config.maxDownloadKbps.toString(), UiModifier.weight(1f))
                 }
+                row(id = "cache_row", spacing = SpacingSize.SMALL, modifier = UiModifier.fillMaxWidth()) {
+                    settingInput(m, SettingKeys.MAX_CACHE_MB, "Max local cache MB (0 = unlimited)", m.config.maxCacheMb.toString(), UiModifier.weight(1f))
+                    button("Prune Cache", id = "btn_prune_cache", action = Ids.ACT_PRUNE_CACHE, isTonal = true, isPrimary = false, iconName = "delete_sweep")
+                }
+                diagnostic(m.state, "cache")
             }
         }
     }
@@ -1166,25 +1330,44 @@ object MangaUploaderRenderer {
     // ───────────────────────── queue ─────────────────────────
 
     private fun UiContainerBuilder.queueView(m: RenderModel) {
+        val hasTerminal = m.jobs.any { it.isTerminal }
         scrollableColumn(
             id = "queue_root", spacing = SpacingSize.SMALL,
             modifier = UiModifier.fillMaxSize().weight(1f).padding(SpacingSize.MEDIUM).background(SemanticColor.SURFACE_CONTAINER_LOWEST)
         ) {
-            text("Queue", id = "queue_title", role = TypographyRole.TITLE_LARGE)
+            row(id = "queue_header", spacing = SpacingSize.SMALL, modifier = UiModifier.fillMaxWidth()) {
+                text("Queue", id = "queue_title", role = TypographyRole.TITLE_LARGE)
+                spacer(id = "queue_header_spacer", modifier = UiModifier.weight(1f))
+                if (hasTerminal) {
+                    button(
+                        "Clear History",
+                        id = "btn_clear_job_history",
+                        action = Ids.ACT_CLEAR_JOB_HISTORY,
+                        isTonal = true,
+                        isPrimary = false,
+                        iconName = "delete_sweep"
+                    )
+                }
+            }
             if (m.jobs.isEmpty()) {
                 emptyState(id = "queue_empty", title = "No jobs", iconName = "list", description = "Pushes and syncs show up here")
             }
-            m.jobs.asReversed().forEach { job -> jobCard(job) }
+            m.jobs.asReversed().forEach { job -> jobCard(job, m.nowEpochSec) }
         }
     }
 
-    private fun UiContainerBuilder.jobCard(job: CapabilityJobSnapshot) {
+    private fun UiContainerBuilder.jobCard(job: CapabilityJobSnapshot, nowEpochSec: Long) {
         val progress = job.primaryProgress
+        val secondary = job.secondaryProgress
+        val elapsed = formatElapsedJob(job, nowEpochSec)
         card(id = "job_${job.jobId}", surfaceRole = SemanticColor.SURFACE_CONTAINER_HIGH, modifier = UiModifier.fillMaxWidth()) {
             column(id = "job_${job.jobId}_col", spacing = SpacingSize.SMALL, modifier = UiModifier.fillMaxWidth().padding(SpacingSize.MEDIUM_SMALL)) {
                 row(id = "job_${job.jobId}_head", spacing = SpacingSize.SMALL) {
                     text(job.capabilityName, id = "job_${job.jobId}_name", role = TypographyRole.TITLE_MEDIUM)
                     badge(job.status.name, id = "job_${job.jobId}_status", color = job.status.color())
+                    if (elapsed != null) {
+                        text("Elapsed: $elapsed", id = "job_${job.jobId}_elapsed", role = TypographyRole.BODY_SMALL, color = SemanticColor.ON_SURFACE_VARIANT)
+                    }
                 }
                 progressBar(
                     id = "job_${job.jobId}_progress",
@@ -1194,25 +1377,50 @@ object MangaUploaderRenderer {
                         else -> progress?.fraction
                     },
                     label = progress?.message,
-                    statusText = progress?.let { p ->
-                        val curr = p.current
-                        val tot = p.total
-                        if (curr != null && tot != null) "${curr.toLong()} / ${tot.toLong()} ${p.unit.orEmpty()}".trim() else null
-                    },
+                    statusText = progress?.let(::formatProgressStatus),
                     color = if (job.status == CapabilityJobStatus.FAILED) SemanticColor.ERROR else SemanticColor.PRIMARY,
                     modifier = UiModifier.fillMaxWidth()
                 )
+                if (secondary != null && !job.isTerminal) {
+                    progressBar(
+                        id = "job_${job.jobId}_secondary_progress",
+                        progress = secondary.fraction,
+                        label = secondary.message,
+                        statusText = formatProgressStatus(secondary),
+                        color = SemanticColor.SECONDARY,
+                        modifier = UiModifier.fillMaxWidth()
+                    )
+                }
+                job.subProgress.entries.forEach { (subKey, subProg) ->
+                    progressBar(
+                        id = "job_${job.jobId}_sub_${sanitizeFolderName(subKey)}",
+                        progress = subProg.fraction,
+                        label = subProg.message ?: subKey,
+                        statusText = formatProgressStatus(subProg),
+                        color = SemanticColor.TERTIARY,
+                        modifier = UiModifier.fillMaxWidth()
+                    )
+                }
                 job.errorMessage?.let { text(it, id = "job_${job.jobId}_error", role = TypographyRole.BODY_SMALL, color = SemanticColor.ERROR) }
                 job.recentLogs.takeLast(MAX_LOG_LINES).forEachIndexed { i, line ->
                     text(line, id = "job_${job.jobId}_log_$i", role = TypographyRole.BODY_SMALL, color = SemanticColor.ON_SURFACE_VARIANT)
                 }
-                row(id = "job_${job.jobId}_actions", spacing = SpacingSize.SMALL) {
-                    button("Pause", id = "job_${job.jobId}_pause", action = Ids.ACT_JOB_PAUSE + job.jobId, isTonal = true, isPrimary = false, iconName = "pause",
-                        modifier = UiModifier.enabled(job.status == CapabilityJobStatus.RUNNING))
-                    button("Resume", id = "job_${job.jobId}_resume", action = Ids.ACT_JOB_RESUME + job.jobId, isTonal = true, isPrimary = false, iconName = "play",
-                        modifier = UiModifier.enabled(job.status == CapabilityJobStatus.PAUSED))
-                    button("Cancel", id = "job_${job.jobId}_cancel", action = Ids.ACT_JOB_CANCEL + job.jobId, isTonal = true, isPrimary = false, isDestructive = true,
-                        iconName = "stop", modifier = UiModifier.enabled(!job.isTerminal))
+                buttonGroup(id = "job_${job.jobId}_actions", selectionMode = false) {
+                    item(
+                        key = "pause", label = "Pause", action = Ids.ACT_JOB_PAUSE + job.jobId, iconName = "pause",
+                        enabled = job.status == CapabilityJobStatus.RUNNING,
+                        tooltip = "Pause this job at its next safe checkpoint"
+                    )
+                    item(
+                        key = "resume", label = "Resume", action = Ids.ACT_JOB_RESUME + job.jobId, iconName = "play",
+                        enabled = job.status == CapabilityJobStatus.PAUSED,
+                        tooltip = "Resume paused job from its saved checkpoint"
+                    )
+                    item(
+                        key = "cancel", label = "Cancel", action = Ids.ACT_JOB_CANCEL + job.jobId, iconName = "stop",
+                        enabled = !job.isTerminal, color = SemanticColor.ERROR_CONTAINER,
+                        tooltip = "Cancel and abort this job"
+                    )
                 }
             }
         }
@@ -1271,6 +1479,26 @@ object MangaUploaderRenderer {
             ) {
                 text(c.message, id = "confirm_message", role = TypographyRole.BODY_MEDIUM)
             }
+        }
+    }
+
+    private fun formatProgressStatus(p: ProgressData): String? {
+        val curr = p.current
+        val tot = p.total
+        if (curr != null && tot != null) {
+            return "${curr.toLong()} / ${tot.toLong()} ${p.unit.orEmpty()}".trim()
+        }
+        return p.fraction?.let { "${(it * 100).toInt()}%" }
+    }
+
+    private fun formatElapsedJob(job: CapabilityJobSnapshot, nowEpochSec: Long): String? {
+        val startedMs = job.startedAtEpochMs ?: return null
+        val endMs = job.completedAtEpochMs ?: (nowEpochSec * 1000L)
+        val sec = ((endMs - startedMs) / 1000L).coerceAtLeast(0L)
+        return when {
+            sec >= 3600L -> "${sec / 3600L}h ${(sec % 3600L) / 60L}m"
+            sec >= 60L -> "${sec / 60L}m ${sec % 60L}s"
+            else -> "${sec}s"
         }
     }
 

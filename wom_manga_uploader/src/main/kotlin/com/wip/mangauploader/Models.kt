@@ -1,6 +1,7 @@
 package com.wip.mangauploader
 
 import java.math.BigDecimal
+import java.security.MessageDigest
 import kotlinx.serialization.Serializable
 
 /**
@@ -31,7 +32,8 @@ data class PageRef(
     val id: String,
     val storedPath: String = "",
     val originalName: String,
-    val remoteUrl: String? = null
+    val remoteUrl: String? = null,
+    val contentHash: String? = null
 ) {
     val isLocal: Boolean get() = storedPath.isNotBlank()
     val isRemoteOnly: Boolean get() = !isLocal && !remoteUrl.isNullOrBlank()
@@ -52,7 +54,8 @@ data class CubariChapterSnapshot(
     val volume: String = "",
     val title: String = "",
     val pageUrls: List<String> = emptyList(),
-    val pageSignature: List<String>? = null
+    val pageSignature: List<String>? = null,
+    val pageHashes: List<String>? = null
 )
 
 @Serializable
@@ -63,7 +66,9 @@ data class MangaDexChapterSnapshot(
     val volume: String = "",
     val title: String = "",
     val language: String = "en",
-    val pageSignature: List<String>? = null
+    val pageSignature: List<String>? = null,
+    val pageCount: Int? = null,
+    val pageHashes: List<String>? = null
 )
 
 enum class TargetPushKind {
@@ -272,12 +277,18 @@ object ChangeDetector {
     fun hasPageChanges(
         pages: List<PageRef>,
         snapshotPageSig: List<String>?,
-        isPublishedOnTarget: Boolean
+        isPublishedOnTarget: Boolean,
+        snapshotPageHashes: List<String>? = null
     ): Boolean {
         if (!isPublishedOnTarget) return true
         if (pages.isEmpty()) return false
         if (snapshotPageSig == null) return pages.any { it.isLocal }
-        return pageListSignature(pages) != snapshotPageSig
+        if (pageListSignature(pages) != snapshotPageSig) return true
+        if (snapshotPageHashes != null && snapshotPageHashes.size == pages.size) {
+            val currentHashes = pages.map { it.contentHash }
+            if (currentHashes.all { !it.isNullOrBlank() } && currentHashes != snapshotPageHashes) return true
+        }
+        return false
     }
 
     fun cubariSeriesSnapshot(series: Series): CubariSeriesSnapshot = CubariSeriesSnapshot(
@@ -308,7 +319,7 @@ object ChangeDetector {
             return ChapterPushPlan(TargetPushKind.NEW_PUBLISH, changedFields = listOf("unpublished"))
         }
         val snap = chapter.cubariSnapshot
-        val pagesChanged = hasPageChanges(effective.pages, snap?.pageSignature, isPublishedOnTarget = true)
+        val pagesChanged = hasPageChanges(effective.pages, snap?.pageSignature, isPublishedOnTarget = true, snap?.pageHashes)
         val changes = buildList {
             if (pagesChanged) add("pages")
             if (snap != null) {
@@ -337,7 +348,12 @@ object ChangeDetector {
             return ChapterPushPlan(TargetPushKind.NEW_PUBLISH, changedFields = listOf("unpublished"))
         }
         val snap = chapter.mdSnapshot
-        val pagesChanged = hasPageChanges(effective.pages, snap?.pageSignature, isPublishedOnTarget = true)
+        val cubariPageCountMismatch = effective.pages.isEmpty() &&
+            effective.cubariPageUrls.isNotEmpty() &&
+            snap?.pageCount != null &&
+            effective.cubariPageUrls.size != snap.pageCount
+        val pagesChanged = hasPageChanges(effective.pages, snap?.pageSignature, isPublishedOnTarget = true, snap?.pageHashes) ||
+            cubariPageCountMismatch
         val changes = buildList {
             if (pagesChanged) add("pages")
             if (snap != null) {
@@ -365,4 +381,141 @@ fun normalizeChapterKey(number: String): String {
     val decimal = runCatching { BigDecimal(stripped) }.getOrNull() ?: return stripped
     val canonical = decimal.stripTrailingZeros()
     return if (canonical.scale() <= 0) canonical.toBigInteger().toString() else canonical.toPlainString()
+}
+
+/** Lowercase SHA-256 hex digest of [bytes]. */
+fun sha256Hex(bytes: ByteArray): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+    val hex = StringBuilder(digest.size * 2)
+    for (b in digest) {
+        val v = b.toInt() and 0xFF
+        hex.append("0123456789abcdef"[v ushr 4])
+        hex.append("0123456789abcdef"[v and 0x0F])
+    }
+    return hex.toString()
+}
+
+/**
+ * Pure incremental page matching and cycle-safe rename planning shared by Aruba/Cubari and MangaDex publishers.
+ */
+object IncrementalPagePlanner {
+
+    /**
+     * Matches each page in [currentPages] to at most one unused prior slot index in
+     * `0 until maxOf(previousSignatures.size, previousHashes.size, previousUrls.size)` that satisfies
+     * [isPreviousEligible]. Returns `null` at indices whose bytes must be freshly uploaded.
+     */
+    fun matchExistingPages(
+        currentPages: List<PageRef>,
+        currentHashes: List<String?>,
+        previousSignatures: List<String>,
+        previousHashes: List<String> = emptyList(),
+        previousUrls: List<String> = emptyList(),
+        isPreviousEligible: (Int) -> Boolean = { true },
+        requireSameExtension: Boolean = false
+    ): List<Int?> {
+        val totalPrev = maxOf(previousSignatures.size, previousHashes.size, previousUrls.size)
+        if (currentPages.isEmpty() || totalPrev == 0) return List(currentPages.size) { null }
+
+        val curSigs = ChangeDetector.pageListSignature(currentPages)
+        val matched = arrayOfNulls<Int>(currentPages.size)
+        val usedPrev = BooleanArray(totalPrev)
+
+        fun extCompatible(curIdx: Int, prevIdx: Int): Boolean {
+            if (!requireSameExtension) return true
+            val curExt = currentPages[curIdx].originalName.substringAfterLast('.', "").lowercase()
+            val prevUrlExt = previousUrls.getOrNull(prevIdx)
+                ?.substringBefore('?')?.substringBefore('#')
+                ?.substringAfterLast('/')?.substringAfterLast('.', "")
+                ?.lowercase().orEmpty()
+            return curExt.isEmpty() || prevUrlExt.isEmpty() || curExt == prevUrlExt
+        }
+
+        fun hashCompatible(curIdx: Int, prevIdx: Int): Boolean {
+            val ch = currentHashes.getOrNull(curIdx)
+            val ph = previousHashes.getOrNull(prevIdx)
+            return ch.isNullOrBlank() || ph.isNullOrBlank() || ch == ph
+        }
+
+        fun matchesSig(curIdx: Int, prevIdx: Int): Boolean {
+            val prevSig = previousSignatures.getOrNull(prevIdx)
+            return !prevSig.isNullOrBlank() && curSigs[curIdx] == prevSig && hashCompatible(curIdx, prevIdx)
+        }
+
+        fun matchesUrl(curIdx: Int, prevIdx: Int): Boolean {
+            val curUrl = currentPages[curIdx].remoteUrl
+            val prevUrl = previousUrls.getOrNull(prevIdx)
+            return !curUrl.isNullOrBlank() && curUrl == prevUrl && hashCompatible(curIdx, prevIdx)
+        }
+
+        fun matchesHash(curIdx: Int, prevIdx: Int): Boolean {
+            val ch = currentHashes.getOrNull(curIdx)
+            val ph = previousHashes.getOrNull(prevIdx)
+            return !ch.isNullOrBlank() && ch == ph
+        }
+
+        fun claim(curIdx: Int, prevIdx: Int) {
+            matched[curIdx] = prevIdx
+            usedPrev[prevIdx] = true
+        }
+
+        // Pass 1: exact same-index match avoids unnecessary renames.
+        for (i in currentPages.indices) {
+            if (i < totalPrev && !usedPrev[i] && isPreviousEligible(i) && extCompatible(i, i)) {
+                if (matchesSig(i, i) || matchesUrl(i, i) || matchesHash(i, i)) {
+                    claim(i, i)
+                }
+            }
+        }
+
+        // Pass 2: match shifted/reordered pages in strict reliability priority order.
+        val matchers: List<(Int, Int) -> Boolean> = listOf(::matchesSig, ::matchesUrl, ::matchesHash)
+        for (matcher in matchers) {
+            for (i in currentPages.indices) {
+                if (matched[i] != null) continue
+                for (j in 0 until totalPrev) {
+                    if (!usedPrev[j] && isPreviousEligible(j) && extCompatible(i, j) && matcher(i, j)) {
+                        claim(i, j)
+                        break
+                    }
+                }
+            }
+        }
+
+        return matched.toList()
+    }
+
+    /**
+     * Orders `(sourcePath -> targetPath)` file moves without clobbering any still-unread source file,
+     * inserting a temporary staging rename only when breaking an actual permutation cycle.
+     */
+    fun planCycleSafeRenames(
+        moves: List<Pair<String, String>>,
+        tempPathFor: (sourcePath: String, seq: Int) -> String
+    ): List<Pair<String, String>> {
+        val pending = LinkedHashMap<String, String>()
+        for ((src, dst) in moves) {
+            if (src != dst) pending[src] = dst
+        }
+        val ops = mutableListOf<Pair<String, String>>()
+        var seq = 0
+        while (pending.isNotEmpty()) {
+            val ready = pending.entries.firstOrNull { it.value !in pending.keys }
+            if (ready != null) {
+                val (src, dst) = ready
+                ops += src to dst
+                pending.remove(src)
+            } else {
+                val (cycleSrc, cycleDst) = pending.entries.first()
+                var tmp = tempPathFor(cycleSrc, seq++)
+                while (tmp in pending.keys || tmp in pending.values) {
+                    tmp = tempPathFor(cycleSrc, seq++)
+                }
+                ops += cycleSrc to tmp
+                pending.remove(cycleSrc)
+                pending[tmp] = cycleDst
+            }
+        }
+        return ops
+    }
 }

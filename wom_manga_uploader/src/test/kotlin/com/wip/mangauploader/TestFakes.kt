@@ -1,9 +1,12 @@
 package com.wip.mangauploader
 
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
@@ -221,11 +224,22 @@ class FakeArubaStorage : ArubaStorage {
     val files = linkedMapOf<String, ByteArray>()
     val directories = linkedSetOf<String>()
     val deleted = mutableListOf<String>()
+    val uploadedPaths = mutableListOf<String>()
+    val renamed = mutableListOf<Pair<String, String>>()
     var onUpload: suspend (String) -> Unit = {}
 
     override suspend fun upload(remotePath: String, bytes: ByteArray) {
         onUpload(remotePath)
+        uploadedPaths += remotePath
         files[remotePath] = bytes
+    }
+
+    override suspend fun rename(fromPath: String, toPath: String) {
+        if (fromPath == toPath) return
+        val bytes = files.remove(fromPath)
+            ?: throw java.io.IOException("FakeArubaStorage missing source for rename: $fromPath")
+        renamed += fromPath to toPath
+        files[toPath] = bytes
     }
 
     override suspend fun delete(remotePath: String) {
@@ -264,6 +278,11 @@ class FakeMangaDexApi : MangaDexApi {
     val downloadedBytes = mutableMapOf<String, ByteArray>()
     val uploadedFiles = mutableListOf<MdUploadFile>()
     val committedDrafts = mutableListOf<MdChapterDraft>()
+    val committedPageOrders = mutableListOf<List<String>>()
+    val prefilledFilesByChapter = mutableMapOf<String, List<MdSessionFileInfo>>()
+    private val committedFilesByChapter = mutableMapOf<String, List<MdSessionFileInfo>>()
+    private val sessionToEditChapterId = mutableMapOf<String, String>()
+    private val chapterVersions = mutableMapOf<String, Int>()
     val updatedMetadataCalls = mutableListOf<Triple<String, Int, MdChapterDraft>>()
     var onUpdateChapterMetadata: (suspend (String, Int, MdChapterDraft) -> MdChapter?)? = null
     var abortedSessions = mutableListOf<String>()
@@ -271,6 +290,9 @@ class FakeMangaDexApi : MangaDexApi {
     val closedSessionIds = mutableListOf<String>()
     var onUploadBatch: suspend (List<MdUploadFile>) -> Unit = {}
     var sessionCounter = 0
+    var rejectBeginIfActiveSession = false
+    val activeUploadCalls = AtomicInteger(0)
+    @Volatile var maxObservedConcurrentUploads = 0
 
     override suspend fun activeUploadSession(accessToken: String): MdUploadSession? = activeSession
 
@@ -289,27 +311,63 @@ class FakeMangaDexApi : MangaDexApi {
     override suspend fun checkUrl(url: String): Int = urlStatuses[url] ?: 200
     override suspend fun download(url: String): ByteArray = downloadedBytes[url] ?: "img".encodeToByteArray()
 
-    override suspend fun beginUpload(accessToken: String, mangaId: String, groupId: String): String =
-        "sess_${++sessionCounter}"
+    override suspend fun beginUpload(accessToken: String, mangaId: String, groupId: String): String {
+        val current = activeSession
+        if (rejectBeginIfActiveSession && current != null && !current.isCommitted && !current.isDeleted) {
+            throw MangaDexException(404, "Upload session already exists. Please close or commit before creating a new one.")
+        }
+        val id = "sess_${++sessionCounter}"
+        if (rejectBeginIfActiveSession) activeSession = MdUploadSession(id = id)
+        return id
+    }
 
-    override suspend fun beginEdit(accessToken: String, chapterId: String, version: Int): String =
-        "edit_sess_${++sessionCounter}"
+    override suspend fun beginEdit(accessToken: String, chapterId: String, version: Int): String {
+        val current = activeSession
+        if (rejectBeginIfActiveSession && current != null && !current.isCommitted && !current.isDeleted) {
+            throw MangaDexException(404, "Upload session already exists. Please close or commit before creating a new one.")
+        }
+        val id = "edit_sess_${++sessionCounter}"
+        if (rejectBeginIfActiveSession) activeSession = MdUploadSession(id = id)
+        sessionToEditChapterId[id] = chapterId
+        return id
+    }
+
+    override suspend fun beginEditSession(accessToken: String, chapterId: String, version: Int): MdEditSession {
+        val id = beginEdit(accessToken, chapterId, version)
+        val prefilled = prefilledFilesByChapter[chapterId] ?: committedFilesByChapter[chapterId] ?: emptyList()
+        return MdEditSession(sessionId = id, prefilledFiles = prefilled)
+    }
 
     override suspend fun uploadPages(accessToken: String, sessionId: String, files: List<MdUploadFile>): List<String> {
-        onUploadBatch(files)
-        uploadedFiles += files
-        return files.mapIndexed { i, f -> "${sessionId}_file_${uploadedFiles.size - files.size + i}_${f.fileName}" }
+        val concurrent = activeUploadCalls.incrementAndGet()
+        if (concurrent > maxObservedConcurrentUploads) maxObservedConcurrentUploads = concurrent
+        return try {
+            onUploadBatch(files)
+            uploadedFiles += files
+            files.mapIndexed { i, f -> "${sessionId}_file_${uploadedFiles.size - files.size + i}_${f.fileName}" }
+        } finally {
+            activeUploadCalls.decrementAndGet()
+        }
     }
 
     override suspend fun commit(accessToken: String, sessionId: String, draft: MdChapterDraft, pageOrder: List<String>): MdChapter {
+        if (activeSession?.id == sessionId) activeSession = null
         committedDrafts += draft
+        committedPageOrders += pageOrder
+        val editId = sessionToEditChapterId.remove(sessionId)
+        val chapterId = editId ?: "md_ch_${committedDrafts.size}"
+        val nextVer = (chapterVersions[chapterId] ?: 0) + 1
+        chapterVersions[chapterId] = nextVer
+        committedFilesByChapter[chapterId] = pageOrder.mapIndexed { idx, fileId ->
+            MdSessionFileInfo(id = "${chapterId}_v${nextVer}_prev_$idx", originalFileName = fileId)
+        }
         return MdChapter(
-            id = "md_ch_${committedDrafts.size}",
+            id = chapterId,
             chapter = draft.chapter,
             volume = draft.volume,
             title = draft.title,
             publishAtEpochSec = 1_700_000_500L,
-            version = 1,
+            version = nextVer,
             pageCount = pageOrder.size
         )
     }
@@ -330,6 +388,7 @@ class FakeMangaDexApi : MangaDexApi {
     }
 
     override suspend fun abort(accessToken: String, sessionId: String) {
+        if (activeSession?.id == sessionId) activeSession = null
         abortedSessions += sessionId
     }
 }
@@ -409,12 +468,16 @@ class FakeSessionContext(
     val pausedJobIds = mutableListOf<String>()
     val resumedJobIds = mutableListOf<String>()
     val cancelledJobIds = mutableListOf<String>()
+    val observedJobs = mutableMapOf<String, Flow<CapabilityJobSnapshot>>()
     private var jobCounter = 0
 
     override val sessionId: String = "test_session"
     override val settingsFlow: StateFlow<Map<String, JsonElement>> = settingsState.asStateFlow()
     override val locksFlow: StateFlow<Map<String, Boolean>> = locksState.asStateFlow()
     override val capabilityJobs: StateFlow<List<CapabilityJobSnapshot>> = jobsState.asStateFlow()
+
+    override fun observeCapabilityJob(jobId: String): Flow<CapabilityJobSnapshot> =
+        observedJobs[jobId] ?: jobsState.mapNotNull { list -> list.firstOrNull { it.jobId == jobId } }
 
     override fun completeSession(response: PluginResponse) {}
     override fun cancelSession(reason: String) {}

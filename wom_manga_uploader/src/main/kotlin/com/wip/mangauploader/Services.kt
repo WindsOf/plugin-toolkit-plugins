@@ -34,7 +34,7 @@ object DefaultServiceFactory : ServiceFactory {
     override fun aruba(context: PluginContext, config: MangaUploaderConfig): ArubaStorage {
         val aruba = ArubaConfig.from(config)
         val raw = if (aruba.protocol == "SFTP") SftpStorage(aruba, context.logger) else FtpStorage(aruba, context.logger)
-        return ThrottledStorage(raw, BandwidthThrottle({ config.maxUploadKbps }, clock))
+        return ThrottledStorage(raw, BandwidthThrottle({ MangaUploaderConfig.from(context.settings).maxUploadKbps }, clock))
     }
 
     override fun mangadex(context: PluginContext, config: MangaUploaderConfig): MangaDexApi {

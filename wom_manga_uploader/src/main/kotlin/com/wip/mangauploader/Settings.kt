@@ -45,6 +45,7 @@ object SettingKeys {
 
     const val MAX_UPLOAD_KBPS = "maxUploadSpeedKbps"
     const val MAX_DOWNLOAD_KBPS = "maxDownloadSpeedKbps"
+    const val MAX_CACHE_MB = "maxCacheSizeMb"
 
     const val PREVIEW_HOURS = "defaultPreviewHours"
     const val PREVIEW_ANCHOR_MD = "previewAnchorLatestMangaDex"
@@ -57,6 +58,7 @@ object SettingKeys {
 }
 
 const val DEFAULT_PREVIEW_HOURS = 24
+const val DEFAULT_MAX_CACHE_MB = 500
 const val DEFAULT_MD_API_URL = "https://api.mangadex.org"
 const val DEFAULT_MD_AUTH_URL = "https://auth.mangadex.org"
 
@@ -104,6 +106,7 @@ data class MangaUploaderConfig(
 
     val maxUploadKbps: Int = 0,
     val maxDownloadKbps: Int = 0,
+    val maxCacheMb: Int = DEFAULT_MAX_CACHE_MB,
 
     val defaultPreviewHours: Int = DEFAULT_PREVIEW_HOURS,
     val previewAnchorLatestMangaDex: Boolean = true
@@ -175,6 +178,7 @@ data class MangaUploaderConfig(
                 mdAutoDoh = bool(SettingKeys.MD_AUTO_DOH, true),
                 maxUploadKbps = int(SettingKeys.MAX_UPLOAD_KBPS, 0).coerceAtLeast(0),
                 maxDownloadKbps = int(SettingKeys.MAX_DOWNLOAD_KBPS, 0).coerceAtLeast(0),
+                maxCacheMb = int(SettingKeys.MAX_CACHE_MB, DEFAULT_MAX_CACHE_MB).coerceAtLeast(0),
                 defaultPreviewHours = int(SettingKeys.PREVIEW_HOURS, DEFAULT_PREVIEW_HOURS).coerceAtLeast(0),
                 previewAnchorLatestMangaDex = bool(SettingKeys.PREVIEW_ANCHOR_MD, true)
             )

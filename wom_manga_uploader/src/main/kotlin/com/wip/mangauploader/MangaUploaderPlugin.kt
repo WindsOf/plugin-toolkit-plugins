@@ -142,6 +142,9 @@ data class MangaUploaderSettings(
     @PluginSetting(description = "Maximum download speed in KB/s (0 = unlimited)", defaultValue = "0", minValue = 0.0)
     val maxDownloadSpeedKbps: Int? = 0,
 
+    @PluginSetting(description = "Maximum local image cache size in MB for chapter pages (0 = unlimited). Evicts oldest published chapters first; unpublished drafts are never deleted.", defaultValue = "$DEFAULT_MAX_CACHE_MB", minValue = 0.0, maxValue = 100000.0)
+    val maxCacheSizeMb: Int? = DEFAULT_MAX_CACHE_MB,
+
     // ── Preview hold ───────────────────────────────────────────────
     @PluginSetting(description = "Default preview hold window in hours between Cubari and MangaDex", defaultValue = "24", minValue = 0.0, maxValue = 720.0)
     val defaultPreviewHours: Int? = 24,
@@ -153,7 +156,7 @@ data class MangaUploaderSettings(
 @PluginInfo(
     id = "com.wip.mangauploader",
     name = "WOM Manga Uploader",
-    version = "1.0.4",
+    version = "1.0.8",
     description = "2-Stage Manga Uploader for Stage 1 (Aruba FTP/SFTP + GitHub Cubari JSON + Cubari.moe) and Stage 2 (MangaDex) with missing-chapter backfill.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
@@ -274,6 +277,15 @@ class MangaUploaderPlugin(val settings: MangaUploaderSettings) : InteractiveUiPr
     )
     suspend fun forceCancelMangaDexUploadSession(context: PluginContext) {
         UploaderActions(context).forceCancelMangaDexUploadSession()
+    }
+
+    @PluginAction(
+        name = "Prune Local Image Cache",
+        description = "Deletes orphaned cached page files and evicts oldest published chapters if above Max Cache MB.",
+        showToast = false
+    )
+    suspend fun pruneLocalCache(context: PluginContext) {
+        UploaderActions(context).pruneLocalCache()
     }
 
     // ───────────────────────── Capabilities ─────────────────────────

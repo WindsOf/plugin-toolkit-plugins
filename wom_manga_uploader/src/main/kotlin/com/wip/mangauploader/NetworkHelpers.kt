@@ -124,26 +124,36 @@ internal suspend fun executeHttpUrlConnection(
         when {
             hasMultipart -> {
                 val boundary = "----WomBoundary${UUID.randomUUID().toString().replace("-", "")}"
+                val encodedParts = request.multipartParts.map { part ->
+                    val headerBytes = buildString {
+                        append("--").append(boundary).append("\r\n")
+                        append("Content-Disposition: form-data; name=\"").append(part.name).append('"')
+                        part.filename?.let { append("; filename=\"").append(it).append('"') }
+                        append("\r\n")
+                        part.contentType?.let { append("Content-Type: ").append(it).append("\r\n") }
+                        append("\r\n")
+                    }.encodeToByteArray()
+                    headerBytes to part.data
+                }
+                val closingBytes = "--$boundary--\r\n".encodeToByteArray()
+                val crlfBytes = "\r\n".encodeToByteArray()
+                val totalLength = encodedParts.sumOf { (h, d) -> h.size.toLong() + d.size.toLong() + crlfBytes.size } + closingBytes.size
                 conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                conn.setRequestProperty("Connection", "close")
+                conn.setFixedLengthStreamingMode(totalLength)
                 conn.doOutput = true
                 conn.outputStream.use { out ->
-                    for (part in request.multipartParts) {
-                        val header = buildString {
-                            append("--").append(boundary).append("\r\n")
-                            append("Content-Disposition: form-data; name=\"").append(part.name).append('"')
-                            part.filename?.let { append("; filename=\"").append(it).append('"') }
-                            append("\r\n")
-                            part.contentType?.let { append("Content-Type: ").append(it).append("\r\n") }
-                            append("\r\n")
-                        }
-                        out.write(header.encodeToByteArray())
-                        out.write(part.data)
-                        out.write("\r\n".encodeToByteArray())
+                    for ((headerBytes, data) in encodedParts) {
+                        out.write(headerBytes)
+                        out.write(data)
+                        out.write(crlfBytes)
                     }
-                    out.write("--$boundary--\r\n".encodeToByteArray())
+                    out.write(closingBytes)
+                    out.flush()
                 }
             }
             request.body != null -> {
+                conn.setFixedLengthStreamingMode(request.body!!.size.toLong())
                 conn.doOutput = true
                 conn.outputStream.use { it.write(request.body) }
             }
@@ -438,8 +448,10 @@ class SmartMangaDexNetworkClient(
 
         val direct = delegate.request(request)
         if (direct.statusCode == 0) {
+            logger?.warn("Host network call failed for ${request.method} ${request.url.substringBefore('?')}: ${direct.errorMessage ?: "unknown"}; trying direct socket fallback")
             val fallback = directFallback(request)
             if (fallback.statusCode > 0) return fallback
+            logger?.warn("Direct socket fallback failed for ${request.method} ${request.url.substringBefore('?')}: ${fallback.errorMessage ?: "unknown"}; trying DoH")
             val fallbackIp = resolveCached(host)
             if (fallbackIp != null) {
                 return executeViaDoh(request, host, fallbackIp)

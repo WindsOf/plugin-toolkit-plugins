@@ -5,6 +5,10 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -18,12 +22,18 @@ import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.PluginNotificationType
 import org.wip.plugintoolkit.api.PluginResponse
 import org.wip.plugintoolkit.api.ProgressData
+import java.util.concurrent.atomic.AtomicInteger
 
 @Serializable
 data class PublishResumeState(val nextPage: Int = 0, val uploadedUrls: List<String> = emptyList())
 
 @Serializable
-data class MangaDexResumeState(val sessionId: String? = null, val nextPage: Int = 0, val uploadedIds: List<String> = emptyList())
+data class MangaDexResumeState(
+    val sessionId: String? = null,
+    val nextPage: Int = 0,
+    val uploadedIds: List<String> = emptyList(),
+    val slotIds: List<String?> = emptyList()
+)
 
 @Serializable
 data class BackfillResumeState(val doneChapterKeys: List<String> = emptyList())
@@ -67,6 +77,7 @@ class UploaderWorkers(
         val foldersStore = ArubaFoldersStore(context.storage)
         val cachedFolders = foldersStore.load()
         val liveFolders = if (cfg.arubaHost.isNotBlank() && cfg.arubaUsername.isNotBlank()) {
+            context.progress.report(ProgressData.indeterminate("Scanning Aruba series folders..."))
             runCatching {
                 services.aruba(context, cfg).use { it.listDirectoryNames(cfg.arubaChaptersPath.trim().ifEmpty { "/" }) }
             }.getOrNull()?.also { foldersStore.save(it) }
@@ -118,7 +129,11 @@ class UploaderWorkers(
         }
         saveIndex(index)
 
-        val pushed = if (push) repo.commitAndPush("Sync Cubari repository") else false
+        val pushed = if (push) {
+            context.progress.report(ProgressData.indeterminate("Committing & pushing Cubari changes..."))
+            repo.commitAndPush("Sync Cubari repository")
+        } else false
+        context.progress.report(ProgressData.ratio(slugs.size.toDouble(), slugs.size.coerceAtLeast(1).toDouble(), "series", "Synced ${index.size} series"))
         if (skipped.isNotEmpty()) {
             context.showNotification(
                 "Cubari sync skipped ${skipped.size} file(s)",
@@ -149,6 +164,7 @@ class UploaderWorkers(
 
         if (operation == OP_SERIES_META) {
             val now = clock.nowEpochSec()
+            context.progress.report(ProgressData.indeterminate("Updating ${series.title} metadata on Cubari..."))
             val updatedJson = CubariJson.applySeriesMeta(repo.readSeries(series.cubariSlug), series, now)
             repo.writeSeries(series.cubariSlug, updatedJson)
             repo.commitAndPush("Update ${series.title} series metadata")
@@ -162,6 +178,7 @@ class UploaderWorkers(
                     )
                 )
             }
+            context.progress.report(ProgressData.ratio(1.0, 1.0, "series", "Updated metadata for ${series.title}"))
             context.showNotification("Updated Cubari series", series.title, PluginNotificationType.SUCCESS)
             return@guarded success("Updated metadata for ${series.title} on Cubari") {
                 put("metadataOnly", true)
@@ -176,6 +193,7 @@ class UploaderWorkers(
         if (operation == OP_REMOVE) {
             val dirKey = plan.previousRemoteKey ?: chapter.cubariKey
             val remoteDir = ArubaPaths.chapterDir(arubaCfg, series.effectiveArubaFolder, dirKey)
+            context.progress.report(ProgressData.indeterminate("Removing ch. ${chapter.number} from Aruba & Cubari..."))
             return@guarded services.aruba(context, cfg).use { storage ->
                 removeFromCubari(cfg, repo, storage, series, chapter, remoteDir, dirKey)
             }
@@ -193,6 +211,7 @@ class UploaderWorkers(
 
         if (plan.kind == TargetPushKind.METADATA_ONLY && hostedUrls.isNotEmpty()) {
             val now = clock.nowEpochSec()
+            context.progress.report(ProgressData.indeterminate("Updating Cubari metadata for ch. ${chapter.number}..."))
             val updatedJson = writeCubariChapterJson(
                 existing = existingJson,
                 series = series,
@@ -205,6 +224,7 @@ class UploaderWorkers(
             repo.writeSeries(series.cubariSlug, updatedJson)
             repo.commitAndPush("Update ${series.title} ch. ${chapter.number} metadata")
             recordCubariPublish(series, chapter, hostedUrls, now)
+            context.progress.report(ProgressData.ratio(1.0, 1.0, "chapter", "Updated ch. ${chapter.number} metadata"))
             context.showNotification(
                 "Updated Cubari metadata",
                 "${series.title} ch. ${chapter.number} (${plan.changedFields.joinToString()})",
@@ -218,53 +238,172 @@ class UploaderWorkers(
         }
 
         val remoteDir = ArubaPaths.chapterDir(arubaCfg, series.effectiveArubaFolder, chapter.cubariKey)
+        val oldRemoteDir = plan.previousRemoteKey
+            ?.takeIf { it != chapter.cubariKey }
+            ?.let { ArubaPaths.chapterDir(arubaCfg, series.effectiveArubaFolder, it) }
         val padDigits = ArubaPaths.resolvePadDigits(arubaCfg, series, library.chaptersOf(series.id))
         val effectivePages = chapter.pages.ifEmpty { PageImporter.remotePageRefs(chapter.cubariPageUrls) }
         require(effectivePages.isNotEmpty()) { "Chapter has no pages" }
 
+        val targetPaths = effectivePages.indices.map { idx ->
+            val ext = PageImporter.extension(effectivePages[idx].originalName)
+            "$remoteDir/${ArubaPaths.pageName(idx, ext, padDigits)}"
+        }
+        val targetUrls = targetPaths.map { ArubaPaths.publicUrl(arubaCfg, it) }
+        val currentHashes = resolvePageHashes(effectivePages)
+
+        val downloadThrottle = BandwidthThrottle({ config.maxDownloadKbps }, clock)
+
         services.aruba(context, cfg).use { storage ->
             val state = decode(resume, PublishResumeState.serializer()) ?: PublishResumeState()
+            val prevSnap = chapter.cubariSnapshot
+            val prevUrls = prevSnap?.pageUrls?.takeIf { it.isNotEmpty() }
+                ?: CubariJson.pageUrls(existingJson, plan.previousRemoteKey ?: chapter.cubariKey, cfg.cubariGroupName).takeIf { it.isNotEmpty() }
+                ?: chapter.cubariPageUrls
+            val prevPaths = prevUrls.map { ArubaPaths.remotePathFromUrl(arubaCfg, it) }
+            val dirsToInspect = buildSet {
+                add(remoteDir)
+                oldRemoteDir?.let { add(it) }
+                prevPaths.filterNotNull().forEach { p ->
+                    p.substringBeforeLast('/', "").takeIf { it.isNotEmpty() }?.let { add(it) }
+                }
+            }
+            val remoteFilesByDir = dirsToInspect.associateWith { dir ->
+                runCatching { storage.listNames(dir).toSet() }.getOrDefault(emptySet())
+            }
+            val matchedPrev = IncrementalPagePlanner.matchExistingPages(
+                currentPages = effectivePages,
+                currentHashes = currentHashes,
+                previousSignatures = prevSnap?.pageSignature.orEmpty(),
+                previousHashes = prevSnap?.pageHashes.orEmpty(),
+                previousUrls = prevUrls,
+                isPreviousEligible = { j ->
+                    val path = prevPaths.getOrNull(j)
+                    if (path != null) {
+                        val dir = path.substringBeforeLast('/', "")
+                        val name = path.substringAfterLast('/')
+                        remoteFilesByDir[dir]?.contains(name) == true
+                    } else false
+                },
+                requireSameExtension = true
+            )
+            val reusedSources = effectivePages.indices.map { i ->
+                val prevPath = matchedPrev[i]?.let { prevPaths.getOrNull(it) }
+                when {
+                    prevPath != null -> prevPath
+                    !effectivePages[i].isLocal && effectivePages[i].remoteUrl == targetUrls[i] -> targetPaths[i]
+                    else -> null
+                }
+            }
+            val slotNeedsUpload = BooleanArray(effectivePages.size) { i -> reusedSources[i] == null }
+
+            if (state.nextPage == 0) {
+                val moves = effectivePages.indices.mapNotNull { i ->
+                    val src = reusedSources[i]
+                    if (src != null && src != targetPaths[i]) src to targetPaths[i] else null
+                }
+                val keptCount = effectivePages.indices.count { reusedSources[it] == targetPaths[it] }
+                val dirtyCount = slotNeedsUpload.count { it }
+                context.logger.info(
+                    "Aruba upload plan for Ch. ${chapter.number}: total=${effectivePages.size}, " +
+                        "kept=$keptCount, rename=${moves.size}, upload=$dirtyCount"
+                )
+                if (moves.isNotEmpty()) {
+                    context.progress.report(ProgressData.indeterminate("Renaming ${moves.size} shifted page(s) on Aruba..."))
+                    val tmpToken = clock.nowEpochSec()
+                    val renameOps = IncrementalPagePlanner.planCycleSafeRenames(moves) { src, seq ->
+                        val dir = src.substringBeforeLast('/', "")
+                        val ext = src.substringAfterLast('.', "tmp")
+                        val file = ".wom_tmp_${tmpToken}_$seq.$ext"
+                        if (dir.isBlank()) file else "$dir/$file"
+                    }
+                    for ((src, dst) in renameOps) {
+                        storage.rename(src, dst)
+                    }
+                }
+            }
+
+            val remainingDirtyIndices = effectivePages.indices.filter { it >= state.nextPage && slotNeedsUpload[it] }
+            val knownDirtyBytes = measureKnownLocalBytes(effectivePages, remainingDirtyIndices)
+            val tracker = TransferProgressTracker(
+                context,
+                clock,
+                remainingDirtyIndices.size,
+                "Aruba Ch. ${chapter.number}:",
+                knownDirtyBytes,
+                limitKbpsProvider = { config.maxUploadKbps }
+            )
+            if (remainingDirtyIndices.isNotEmpty()) {
+                tracker.reportInitial()
+                context.logger.info(
+                    "Starting Aruba incremental upload for Ch. ${chapter.number} (${remainingDirtyIndices.size}/${effectivePages.size} page(s) to upload, " +
+                        "limits: upload=${limitLabel(cfg.maxUploadKbps)}, download=${limitLabel(cfg.maxDownloadKbps)})"
+                )
+            } else {
+                context.progress.report(ProgressData.indeterminate("No page uploads needed; finalizing Ch. ${chapter.number} on Aruba & Cubari..."))
+            }
+
             val uploadedUrls = state.uploadedUrls.toMutableList()
             var next = state.nextPage
             val total = effectivePages.size
-            val batchSize = cfg.concurrentUploads
+            val batchSize = cfg.concurrentUploads.coerceAtLeast(1)
             val remoteApi by lazy { services.mangadex(context, cfg) }
 
             while (next < total) {
+                if (!slotNeedsUpload[next]) {
+                    uploadedUrls += targetUrls[next]
+                    next++
+                    continue
+                }
                 if (gate.pauseCheckpoint()) {
                     context.logger.info("Publish paused at page $next/$total")
                     return@guarded ExecutionResult.Paused(encode(PublishResumeState(next, uploadedUrls), PublishResumeState.serializer()))
                 }
-                val batch = effectivePages.subList(next, minOf(total, next + batchSize))
-                val base = next
-                val uploaded = coroutineScope {
-                    batch.mapIndexed { offset, page ->
+                val batchIndices = mutableListOf<Int>()
+                var cursor = next
+                while (cursor < total && batchIndices.size < batchSize && slotNeedsUpload[cursor]) {
+                    batchIndices += cursor
+                    cursor++
+                }
+                val uploadedBytes = coroutineScope {
+                    batchIndices.map { idx ->
                         async {
-                            val ext = PageImporter.extension(page.originalName)
-                            val name = ArubaPaths.pageName(base + offset, ext, padDigits)
-                            val targetPath = "$remoteDir/$name"
-                            val targetUrl = ArubaPaths.publicUrl(arubaCfg, targetPath)
-                            if (!page.isLocal && page.remoteUrl == targetUrl) {
-                                targetUrl
+                            val page = effectivePages[idx]
+                            val targetPath = targetPaths[idx]
+                            val bytes = if (page.isLocal) {
+                                context.fileSystem.readFile(relPath(page.storedPath))
+                                    ?: error("Page file missing: ${page.originalName}")
                             } else {
-                                val bytes = if (page.isLocal) {
-                                    context.fileSystem.readFile(relPath(page.storedPath))
-                                        ?: error("Page file missing: ${page.originalName}")
-                                } else {
-                                    remoteApi.download(page.remoteUrl ?: error("Remote page URL missing for ${page.originalName}"))
-                                }
-                                storage.upload(targetPath, bytes)
-                                targetUrl
+                                remoteApi.download(page.remoteUrl ?: error("Remote page URL missing for ${page.originalName}"))
+                                    .also { downloadThrottle.acquire(it.size) }
                             }
+                            storage.upload(targetPath, bytes)
+                            bytes.size.toLong()
                         }
                     }.awaitAll()
                 }
-                uploadedUrls += uploaded
-                next += batch.size
-                context.progress.report(ProgressData.ratio(next.toDouble(), total.toDouble(), "pages", "Uploaded $next/$total pages"))
+                for (i in next until cursor) {
+                    uploadedUrls += targetUrls[i]
+                }
+                val batchBytes = uploadedBytes.sum()
+                next = cursor
+                tracker.advance(batchIndices.size, batchBytes)
+            }
+            (storage as? ThrottledStorage)?.stats()?.let { st ->
+                if (st.bytes > 0L) {
+                    context.logger.info(
+                        "Aruba upload transfer summary: ${formatBytes(st.bytes)} in ${st.elapsedMs}ms " +
+                            "(~${st.effectiveKbps.toInt()} KB/s, limit=${limitLabel(st.limitKbps)}, throttleWait=${st.waitedMs}ms)"
+                    )
+                }
             }
 
+            context.progress.clearSecondary()
+            context.progress.report(ProgressData.indeterminate("Finalizing Cubari JSON & Git push for ch. ${chapter.number}..."))
             removeStalePages(storage, remoteDir, uploadedUrls)
+            if (oldRemoteDir != null && oldRemoteDir != remoteDir) {
+                removeStalePages(storage, oldRemoteDir, emptyList())
+            }
             val urls: List<String> = uploadedUrls
 
             val now = clock.nowEpochSec()
@@ -281,7 +420,8 @@ class UploaderWorkers(
             repo.writeSeries(series.cubariSlug, json)
             repo.commitAndPush("${if (wasPublished) "Update" else "Add"} ${series.title} ch. ${chapter.number}")
 
-            recordCubariPublish(series, chapter, urls, now)
+            val resolvedHashes = currentHashes.filterNotNull().takeIf { it.size == effectivePages.size }
+            recordCubariPublish(series, chapter, urls, now, resolvedHashes)
             context.showNotification(
                 "Published to Cubari",
                 "${series.title} ch. ${chapter.number} (${urls.size} pages)",
@@ -309,20 +449,42 @@ class UploaderWorkers(
         return CubariJson.upsertChapter(cleaned, chapter.cubariKey, chapter.title, chapter.volume, group, urls, now)
     }
 
-    private suspend fun recordCubariPublish(series: Series, chapter: Chapter, urls: List<String>, now: Long) {
+    private suspend fun recordCubariPublish(
+        series: Series,
+        chapter: Chapter,
+        urls: List<String>,
+        now: Long,
+        pageHashes: List<String>? = chapter.cubariSnapshot?.pageHashes
+    ) {
+        var urlsChanged = false
         store.mutate { lib ->
             val latestSeries = lib.seriesById(series.id) ?: series
             val latest = lib.chapterById(chapter.id) ?: chapter
+            urlsChanged = latest.cubariPageUrls != urls
+            val hadRemotePages = latest.pages.any { it.isRemoteOnly }
+            // Mixed remote+local drafts were edits atop a remote chapter: once published, clear the
+            // transient draft so the UI displays the canonical published Aruba/Cubari URLs without stale
+            // local items or shifted pre-publish remote URLs.
+            val nextPages = when {
+                latest.pages.isEmpty() -> emptyList()
+                hadRemotePages -> emptyList()
+                else -> latest.pages.mapIndexed { idx, ref ->
+                    ref.copy(remoteUrl = urls.getOrNull(idx) ?: ref.remoteUrl)
+                }
+            }
+            val sigPages = if (hadRemotePages && urls.isNotEmpty()) PageImporter.remotePageRefs(urls) else nextPages
             val snap = CubariChapterSnapshot(
                 key = latest.cubariKey,
                 volume = latest.volume.trim(),
                 title = latest.title.trim(),
                 pageUrls = urls,
-                pageSignature = ChangeDetector.pageListSignature(latest.pages)
+                pageSignature = ChangeDetector.pageListSignature(sigPages),
+                pageHashes = pageHashes
             )
             var updated = LibraryOps.upsertChapter(
                 lib,
                 latest.copy(
+                    pages = nextPages,
                     cubariPublishedAtEpochSec = latest.cubariPublishedAtEpochSec ?: now,
                     cubariUpdatedAtEpochSec = now,
                     cubariPageUrls = urls,
@@ -338,6 +500,16 @@ class UploaderWorkers(
             )
             updated
         }
+        if (urlsChanged) {
+            RemotePagesStore(context.storage).remove(chapter.id, SOURCE_CUBARI)
+        }
+        ImageCacheManager.prune(
+            fs = context.fileSystem,
+            store = store,
+            maxCacheMb = config.maxCacheMb,
+            logger = context.logger,
+            protectedChapterIds = setOf(chapter.id)
+        )
     }
 
     private suspend fun removeFromCubari(
@@ -406,10 +578,12 @@ class UploaderWorkers(
             val draft = MdChapterDraft(chapter.volume, chapter.number, chapter.title, cfg.mdLanguage)
 
             if (plan.kind == TargetPushKind.METADATA_ONLY && !chapter.mangadexChapterId.isNullOrBlank()) {
+                context.progress.report(ProgressData.indeterminate("Updating MangaDex metadata for ch. ${chapter.number}..."))
                 val updated = api.updateChapterMetadata(token, chapter.mangadexChapterId, chapter.mangadexVersion ?: 1, draft)
                 val now = clock.nowEpochSec()
                 val sig = chapter.mdSnapshot?.pageSignature ?: ChangeDetector.pageListSignature(chapter.pages)
                 recordMangaDexPublish(chapterId, chapter, updated, cfg.mdLanguage, now, sig)
+                context.progress.report(ProgressData.ratio(1.0, 1.0, "chapter", "Updated MangaDex metadata for ch. ${chapter.number}"))
                 context.showNotification(
                     "Updated MangaDex metadata",
                     "${series.title} ch. ${chapter.number} (${plan.changedFields.joinToString()})",
@@ -423,52 +597,274 @@ class UploaderWorkers(
 
             val effectivePages = chapter.pages.ifEmpty { PageImporter.remotePageRefs(chapter.cubariPageUrls) }
             require(effectivePages.isNotEmpty()) { "Chapter has no pages" }
+            val currentHashes = resolvePageHashes(effectivePages)
 
-            val state = decode(resume, MangaDexResumeState.serializer()) ?: MangaDexResumeState()
-            val sessionId = state.sessionId ?: chapter.mangadexChapterId?.let { api.beginEdit(token, it, chapter.mangadexVersion ?: 1) }
-                ?: api.beginUpload(token, mangaId, groupId)
-
-            val ids = state.uploadedIds.toMutableList()
-            var next = state.nextPage
-            val total = effectivePages.size
-            val throttle = BandwidthThrottle({ cfg.maxUploadKbps }, clock)
-            var lastRequestNanos = 0L
-            try {
-                while (next < total) {
-                    if (gate.pauseCheckpoint()) {
-                        context.logger.info("MangaDex upload paused at page $next/$total")
-                        return@guarded ExecutionResult.Paused(
-                            encode(MangaDexResumeState(sessionId, next, ids), MangaDexResumeState.serializer())
-                        )
-                    }
-                    val batch = effectivePages.subList(next, minOf(total, next + MD_MAX_FILES_PER_REQUEST))
-                    val files = batch.mapIndexed { offset, page ->
-                        val bytes = if (page.isLocal) {
-                            context.fileSystem.readFile(relPath(page.storedPath))
-                                ?: error("Page file missing: ${page.originalName}")
+            if (mdUploadMutex.isLocked) {
+                context.progress.report(ProgressData.indeterminate("Waiting for active MangaDex upload session to finish..."))
+            }
+            mdUploadMutex.withLock {
+                val state = decode(resume, MangaDexResumeState.serializer()) ?: MangaDexResumeState()
+                if (state.sessionId == null) {
+                    context.progress.report(ProgressData.indeterminate("Checking active MangaDex upload sessions..."))
+                    val existing = api.activeUploadSession(token)
+                    if (existing != null && !existing.isCommitted && !existing.isDeleted) {
+                        val ageSec = existing.ageSeconds(clock.nowEpochSec())
+                        if (ageSec != null && ageSec >= STALE_UPLOAD_SESSION_SEC) {
+                            context.logger.info(
+                                "Closing stale MangaDex upload session ${existing.id} (age ${ageSec / 60}m >= ${STALE_UPLOAD_SESSION_SEC / 60}m)"
+                            )
+                            context.progress.report(
+                                ProgressData.indeterminate("Closing stale upload session (${ageSec / 60}m old)...")
+                            )
+                            api.closeUploadSession(token, existing.id)
                         } else {
-                            api.download(page.remoteUrl ?: error("Remote page URL missing for ${page.originalName}"))
+                            val ageHint = ageSec?.let { "${it / 60}m old" } ?: "age unknown"
+                            throw MangaDexException(
+                                409,
+                                "Active MangaDex upload session ${existing.id} ($ageHint) is already open; wait for it to finish or use 'Force Cancel Upload Session' in Settings & Locks."
+                            )
                         }
-                        throttle.acquire(bytes.size)
-                        val ext = PageImporter.extension(page.originalName)
-                        MdUploadFile(ArubaPaths.pageName(next + offset, ext), bytes, contentType(ext))
                     }
-                    lastRequestNanos = waitForUploadSlot(lastRequestNanos, cfg.mdUploadIntervalMs)
-                    ids += api.uploadPages(token, sessionId, files)
-                    next += batch.size
-                    context.progress.report(ProgressData.ratio(next.toDouble(), total.toDouble(), "pages", "Uploaded $next/$total pages to MangaDex"))
                 }
-                lastRequestNanos = waitForUploadSlot(lastRequestNanos, cfg.mdUploadIntervalMs)
-                val committed = api.commit(token, sessionId, draft, ids)
-                val now = clock.nowEpochSec()
-                recordMangaDexPublish(chapterId, chapter, committed, cfg.mdLanguage, now, ChangeDetector.pageListSignature(chapter.pages))
-                context.showNotification("Published to MangaDex", "${series.title} ch. ${chapter.number}", PluginNotificationType.SUCCESS)
-                success("Published ch. ${chapter.number} to MangaDex") { put("mangadexChapterId", committed.id) }
-            } catch (e: Exception) {
-                if (e !is CancellationException) api.abort(token, sessionId)
-                throw e
+
+                val editChapterId = chapter.mangadexChapterId?.takeIf { it.isNotBlank() }
+                val sessionId: String
+                val initialSlotIds: List<String?>
+                if (state.sessionId != null) {
+                    sessionId = state.sessionId
+                    initialSlotIds = if (state.slotIds.size == effectivePages.size) {
+                        state.slotIds
+                    } else {
+                        List(effectivePages.size) { idx -> state.uploadedIds.getOrNull(idx) }
+                    }
+                } else if (editChapterId != null) {
+                    val editSession = api.beginEditSession(token, editChapterId, chapter.mangadexVersion ?: 1)
+                    sessionId = editSession.sessionId
+                    initialSlotIds = matchMangaDexEditSlots(
+                        api = api,
+                        chapter = chapter,
+                        editChapterId = editChapterId,
+                        effectivePages = effectivePages,
+                        currentHashes = currentHashes,
+                        prefilled = editSession.prefilledFiles
+                    )
+                } else {
+                    sessionId = api.beginUpload(token, mangaId, groupId)
+                    initialSlotIds = List(effectivePages.size) { null }
+                }
+
+                val slotIds = initialSlotIds.toMutableList()
+                val dirtyIndices = effectivePages.indices.filter { slotIds[it] == null }
+                val reusedCount = effectivePages.size - dirtyIndices.size
+                val total = effectivePages.size
+                val dirtyTotal = dirtyIndices.size
+                val knownDirtyBytes = measureKnownLocalBytes(effectivePages, dirtyIndices)
+                val tracker = TransferProgressTracker(
+                    context,
+                    clock,
+                    dirtyTotal,
+                    "MangaDex Ch. ${chapter.number}:",
+                    knownDirtyBytes,
+                    limitKbpsProvider = { config.maxUploadKbps }
+                )
+                if (dirtyIndices.isNotEmpty()) {
+                    tracker.reportInitial()
+                    context.logger.info(
+                        "Starting MangaDex upload session $sessionId for Ch. ${chapter.number} " +
+                            "($dirtyTotal/$total page(s) to upload, reused=$reusedCount, " +
+                            "limits: upload=${limitLabel(cfg.maxUploadKbps)}, download=${limitLabel(cfg.maxDownloadKbps)}, " +
+                            "interval=${cfg.mdUploadIntervalMs}ms, concurrency=${cfg.concurrentDownloads})"
+                    )
+                } else {
+                    context.logger.info(
+                        "MangaDex edit session $sessionId for Ch. ${chapter.number}: reusing all $reusedCount page(s), 0 uploads needed"
+                    )
+                    context.progress.report(
+                        ProgressData.indeterminate("Reusing all $reusedCount page(s) for MangaDex ch. ${chapter.number}...")
+                    )
+                }
+
+                val downloadThrottle = BandwidthThrottle({ config.maxDownloadKbps }, clock)
+                val uploadThrottle = BandwidthThrottle({ config.maxUploadKbps }, clock)
+                val dlSem = Semaphore(cfg.concurrentDownloads.coerceAtLeast(1))
+                val completedDl = AtomicInteger(0)
+                var dirtyCursor = 0
+                var lastRequestNanos = 0L
+                try {
+                    while (dirtyCursor < dirtyIndices.size) {
+                        if (gate.pauseCheckpoint()) {
+                            context.logger.info("MangaDex upload paused at dirty page $dirtyCursor/${dirtyIndices.size}")
+                            return@guarded ExecutionResult.Paused(
+                                encode(
+                                    MangaDexResumeState(sessionId, dirtyCursor, slotIds.filterNotNull(), slotIds),
+                                    MangaDexResumeState.serializer()
+                                )
+                            )
+                        }
+                        val firstDirtyPage = effectivePages[dirtyIndices[dirtyCursor]]
+                        val preparedSlots = mutableListOf<Pair<Int, MdUploadFile>>()
+                        var batchBytes = 0L
+
+                        if (firstDirtyPage.isLocal) {
+                            while (dirtyCursor + preparedSlots.size < dirtyIndices.size && preparedSlots.size < MD_MAX_FILES_PER_REQUEST) {
+                                val slotIdx = dirtyIndices[dirtyCursor + preparedSlots.size]
+                                val page = effectivePages[slotIdx]
+                                if (!page.isLocal) break
+                                val bytes = context.fileSystem.readFile(relPath(page.storedPath))
+                                    ?: error("Page file missing: ${page.originalName}")
+                                if (preparedSlots.isNotEmpty() && batchBytes + bytes.size > MD_MAX_BATCH_BYTES) break
+                                batchBytes += bytes.size.toLong()
+                                val ext = PageImporter.extension(page.originalName)
+                                preparedSlots += slotIdx to MdUploadFile(ArubaPaths.pageName(slotIdx, ext), bytes, contentType(ext))
+                            }
+                        } else {
+                            val remoteEnd = minOf(dirtyIndices.size, dirtyCursor + MD_REMOTE_BATCH_SIZE)
+                            val remoteSlice = dirtyIndices.subList(dirtyCursor, remoteEnd)
+                                .takeWhile { !effectivePages[it].isLocal }
+                            context.progress.reportSecondary(
+                                ProgressData.ratio(
+                                    dirtyCursor.toDouble(),
+                                    dirtyTotal.toDouble().coerceAtLeast(1.0),
+                                    "pages",
+                                    "Downloading pages ${dirtyCursor + 1}..${dirtyCursor + remoteSlice.size}/$dirtyTotal"
+                                )
+                            )
+                            val downloaded = coroutineScope {
+                                remoteSlice.map { slotIdx ->
+                                    val page = effectivePages[slotIdx]
+                                    async {
+                                        dlSem.withPermit {
+                                            val dlStart = clock.nowNanos()
+                                            val bytes = api.download(page.remoteUrl ?: error("Remote page URL missing for ${page.originalName}"))
+                                                .also { downloadThrottle.acquire(it.size) }
+                                            val dlMs = ((clock.nowNanos() - dlStart) / 1_000_000L).coerceAtLeast(1L)
+                                            val doneSoFar = completedDl.incrementAndGet()
+                                            context.logger.info(
+                                                "Fetched page ${slotIdx + 1}/$total (${page.originalName}, ${formatBytes(bytes.size.toLong())} in ${dlMs}ms)"
+                                            )
+                                            context.progress.reportSecondary(
+                                                ProgressData.ratio(
+                                                    doneSoFar.toDouble().coerceAtMost(dirtyTotal.toDouble()),
+                                                    dirtyTotal.toDouble().coerceAtLeast(1.0),
+                                                    "pages",
+                                                    "Fetched $doneSoFar/$dirtyTotal (${formatBytes(bytes.size.toLong())})"
+                                                )
+                                            )
+                                            val ext = PageImporter.extension(page.originalName)
+                                            slotIdx to MdUploadFile(ArubaPaths.pageName(slotIdx, ext), bytes, contentType(ext))
+                                        }
+                                    }
+                                }.awaitAll()
+                            }
+                            preparedSlots += downloaded
+                            batchBytes = downloaded.sumOf { it.second.bytes.size.toLong() }
+                        }
+
+                        var subStart = 0
+                        while (subStart < preparedSlots.size) {
+                            val chunk = mutableListOf<Pair<Int, MdUploadFile>>()
+                            var chunkBytes = 0L
+                            while (subStart < preparedSlots.size && chunk.size < MD_MAX_FILES_PER_REQUEST) {
+                                val entry = preparedSlots[subStart]
+                                if (chunk.isNotEmpty() && chunkBytes + entry.second.bytes.size > MD_MAX_BATCH_BYTES) break
+                                chunk += entry
+                                chunkBytes += entry.second.bytes.size.toLong()
+                                subStart++
+                            }
+                            val firstNum = dirtyCursor + 1
+                            val lastNum = dirtyCursor + chunk.size
+                            context.progress.reportSecondary(
+                                ProgressData.ratio(
+                                    lastNum.toDouble().coerceAtMost(dirtyTotal.toDouble()),
+                                    dirtyTotal.toDouble().coerceAtLeast(1.0),
+                                    "pages",
+                                    "Uploading pages $firstNum..$lastNum/$dirtyTotal (${formatBytes(chunkBytes)})"
+                                )
+                            )
+                            val upStartNanos = clock.nowNanos()
+                            uploadThrottle.acquire(chunkBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+                            lastRequestNanos = waitForUploadSlot(lastRequestNanos, cfg.mdUploadIntervalMs)
+                            val acked = api.uploadPages(token, sessionId, chunk.map { it.second })
+                            val upMs = ((clock.nowNanos() - upStartNanos) / 1_000_000L).coerceAtLeast(1L)
+                            val chunkKbps = (chunkBytes / 1024.0) / (upMs / 1000.0)
+                            context.logger.info(
+                                "Uploaded MangaDex pages $firstNum..$lastNum/$dirtyTotal (${formatBytes(chunkBytes)} in ${upMs}ms, ~${chunkKbps.toInt()} KB/s)"
+                            )
+                            chunk.forEachIndexed { k, (slotIdx, _) ->
+                                slotIds[slotIdx] = acked[k]
+                            }
+                            dirtyCursor += chunk.size
+                            tracker.advance(chunk.size, chunkBytes)
+                        }
+                    }
+                    val upStats = uploadThrottle.stats()
+                    val dlStats = downloadThrottle.stats()
+                    context.logger.info(
+                        "MangaDex transfer summary: upload=${formatBytes(upStats.bytes)} (~${upStats.effectiveKbps.toInt()} KB/s, limit=${limitLabel(upStats.limitKbps)}, wait=${upStats.waitedMs}ms)" +
+                            if (dlStats.bytes > 0L) ", download=${formatBytes(dlStats.bytes)} (~${dlStats.effectiveKbps.toInt()} KB/s, limit=${limitLabel(dlStats.limitKbps)}, wait=${dlStats.waitedMs}ms)" else ""
+                    )
+                    context.progress.clearSecondary()
+                    context.progress.report(ProgressData.indeterminate("Committing MangaDex chapter ${chapter.number}..."))
+                    lastRequestNanos = waitForUploadSlot(lastRequestNanos, cfg.mdUploadIntervalMs)
+                    val finalPageOrder = slotIds.mapIndexed { idx, id ->
+                        id ?: error("Missing MangaDex file id for page ${idx + 1}")
+                    }
+                    val committed = api.commit(token, sessionId, draft, finalPageOrder)
+                    val now = clock.nowEpochSec()
+                    val resolvedHashes = currentHashes.filterNotNull().takeIf { it.size == effectivePages.size }
+                    recordMangaDexPublish(chapterId, chapter, committed, cfg.mdLanguage, now, ChangeDetector.pageListSignature(chapter.pages), resolvedHashes)
+                    context.showNotification("Published to MangaDex", "${series.title} ch. ${chapter.number}", PluginNotificationType.SUCCESS)
+                    success("Published ch. ${chapter.number} to MangaDex") { put("mangadexChapterId", committed.id) }
+                } catch (e: Exception) {
+                    if (e !is CancellationException) api.abort(token, sessionId)
+                    throw e
+                }
             }
         }
+
+    private suspend fun matchMangaDexEditSlots(
+        api: MangaDexApi,
+        chapter: Chapter,
+        editChapterId: String,
+        effectivePages: List<PageRef>,
+        currentHashes: List<String?>,
+        prefilled: List<MdSessionFileInfo>
+    ): List<String?> {
+        if (prefilled.isEmpty()) return List(effectivePages.size) { null }
+        val prevSnap = chapter.mdSnapshot
+        val prevSigs = prevSnap?.pageSignature.orEmpty()
+        val prevHashes = prevSnap?.pageHashes.orEmpty()
+        val prevMdUrls = if (prevSigs.isEmpty() && effectivePages.any { !it.remoteUrl.isNullOrBlank() }) {
+            runCatching { api.pageUrls(editChapterId) }.getOrDefault(emptyList())
+        } else emptyList()
+        val prevCount = maxOf(prevSigs.size, prevHashes.size, prevMdUrls.size)
+        if (prevCount > 0 && prefilled.size == prevCount) {
+            val matchedPrev = IncrementalPagePlanner.matchExistingPages(
+                currentPages = effectivePages,
+                currentHashes = currentHashes,
+                previousSignatures = prevSigs,
+                previousHashes = prevHashes,
+                previousUrls = prevMdUrls,
+                isPreviousEligible = { it in prefilled.indices },
+                requireSameExtension = false
+            )
+            return matchedPrev.map { prevIdx -> prevIdx?.let { prefilled[it].id } }
+        }
+        if (prefilled.any { !it.fileHash.isNullOrBlank() }) {
+            val used = BooleanArray(prefilled.size)
+            return currentHashes.map { hash ->
+                if (hash.isNullOrBlank()) null
+                else {
+                    val idx = prefilled.indices.firstOrNull { !used[it] && prefilled[it].fileHash == hash }
+                    if (idx != null) {
+                        used[idx] = true
+                        prefilled[idx].id
+                    } else null
+                }
+            }
+        }
+        return List(effectivePages.size) { null }
+    }
 
     private suspend fun recordMangaDexPublish(
         chapterId: String,
@@ -476,7 +872,8 @@ class UploaderWorkers(
         committed: MdChapter,
         language: String,
         now: Long,
-        pageSignature: List<String>?
+        pageSignature: List<String>?,
+        pageHashes: List<String>? = fallback.mdSnapshot?.pageHashes
     ) {
         val committedTs = committed.updatedAtEpochSec ?: committed.publishAtEpochSec ?: now
         store.mutate { lib ->
@@ -489,7 +886,9 @@ class UploaderWorkers(
                 volume = (committed.volume ?: latest.volume).trim(),
                 title = (committed.title ?: latest.title).trim(),
                 language = language.trim(),
-                pageSignature = pageSignature
+                pageSignature = pageSignature,
+                pageCount = committed.pageCount.takeIf { it > 0 } ?: latest.mdSnapshot?.pageCount,
+                pageHashes = pageHashes
             )
             LibraryOps.upsertChapter(
                 lib,
@@ -504,6 +903,13 @@ class UploaderWorkers(
                 )
             )
         }
+        ImageCacheManager.prune(
+            fs = context.fileSystem,
+            store = store,
+            maxCacheMb = config.maxCacheMb,
+            logger = context.logger,
+            protectedChapterIds = setOf(chapterId)
+        )
     }
 
     private suspend fun waitForUploadSlot(lastNanos: Long, intervalMs: Int): Long {
@@ -596,6 +1002,8 @@ class UploaderWorkers(
                 val sources = api.pageUrls(md.id)
                 val dir = ArubaPaths.chapterDir(arubaCfg, effectiveSeries.effectiveArubaFolder, md.key)
                 val urls = mutableListOf<String>()
+                var chapterBytes = 0L
+                val chStartNanos = clock.nowNanos()
                 for (chunk in sources.withIndex().chunked(cfg.concurrentDownloads)) {
                     val bytesList = coroutineScope {
                         chunk.map { (_, url) ->
@@ -611,52 +1019,85 @@ class UploaderWorkers(
                             }
                         }.awaitAll()
                     }
+                    chapterBytes += bytesList.sumOf { it.size.toLong() }
                     chunk.forEach { (pageIndex, url) ->
                         val ext = url.substringAfterLast('.', "jpg").substringBefore('?')
                         urls += ArubaPaths.publicUrl(arubaCfg, "$dir/${ArubaPaths.pageName(pageIndex, ext, padDigits)}")
                     }
+                    val totalPages = sources.size.coerceAtLeast(1)
+                    val speedSuffix = transferStatsSuffix(urls.size, totalPages, chapterBytes, clock.nowNanos() - chStartNanos)
                     context.progress.report(
                         ProgressData.ratio(
-                            index + urls.size.toDouble() / sources.size.coerceAtLeast(1), targets.size.toDouble(),
-                            "chapters", "Chapter ${md.key}: ${urls.size}/${sources.size} pages"
+                            index + urls.size.toDouble() / totalPages, targets.size.toDouble(),
+                            "chapters", "Ch. ${md.key}: ${urls.size}/${sources.size} pages ($speedSuffix)"
                         )
+                    )
+                    context.progress.reportSecondary(
+                        ProgressData.ratio(urls.size.toDouble(), totalPages.toDouble(), "pages", "Ch. ${md.key}: $speedSuffix")
                     )
                 }
                 removeStalePages(storage, dir, urls)
                 val now = clock.nowEpochSec()
                 val mdTs = md.updatedAtEpochSec ?: md.publishAtEpochSec ?: now
+                val mdNumber = md.chapter.orEmpty().trim().ifBlank { md.key }
+                val mdVolume = md.volume.orEmpty().trim()
+                val mdTitle = md.title.orEmpty().trim()
+                val baseJson = CubariJson.applySeriesMeta(json, effectiveSeries, now)
+                val existingLocal = store.load().chapters.firstOrNull {
+                    it.seriesId == seriesId && (it.mangadexChapterId == md.id || it.cubariKey == md.key)
+                }
+                val renamedJson = if (existingLocal != null && existingLocal.cubariKey != md.key && existingLocal.isOnCubari) {
+                    CubariJson.removeChapter(baseJson, existingLocal.cubariKey, cfg.cubariGroupName, now)
+                } else baseJson
                 val nextJson = CubariJson.upsertChapter(
-                    CubariJson.applySeriesMeta(json, series, now),
-                    md.key, md.title.orEmpty(), md.volume.orEmpty(), cfg.cubariGroupName, urls, mdTs
+                    renamedJson, md.key, mdTitle, mdVolume, cfg.cubariGroupName, urls, mdTs
                 )
                 json = nextJson
                 repo.writeSeries(series.cubariSlug, nextJson)
                 store.mutate { lib ->
-                    val local = lib.chapters.firstOrNull { it.seriesId == seriesId && it.cubariKey == md.key }
-                    if (local == null) lib else LibraryOps.touchSeries(
-                        LibraryOps.upsertChapter(
-                            lib,
-                            local.copy(
-                                cubariPublishedAtEpochSec = local.cubariPublishedAtEpochSec ?: mdTs,
-                                cubariUpdatedAtEpochSec = mdTs,
-                                mangadexUpdatedAtEpochSec = local.mangadexUpdatedAtEpochSec ?: mdTs,
-                                lastSyncedCubariTs = mdTs,
-                                lastSyncedMdTs = local.effectiveMangaDexTimestampSec ?: mdTs,
-                                cubariPageUrls = urls,
-                                cubariSnapshot = CubariChapterSnapshot(
-                                    key = md.key,
-                                    volume = md.volume.orEmpty().trim(),
-                                    title = md.title.orEmpty().trim(),
-                                    pageUrls = urls,
-                                    pageSignature = ChangeDetector.pageListSignature(local.pages)
-                                )
-                            )
-                        ),
-                        seriesId, now
+                    val local = lib.chapters.firstOrNull { it.seriesId == seriesId && (it.mangadexChapterId == md.id || it.cubariKey == md.key) }
+                    val syncedPages = emptyList<PageRef>()
+                    val pageSig = ChangeDetector.pageListSignature(syncedPages)
+                    val cubariSnap = CubariChapterSnapshot(
+                        key = md.key,
+                        volume = mdVolume,
+                        title = mdTitle,
+                        pageUrls = urls,
+                        pageSignature = pageSig
                     )
+                    val mdSnap = MangaDexChapterSnapshot(
+                        chapterId = md.id,
+                        version = md.version,
+                        number = mdNumber,
+                        volume = mdVolume,
+                        title = mdTitle,
+                        language = cfg.mdLanguage.trim().ifEmpty { local?.mdSnapshot?.language ?: "en" },
+                        pageSignature = pageSig,
+                        pageCount = sources.size.takeIf { it > 0 } ?: md.pageCount
+                    )
+                    val updatedChapter = (local ?: Chapter(id = newId("ch"), seriesId = seriesId, createdAtEpochSec = now)).copy(
+                        number = mdNumber,
+                        volume = mdVolume,
+                        title = mdTitle,
+                        pages = syncedPages,
+                        mangadexChapterId = md.id,
+                        mangadexVersion = md.version,
+                        cubariPublishedAtEpochSec = local?.cubariPublishedAtEpochSec ?: mdTs,
+                        cubariUpdatedAtEpochSec = mdTs,
+                        mangadexPublishedAtEpochSec = local?.mangadexPublishedAtEpochSec ?: md.publishAtEpochSec ?: mdTs,
+                        mangadexUpdatedAtEpochSec = md.updatedAtEpochSec ?: md.publishAtEpochSec ?: mdTs,
+                        lastSyncedCubariTs = mdTs,
+                        lastSyncedMdTs = md.updatedAtEpochSec ?: md.publishAtEpochSec ?: local?.effectiveMangaDexTimestampSec ?: mdTs,
+                        cubariPageUrls = urls,
+                        cubariSnapshot = cubariSnap,
+                        mdSnapshot = mdSnap
+                    )
+                    LibraryOps.touchSeries(LibraryOps.upsertChapter(lib, updatedChapter), seriesId, now)
                 }
                 done += md.key
             }
+            context.progress.clearSecondary()
+            context.progress.report(ProgressData.indeterminate("Pushing synced Cubari chapters to Git..."))
             repo.commitAndPush("Sync ${series.title} from MangaDex (${done.size} chapter(s))")
         }
         context.showNotification("MangaDex -> Cubari complete", "${series.title}: ${done.size} chapter(s) synced", PluginNotificationType.SUCCESS)
@@ -691,8 +1132,11 @@ class UploaderWorkers(
                     return@guarded success("Cover removed") { put("cover", false) }
                 }
                 val bytes = context.fileSystem.readFile(relPath(coverRelativePath)) ?: error("Cover file missing: $coverRelativePath")
+                val coverKb = (bytes.size / 1024.0).coerceAtLeast(1.0)
+                context.progress.report(ProgressData.ratio(0.0, coverKb, "KB", "Uploading cover (${formatBytes(bytes.size.toLong())}) to Aruba..."))
                 val remote = ArubaPaths.coverPath(arubaCfg, series.effectiveArubaFolder, PageImporter.extension(coverRelativePath))
                 storage.upload(remote, bytes)
+                context.progress.report(ProgressData.ratio(coverKb, coverKb, "KB", "Updating Cubari JSON cover & Git..."))
                 val url = ArubaPaths.publicUrl(arubaCfg, remote)
                 val baseSeries = (store.load().seriesById(seriesId) ?: series).copy(coverUrl = url, coverPath = coverRelativePath, lastUpdatedEpochSec = now)
                 val updatedSeries = baseSeries.copy(cubariSnapshot = ChangeDetector.cubariSeriesSnapshot(baseSeries))
@@ -769,6 +1213,7 @@ class UploaderWorkers(
         if (isLoad && pageIndex >= 0) {
             require(pageIndex in urls.indices) { "Page index #${pageIndex + 1} out of range (1..${urls.size})" }
             val url = urls[pageIndex]
+            context.progress.report(ProgressData.indeterminate("Downloading page #${pageIndex + 1} from $label..."))
             val throttle = BandwidthThrottle({ cfg.maxDownloadKbps }, clock)
             val bytes = api.download(url).also { throttle.acquire(it.size) }
             val downloadedPage = PageImporter.storeChapterPage(
@@ -789,6 +1234,14 @@ class UploaderWorkers(
                     )
                 )
             }
+            ImageCacheManager.prune(
+                fs = context.fileSystem,
+                store = store,
+                maxCacheMb = cfg.maxCacheMb,
+                logger = context.logger,
+                protectedChapterIds = setOf(chapterId)
+            )
+            context.progress.report(ProgressData.ratio(1.0, 1.0, "pages", "Downloaded page #${pageIndex + 1} (${formatBytes(bytes.size.toLong())})"))
             context.showToast("Downloaded page #${pageIndex + 1} to local draft")
             return@guarded success("Downloaded page #${pageIndex + 1} from $label") { put("pages", 1) }
         }
@@ -796,7 +1249,15 @@ class UploaderWorkers(
         val state = decode(resume, LoadPagesResumeState.serializer()) ?: LoadPagesResumeState()
         val downloaded = state.pages.toMutableList()
         var next = state.nextIndex
-        val throttle = BandwidthThrottle({ cfg.maxDownloadKbps }, clock)
+        val throttle = BandwidthThrottle({ config.maxDownloadKbps }, clock)
+        val dlTracker = TransferProgressTracker(
+            context,
+            clock,
+            urls.size,
+            "Downloading $label:",
+            limitKbpsProvider = { config.maxDownloadKbps }
+        )
+        dlTracker.reportInitial()
 
         while (next < urls.size) {
             if (gate.pauseCheckpoint()) {
@@ -813,14 +1274,14 @@ class UploaderWorkers(
                     context.fileSystem,
                     chapter.id,
                     remoteFileName(idx, urls[idx]),
-                    bytesList[offset]
+                    bytesList[offset],
+                    remoteUrl = urls[idx]
                 )
             }
             next += chunk.size
-            context.progress.report(
-                ProgressData.ratio(next.toDouble(), urls.size.toDouble(), "pages", "Downloaded $next/${urls.size} from $label")
-            )
+            dlTracker.advance(chunk.size, bytesList.sumOf { it.size.toLong() })
         }
+        context.progress.clearSecondary()
 
         val okReport = RemoteChapterPages(
             chapter.id,
@@ -840,6 +1301,13 @@ class UploaderWorkers(
                 )
             )
         }
+        ImageCacheManager.prune(
+            fs = context.fileSystem,
+            store = store,
+            maxCacheMb = cfg.maxCacheMb,
+            logger = context.logger,
+            protectedChapterIds = setOf(chapterId)
+        )
         context.showNotification("Loaded images into draft", "${series.title} ch. ${chapter.number}: ${downloaded.size} pages ($label)", PluginNotificationType.SUCCESS)
         success("Loaded ${downloaded.size} page(s) from $label") { put("pages", downloaded.size) }
     }
@@ -978,6 +1446,26 @@ class UploaderWorkers(
         )
     }
 
+    private suspend fun resolvePageHashes(pages: List<PageRef>): List<String?> =
+        pages.map { page ->
+            when {
+                !page.contentHash.isNullOrBlank() -> page.contentHash
+                page.isLocal -> context.fileSystem.readFile(relPath(page.storedPath))?.let(::sha256Hex)
+                else -> null
+            }
+        }
+
+    private suspend fun measureKnownLocalBytes(pages: List<PageRef>, indices: Iterable<Int> = pages.indices): Long? {
+        if (!indices.iterator().hasNext()) return null
+        if (indices.any { !pages[it].isLocal }) return null
+        var total = 0L
+        for (idx in indices) {
+            val bytes = context.fileSystem.readFile(relPath(pages[idx].storedPath)) ?: return null
+            total += bytes.size.toLong()
+        }
+        return total
+    }
+
     private fun contentType(ext: String) = when (ext.lowercase()) {
         "jpg", "jpeg" -> "image/jpeg"
         "webp" -> "image/webp"
@@ -994,7 +1482,119 @@ class UploaderWorkers(
         const val MODE_CHECK = "check"
         const val MODE_LOAD = "load"
         const val INDEX_KEY = "cubari_index"
+        const val STALE_UPLOAD_SESSION_SEC = 2L * 3600L
         private const val MD_MAX_FILES_PER_REQUEST = 10
+        private const val MD_REMOTE_BATCH_SIZE = 3
+        private const val MD_MAX_BATCH_BYTES = 3L * 1024L * 1024L
         private val STALE_PAGE = Regex("^\\d+\\.(png|jpe?g|webp|gif)$", RegexOption.IGNORE_CASE)
+        private val mdUploadMutex = Mutex()
     }
+}
+
+private class TransferProgressTracker(
+    private val context: PluginContext,
+    private val clock: Clock,
+    private val totalItems: Int,
+    private val actionLabel: String,
+    private val knownTotalBytes: Long? = null,
+    private val limitKbpsProvider: () -> Int = { 0 }
+) {
+    private val startNanos: Long = clock.nowNanos()
+    private var bytesDone: Long = 0L
+    private var itemsDone: Int = 0
+
+    fun reportInitial() {
+        val total = totalItems.coerceAtLeast(1)
+        val limit = limitKbpsProvider()
+        val limitNote = if (limit > 0) " · cap $limit KB/s" else ""
+        val msg = if (knownTotalBytes != null && knownTotalBytes > 0L) {
+            "$actionLabel 0/$totalItems (${formatBytes(knownTotalBytes)} total$limitNote)"
+        } else {
+            "$actionLabel 0/$totalItems$limitNote"
+        }
+        if (knownTotalBytes != null && knownTotalBytes > 0L) {
+            context.progress.report(ProgressData.ratio(0.0, (knownTotalBytes / 1024.0).coerceAtLeast(1.0), "KB", msg))
+        } else {
+            context.progress.report(ProgressData.ratio(0.0, total.toDouble(), "pages", msg))
+        }
+        context.progress.reportSecondary(ProgressData.ratio(0.0, total.toDouble(), "pages", "0/$totalItems pages"))
+    }
+
+    fun advance(itemsDelta: Int, bytesDelta: Long) {
+        val total = totalItems.coerceAtLeast(1)
+        itemsDone = (itemsDone + itemsDelta).coerceAtMost(total)
+        bytesDone += bytesDelta.coerceAtLeast(0L)
+        val suffix = transferStatsSuffix(
+            itemsDone = itemsDone,
+            totalItems = total,
+            bytesDone = bytesDone,
+            elapsedNanos = clock.nowNanos() - startNanos,
+            knownTotalBytes = knownTotalBytes,
+            limitKbps = limitKbpsProvider()
+        )
+        val summary = if (suffix.isNotEmpty()) "$actionLabel $itemsDone/$total ($suffix)" else "$actionLabel $itemsDone/$total"
+
+        if (knownTotalBytes != null && knownTotalBytes > 0L) {
+            val totalKb = (knownTotalBytes / 1024.0).coerceAtLeast(1.0)
+            val doneKb = (bytesDone / 1024.0).coerceIn(0.0, totalKb)
+            context.progress.report(ProgressData.ratio(doneKb, totalKb, "KB", summary))
+            context.progress.reportSecondary(ProgressData.ratio(itemsDone.toDouble(), total.toDouble(), "pages", "Pages $itemsDone/$total"))
+        } else {
+            context.progress.report(ProgressData.ratio(itemsDone.toDouble(), total.toDouble(), "pages", summary))
+            if (bytesDone > 0L) {
+                val estTotalBytes = ((bytesDone.toDouble() / itemsDone.coerceAtLeast(1)) * total).toLong()
+                val estTotalKb = (estTotalBytes / 1024.0).coerceAtLeast(1.0)
+                val doneKb = (bytesDone / 1024.0).coerceIn(0.0, estTotalKb)
+                context.progress.reportSecondary(ProgressData.ratio(doneKb, estTotalKb, "KB", "~${formatBytes(estTotalBytes)} est."))
+            }
+        }
+    }
+}
+
+private fun transferStatsSuffix(
+    itemsDone: Int,
+    totalItems: Int,
+    bytesDone: Long,
+    elapsedNanos: Long,
+    knownTotalBytes: Long? = null,
+    limitKbps: Int = 0
+): String {
+    val elapsedSec = elapsedNanos.coerceAtLeast(0L) / 1_000_000_000.0
+    val speedBps = if (elapsedSec >= 0.05 && bytesDone > 0L) bytesDone / elapsedSec else null
+    val remBytes = when {
+        knownTotalBytes != null && knownTotalBytes >= bytesDone -> knownTotalBytes - bytesDone
+        itemsDone > 0 && itemsDone < totalItems && bytesDone > 0L ->
+            ((bytesDone.toDouble() / itemsDone) * (totalItems - itemsDone)).toLong()
+        else -> null
+    }
+    val etaSec = when {
+        itemsDone >= totalItems -> 0L
+        speedBps != null && speedBps > 0.0 && remBytes != null -> (remBytes / speedBps).toLong().coerceAtLeast(0L)
+        elapsedSec >= 0.05 && itemsDone > 0 -> ((elapsedSec / itemsDone) * (totalItems - itemsDone)).toLong().coerceAtLeast(0L)
+        else -> null
+    }
+    return buildList {
+        if (knownTotalBytes != null && knownTotalBytes > 0L) {
+            add("${formatBytes(bytesDone)} / ${formatBytes(knownTotalBytes)}")
+        } else if (bytesDone > 0L) {
+            add(formatBytes(bytesDone))
+        }
+        if (speedBps != null && speedBps >= 1.0) {
+            val speedText = "${formatBytes(speedBps.toLong())}/s"
+            add(if (limitKbps > 0) "$speedText (cap $limitKbps KB/s)" else speedText)
+        } else if (limitKbps > 0) {
+            add("cap $limitKbps KB/s")
+        }
+        if (etaSec != null && itemsDone < totalItems) add("~${formatEta(etaSec)} left")
+    }.joinToString(" · ")
+}
+
+private fun limitLabel(kbps: Int): String = if (kbps > 0) "$kbps KB/s" else "unlimited"
+
+private fun formatBytes(bytes: Long): String = formatByteCount(bytes)
+
+private fun formatEta(seconds: Long): String = when {
+    seconds >= 3600L -> "${seconds / 3600L}h ${(seconds % 3600L) / 60L}m"
+    seconds >= 60L -> "${seconds / 60L}m ${seconds % 60L}s"
+    else -> "${seconds}s"
 }

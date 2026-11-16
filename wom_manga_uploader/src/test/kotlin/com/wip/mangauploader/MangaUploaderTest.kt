@@ -2,8 +2,11 @@ package com.wip.mangauploader
 
 import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -18,18 +21,25 @@ import org.wip.plugintoolkit.api.ExecutionResult
 import org.wip.plugintoolkit.api.HttpMethod
 import org.wip.plugintoolkit.api.HttpRequest
 import org.wip.plugintoolkit.api.HttpResponse
+import org.wip.plugintoolkit.api.MultipartPart
 import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.PluginNotificationType
 import org.wip.plugintoolkit.api.PluginSignal
+import org.wip.plugintoolkit.api.ProgressData
 import org.wip.plugintoolkit.api.sdui.AlertBannerNode
 import org.wip.plugintoolkit.api.sdui.AssetReference
 import org.wip.plugintoolkit.api.sdui.BadgeNode
 import org.wip.plugintoolkit.api.sdui.ButtonGroupNode
 import org.wip.plugintoolkit.api.sdui.ButtonNode
+import org.wip.plugintoolkit.api.sdui.CapabilityJobSnapshot
+import org.wip.plugintoolkit.api.sdui.CapabilityJobStatus
 import org.wip.plugintoolkit.api.sdui.ColumnNode
 import org.wip.plugintoolkit.api.sdui.DialogNode
+import org.wip.plugintoolkit.api.sdui.DropdownNode
 import org.wip.plugintoolkit.api.sdui.GridNode
+import org.wip.plugintoolkit.api.sdui.IconButtonNode
 import org.wip.plugintoolkit.api.sdui.ImageNode
+import org.wip.plugintoolkit.api.sdui.ProgressBarNode
 import org.wip.plugintoolkit.api.sdui.ScrollableColumnNode
 import org.wip.plugintoolkit.api.sdui.SemanticColor
 import org.wip.plugintoolkit.api.sdui.SplitButtonNode
@@ -46,6 +56,7 @@ import java.net.ServerSocket
 import java.net.URI
 import java.nio.file.Files
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -1353,8 +1364,8 @@ class MangaUploaderTest {
     // ─────────────────── v1.0.3 Tests ───────────────────
 
     @Test
-    fun `plugin version is bumped to 1_0_4`() {
-        assertEquals("1.0.4", MangaUploaderPluginManifest.manifest.plugin.version)
+    fun `plugin version is bumped to 1_0_8`() {
+        assertEquals("1.0.8", MangaUploaderPluginManifest.manifest.plugin.version)
     }
 
     @Test
@@ -2113,5 +2124,962 @@ class MangaUploaderTest {
         assertEquals(listOf("publishToMangaDex"), bulkQueued.map { it.second })
 
         job2.cancel()
+    }
+
+    // ─────────────────── v1.0.5 Tests ───────────────────
+
+    @Test
+    fun `HttpMangaDexApi uploadPages normalizes filenames, uses positional fallback, and surfaces errors`() = runTest {
+        val network = FakeNetwork()
+        val api = HttpMangaDexApi(network = network, logger = FakeLogger(), sleeper = {})
+        val files = listOf(
+            MdUploadFile("1.png", byteArrayOf(1, 2), "image/png"),
+            MdUploadFile("2.png", byteArrayOf(3, 4), "image/png")
+        )
+
+        // Normalized path/case + renamed second file matched cleanly without throwing
+        network.responder = {
+            HttpResponse(
+                statusCode = 200,
+                body = """
+                    {
+                      "result": "ok",
+                      "errors": [],
+                      "data": [
+                        {"id":"f2","type":"upload_session_file","attributes":{"originalFileName":"renamed_page.png"}},
+                        {"id":"f1","type":"upload_session_file","attributes":{"originalFileName":"batch/1.PNG"}}
+                      ]
+                    }
+                """.trimIndent().encodeToByteArray()
+            )
+        }
+        val ids = api.uploadPages("tok", "sess-1", files)
+        assertEquals(listOf("f1", "f2"), ids)
+
+        // Server errors array surfaced cleanly when a page fails
+        network.responder = {
+            HttpResponse(
+                statusCode = 200,
+                body = """
+                    {
+                      "result": "ok",
+                      "errors": [{"status":400,"title":"bad_request","detail":"Image dimensions exceed limit"}],
+                      "data": []
+                    }
+                """.trimIndent().encodeToByteArray()
+            )
+        }
+        val err = kotlin.runCatching { api.uploadPages("tok", "sess-1", files) }.exceptionOrNull()
+        assertTrue(err is MangaDexException)
+        assertTrue(err!!.message!!.contains("Image dimensions exceed limit"))
+    }
+
+    @Test
+    fun `publishToMangaDex auto-closes stale session over 2h and refuses recent active session`() = runTest {
+        val series = Series(
+            id = "sr_stale",
+            title = "Stale Session Manga",
+            cubariSlug = "stale-session-manga",
+            mangadexId = "11111111-1111-1111-1111-111111111111"
+        )
+        pluginFs.writeFile(relPath("pages/ch_1/p1.png"), ByteArray(2048) { 1 })
+        val chapter = Chapter(
+            id = "ch_stale",
+            seriesId = "sr_stale",
+            volume = "1",
+            number = "1",
+            title = "Start",
+            pages = listOf(PageRef("pg1", "pages/ch_1/p1.png", "1.png")),
+            cubariPublishedAtEpochSec = 1_700_000_000L
+        )
+        LibraryStore(pluginFs).mutate { it.copy(series = listOf(series), chapters = listOf(chapter)) }
+        val base = FakePluginContext(
+            fileSystem = pluginFs,
+            initialSettings = configuredSettings() + mapOf(
+                SettingKeys.PREVIEW_HOURS to JsonPrimitive(0),
+                SettingKeys.MD_UPLOAD_INTERVAL to JsonPrimitive(0)
+            )
+        )
+        // FakeClock is at 1_700_000_000L (2023-11-14T22:13:20Z).
+        // 1) Recent session (30 minutes ago) must NOT be auto-closed
+        services.mangadex.rejectBeginIfActiveSession = true
+        services.mangadex.activeSession = MdUploadSession(
+            id = "recent_sess",
+            createdAt = "2023-11-14T21:43:20Z"
+        )
+        val recentRes = UploaderWorkers(base, services).publishToMangaDex("sr_stale", "ch_stale", resume = null)
+        assertTrue(recentRes is ExecutionResult.Error)
+        assertTrue(services.mangadex.closedSessionIds.isEmpty())
+
+        // 2) Stale session (> 2 hours ago = 2023-11-14T19:50:00Z) is auto-closed and publish succeeds
+        services.mangadex.activeSession = MdUploadSession(
+            id = "old_sess",
+            createdAt = "2023-11-14T19:50:00Z"
+        )
+        val staleRes = UploaderWorkers(base, services).publishToMangaDex("sr_stale", "ch_stale", resume = null)
+        assertTrue(staleRes is ExecutionResult.Success)
+        assertEquals(listOf("old_sess"), services.mangadex.closedSessionIds)
+        assertEquals(1, services.mangadex.committedDrafts.size)
+    }
+
+    @Test
+    fun `MangaDex uploads serialize on backend mutex and UI prevents duplicate active uploads`() = runTest {
+        val series = Series(
+            id = "sr_conc",
+            title = "Concurrent Guard",
+            cubariSlug = "concurrent-guard",
+            mangadexId = "11111111-1111-1111-1111-111111111111"
+        )
+        pluginFs.writeFile(relPath("pages/ch_a/p1.png"), ByteArray(4096) { 2 })
+        pluginFs.writeFile(relPath("pages/ch_b/p1.png"), ByteArray(4096) { 3 })
+        val chA = Chapter(
+            id = "ch_a", seriesId = "sr_conc", number = "1",
+            pages = listOf(PageRef("pga", "pages/ch_a/p1.png", "1.png")),
+            cubariPublishedAtEpochSec = 1_700_000_000L
+        )
+        val chB = Chapter(
+            id = "ch_b", seriesId = "sr_conc", number = "2",
+            pages = listOf(PageRef("pgb", "pages/ch_b/p1.png", "1.png")),
+            cubariPublishedAtEpochSec = 1_700_000_000L
+        )
+        LibraryStore(pluginFs).mutate { it.copy(series = listOf(series), chapters = listOf(chA, chB)) }
+        val base = FakePluginContext(
+            fileSystem = pluginFs,
+            initialSettings = configuredSettings() + mapOf(
+                SettingKeys.PREVIEW_HOURS to JsonPrimitive(0),
+                SettingKeys.MD_UPLOAD_INTERVAL to JsonPrimitive(0)
+            )
+        )
+
+        services.mangadex.rejectBeginIfActiveSession = true
+        services.mangadex.onUploadBatch = { delay(30) }
+        val d1 = async { UploaderWorkers(base, services).publishToMangaDex("sr_conc", "ch_a", null) }
+        val d2 = async { UploaderWorkers(base, services).publishToMangaDex("sr_conc", "ch_b", null) }
+        assertTrue(d1.await() is ExecutionResult.Success)
+        assertTrue(d2.await() is ExecutionResult.Success)
+        assertEquals(1, services.mangadex.maxObservedConcurrentUploads)
+        assertEquals(2, services.mangadex.committedDrafts.size)
+
+        // UI session prevents starting another MangaDex upload operation while one is already active
+        val plugin = MangaUploaderPlugin(MangaUploaderSettings())
+        val sessionCtx = FakeSessionContext(entry = MangaUploaderPluginPluginEntry(plugin), scope = this, base = base)
+        sessionCtx.locksState.value = mapOf(LockKeys.STAGE1 to true, LockKeys.STAGE2 to true, LockKeys.CUBARI to true, LockKeys.ARUBA to true, LockKeys.MANGADEX to true, LockKeys.SYNC to true)
+        sessionCtx.jobsState.value = listOf(
+            CapabilityJobSnapshot(
+                jobId = "active_md_1",
+                capabilityName = "publishToMangaDex",
+                status = CapabilityJobStatus.RUNNING,
+                primaryProgress = ProgressData.ratio(2048.0, 4096.0, "KB", "MangaDex Ch. 1: 1/2"),
+                secondaryProgress = ProgressData.ratio(1.0, 2.0, "pages", "Pages 1/2"),
+                startedAtEpochMs = 1_700_000_000_000L - 10_000L
+            )
+        )
+        val events = MutableSharedFlow<UiEvent>(extraBufferCapacity = 16)
+        var latestTree: UiNodeTree? = null
+        val job = launch { plugin.openUiSession(sessionCtx, events).collect { latestTree = it } }
+        advanceUntilIdle()
+
+        // Workspace keeps full vertical space (progress sliders live only in Queue); topBar Queue tab exposes active count & tooltip
+        assertNull(latestTree!!.findById("ws_active_jobs_card"))
+        assertNull(latestTree!!.findById("ws_job_active_md_1_progress"))
+        val navViews = latestTree!!.findById(Ids.NAV_VIEWS) as ButtonGroupNode
+        val queueNavItem = navViews.items.first { it.key == MainView.QUEUE.key }
+        assertEquals("Queue (1)", queueNavItem.label)
+        assertTrue(queueNavItem.tooltip.orEmpty().contains("publishToMangaDex"))
+        val pushMdBtn = latestTree!!.findById("btn_push_mangadex") as ButtonNode
+        assertFalse(pushMdBtn.modifier.enabled)
+
+        val beforeLaunches = sessionCtx.launchedCapabilities.size
+        events.emit(UiEvent.Click("btn_push_mangadex", Ids.ACT_CH_PUSH_MANGADEX))
+        advanceUntilIdle()
+        assertEquals(beforeLaunches, sessionCtx.launchedCapabilities.size)
+        assertTrue(base.toasts.any { "already running or queued" in it })
+
+        // Verify Queue view renders primary + secondary progress bars & tooltips on job actions
+        events.emit(UiEvent.Click(Ids.NAV_VIEWS, Ids.ACT_VIEW + MainView.QUEUE.key))
+        advanceUntilIdle()
+        val queueProg = latestTree!!.findById("job_active_md_1_progress") as ProgressBarNode
+        assertEquals("2048 / 4096 KB", queueProg.statusText)
+        assertNotNull(latestTree!!.findById("job_active_md_1_secondary_progress"))
+        val jobActions = latestTree!!.findById("job_active_md_1_actions") as ButtonGroupNode
+        assertTrue(jobActions.items.all { !it.tooltip.isNullOrBlank() })
+
+        job.cancel()
+    }
+
+    @Test
+    fun `chapter remote source selector drives metadata view, loads MD meta, syncs MD metadata+pages, and exposes tooltips`() = runTest {
+        val series = Series(
+            id = "sr_meta",
+            title = "Cross Sync",
+            cubariSlug = "cross-sync",
+            mangadexId = "11111111-1111-1111-1111-111111111111"
+        )
+        pluginFs.writeFile(relPath("pages/ch_1/p1.png"), ByteArray(3072) { 4 })
+        val ch = Chapter(
+            id = "ch_meta",
+            seriesId = "sr_meta",
+            volume = "1",
+            number = "5",
+            title = "Cubari Title",
+            pages = listOf(PageRef("pg1", "pages/ch_1/p1.png", "1.png")),
+            cubariPublishedAtEpochSec = 1_700_000_000L,
+            cubariUpdatedAtEpochSec = 1_700_000_000L,
+            cubariPageUrls = listOf("https://cdn.example/Cross Sync/ch5/1.png"),
+            cubariSnapshot = CubariChapterSnapshot("5", "1", "Cubari Title", listOf("https://cdn.example/Cross Sync/ch5/1.png")),
+            mangadexChapterId = "md_ch_5",
+            mangadexVersion = 2,
+            mangadexPublishedAtEpochSec = 1_700_000_100L,
+            mangadexUpdatedAtEpochSec = 1_700_000_100L,
+            mdSnapshot = MangaDexChapterSnapshot("md_ch_5", 2, "5", "2", "MD Better Title", "en", pageCount = 1)
+        )
+        LibraryStore(pluginFs).mutate { it.copy(series = listOf(series), chapters = listOf(ch)) }
+        val base = FakePluginContext(
+            fileSystem = pluginFs,
+            initialSettings = configuredSettings() + mapOf(
+                SettingKeys.ARUBA_PUBLIC_URL to JsonPrimitive("https://cdn.example"),
+                SettingKeys.ARUBA_CHAPTERS_PATH to JsonPrimitive("/")
+            )
+        )
+
+        // Verify byte progress reporting on Aruba publish (3072 B -> 3 KB)
+        val publishRes = UploaderWorkers(base, services).publishToArubaAndCubari("sr_meta", "ch_meta", UploaderWorkers.OP_PUBLISH, null)
+        assertTrue(publishRes is ExecutionResult.Success)
+        val kbProgress = base.progress.reports.lastOrNull { p -> p.unit == "KB" }
+        assertNotNull(kbProgress)
+        assertEquals(3.0, kbProgress.total ?: -1.0, 0.01)
+
+        // Verify UI chapter-level REMOTE_SOURCE dropdown + loading MD metadata into editable draft + tooltips
+        val plugin = MangaUploaderPlugin(MangaUploaderSettings())
+        val sessionCtx = FakeSessionContext(
+            entry = MangaUploaderPluginPluginEntry(plugin),
+            scope = this,
+            base = base,
+            locksState = MutableStateFlow(plugin.checkLocks(base))
+        )
+        val events = MutableSharedFlow<UiEvent>(extraBufferCapacity = 16)
+        var latestTree: UiNodeTree? = null
+        val job = launch { plugin.openUiSession(sessionCtx, events).collect { latestTree = it } }
+        advanceUntilIdle()
+
+        val remoteDropdown = latestTree!!.findById(Ids.REMOTE_SOURCE) as DropdownNode
+        assertEquals(UploaderWorkers.SOURCE_CUBARI, remoteDropdown.selectedKey)
+        val syncBtn = latestTree!!.findById("btn_sync_repo_ws") as IconButtonNode
+        assertFalse(syncBtn.tooltip.isNullOrBlank())
+        val navViews = latestTree!!.findById(Ids.NAV_VIEWS) as ButtonGroupNode
+        assertTrue(navViews.items.all { !it.tooltip.isNullOrBlank() })
+        val chLinks = latestTree!!.findById("chapter_links_group") as ButtonGroupNode
+        assertTrue(chLinks.items.all { !it.tooltip.isNullOrBlank() })
+        val pagesToolbar = latestTree!!.findById("pages_toolbar") as ButtonGroupNode
+        assertTrue(pagesToolbar.items.all { !it.tooltip.isNullOrBlank() })
+
+        // Switch chapter-level Remote Source to MangaDex and load its metadata into draft
+        events.emit(UiEvent.OptionSelected(Ids.REMOTE_SOURCE, UploaderWorkers.SOURCE_MANGADEX))
+        advanceUntilIdle()
+        val mdSummary = latestTree!!.findById("ch_remote_meta_summary") as TextNode
+        assertTrue("MD Better Title" in mdSummary.text)
+        events.emit(UiEvent.Click("btn_load_remote_meta", Ids.ACT_LOAD_REMOTE_META))
+        advanceUntilIdle()
+        val titleInput = latestTree!!.findById(Ids.CH_TITLE) as TextInputNode
+        val volInput = latestTree!!.findById(Ids.CH_VOLUME) as TextInputNode
+        assertEquals("MD Better Title", titleInput.text)
+        assertEquals("2", volInput.text)
+
+        // Verify syncMangaDexToCubari updates BOTH Cubari JSON and local chapter metadata + pages
+        services.mangadex.feed = listOf(
+            MdChapter("md_ch_5", "5", "3", "Final MD Title", 1_700_000_500L, 3, 2, updatedAtEpochSec = 1_700_000_500L)
+        )
+        services.mangadex.pageUrlsByChapter["md_ch_5"] = listOf("https://md.home/1.png", "https://md.home/2.png")
+        val syncRes = UploaderWorkers(base, services).syncMangaDexToCubari("sr_meta", "5", scanOnly = false)
+        assertTrue(syncRes is ExecutionResult.Success)
+        val afterSyncCh = LibraryStore(pluginFs).load().chapterById("ch_meta")!!
+        assertEquals("Final MD Title", afterSyncCh.title)
+        assertEquals("3", afterSyncCh.volume)
+        assertEquals(2, afterSyncCh.cubariPageUrls.size)
+        assertEquals("Final MD Title", afterSyncCh.cubariSnapshot?.title)
+        assertEquals(2, afterSyncCh.mdSnapshot?.pageCount)
+
+        job.cancel()
+    }
+
+    @Test
+    fun `BandwidthThrottle serializes staggered waits across concurrent coroutines and exposes stats`() = runTest {
+        val fakeClock = FakeClock(nanos = 10_000_000_000L)
+        val recordedWaits = mutableListOf<Long>()
+        val lock = Any()
+        // 100 KB/s => 100 KB takes 1,000ms
+        val throttle = BandwidthThrottle(
+            limitProvider = { 100 },
+            clock = fakeClock,
+            sleeper = { ms -> synchronized(lock) { recordedWaits += ms } }
+        )
+
+        val jobs = (1..3).map {
+            async { throttle.acquire(100 * 1024) }
+        }
+        jobs.forEach { it.await() }
+
+        // Call 1 starts at 0ms, Call 2 waits ~1000ms, Call 3 waits ~2000ms -> monotonically staggered!
+        assertEquals(listOf(1_000L, 2_000L), recordedWaits.sorted())
+        fakeClock.nanos += 3_000_000_000L
+        val stats = throttle.stats()
+        assertEquals(3L * 100L * 1024L, stats.bytes)
+        assertEquals(100, stats.limitKbps)
+        assertEquals(3_000L, stats.waitedMs)
+        assertTrue(stats.effectiveKbps in 99.0..101.0)
+    }
+
+    @Test
+    fun `Cubari to MangaDex uses remote micro-batches, separate download vs upload throttles, and reports progress`() = runTest {
+        val series = Series(
+            id = "sr_c2md",
+            title = "Remote Batching",
+            cubariSlug = "remote-batching",
+            mangadexId = "11111111-1111-1111-1111-111111111111"
+        )
+        val urls = (1..5).map { "https://cdn.example/Remote/$it.png" }
+        urls.forEach { u -> services.mangadex.downloadedBytes[u] = ByteArray(4 * 1024) { 7 } }
+        val chapter = Chapter(
+            id = "ch_c2md",
+            seriesId = "sr_c2md",
+            number = "10",
+            title = "Remote Push",
+            cubariPublishedAtEpochSec = 1_700_000_000L,
+            cubariPageUrls = urls
+        )
+        LibraryStore(pluginFs).mutate { it.copy(series = listOf(series), chapters = listOf(chapter)) }
+
+        val batchSizes = mutableListOf<Int>()
+        services.mangadex.onUploadBatch = { batch -> batchSizes += batch.size }
+        val secondaryMessages = mutableListOf<String>()
+        val progress = FakeProgressReporter(onSecondary = { p -> p?.message?.let { secondaryMessages += it } })
+        val base = FakePluginContext(
+            fileSystem = pluginFs,
+            progress = progress,
+            initialSettings = configuredSettings() + mapOf(
+                SettingKeys.MD_UPLOAD_INTERVAL to JsonPrimitive(0),
+                SettingKeys.MAX_DOWNLOAD_KBPS to JsonPrimitive(0),
+                SettingKeys.MAX_UPLOAD_KBPS to JsonPrimitive(500),
+                SettingKeys.CONCURRENT_DOWNLOADS to JsonPrimitive(3)
+            )
+        )
+
+        val result = UploaderWorkers(base, services).publishToMangaDex("sr_c2md", "ch_c2md", null)
+        assertTrue(result is ExecutionResult.Success)
+        // 5 remote pages upload cleanly in micro-batches [3, 2] instead of waiting to buffer all pages
+        assertEquals(listOf(3, 2), batchSizes)
+        assertEquals(5, services.mangadex.uploadedFiles.size)
+        assertTrue(secondaryMessages.any { it.startsWith("Downloading pages 1..3/5") })
+        assertTrue(secondaryMessages.any { it.startsWith("Fetched 1/5") })
+        assertTrue(secondaryMessages.any { it.startsWith("Uploading pages 1..3/5") })
+        val progressMessages = progress.reports.mapNotNull { it.message }
+        assertTrue(progressMessages.any { "cap 500 KB/s" in it })
+        assertTrue(base.logger.entries.any { "MangaDex transfer summary:" in it })
+    }
+
+    @Test
+    fun `executeHttpUrlConnection streams multipart body with exact Content-Length header`() = runTest {
+        val receivedContentLength = AtomicReference<String?>()
+        val receivedBody = AtomicReference<String>("")
+        val server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
+        server.createContext("/upload") { ex ->
+            receivedContentLength.set(ex.requestHeaders.getFirst("Content-Length"))
+            val body = ex.requestBody.readAllBytes()
+            receivedBody.set(body.decodeToString())
+            val resp = """{"ok":true}""".encodeToByteArray()
+            ex.sendResponseHeaders(200, resp.size.toLong())
+            ex.responseBody.use { it.write(resp) }
+        }
+        server.start()
+        try {
+            val port = server.address.port
+            val resp = executeHttpUrlConnection(
+                request = HttpRequest(
+                    url = "http://127.0.0.1:$port/upload",
+                    method = HttpMethod.POST,
+                    multipartParts = listOf(MultipartPart("file", "HELLO_PNG".encodeToByteArray(), "1.png", "image/png"))
+                ),
+                proxy = null
+            )
+            assertEquals(200, resp.statusCode)
+            val cl = receivedContentLength.get()?.toLongOrNull()
+            assertNotNull(cl)
+            assertEquals(receivedBody.get().encodeToByteArray().size.toLong(), cl)
+            assertTrue("HELLO_PNG" in receivedBody.get())
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `persistent job store reattaches running host job across UI reopen and skips vanished jobs`() = runTest {
+        val series = Series(id = "sr_p", title = "Persistent", cubariSlug = "persistent")
+        val ch = Chapter(id = "ch_p", seriesId = "sr_p", number = "1", pages = listOf(PageRef("pg1", "pages/ch_p/1.png", "1.png")))
+        LibraryStore(pluginFs).mutate { it.copy(series = listOf(series), chapters = listOf(ch)) }
+
+        val sharedStorage = FakeStorage()
+        // Pre-seed a stale non-terminal job whose host record vanished before reopen
+        PersistedJobStore(sharedStorage).upsert(
+            CapabilityJobSnapshot(jobId = "job_vanished", capabilityName = "syncCubariGitRepo", status = CapabilityJobStatus.RUNNING, startedAtEpochMs = 1_699_000_000_000L)
+        )
+
+        val plugin = MangaUploaderPlugin(MangaUploaderSettings())
+        val base1 = FakePluginContext(
+            fileSystem = pluginFs,
+            storage = sharedStorage,
+            initialSettings = configuredSettings()
+        )
+        val session1 = FakeSessionContext(
+            entry = MangaUploaderPluginPluginEntry(plugin),
+            scope = this,
+            base = base1,
+            locksState = MutableStateFlow(plugin.checkLocks(base1))
+        )
+        // Session 1 triggers a Cubari push via FakeSessionContext; replace launchCapability tracking cleanly
+        val events1 = MutableSharedFlow<UiEvent>(extraBufferCapacity = 8)
+        val job1 = launch {
+            runMangaUploaderSession(session1, events1, services, reattachTimeoutMs = 25L).collect {}
+        }
+        advanceUntilIdle()
+        events1.emit(UiEvent.Click("btn_push_cubari_single", Ids.ACT_CH_PUSH_CUBARI))
+        advanceUntilIdle()
+        val launchedId = session1.launchedCapabilities.single().first
+        // Simulate closing GUI Session 1 while host still owns a separate running job 'job_surviving'
+        job1.cancel()
+
+        val survivingFlow = MutableStateFlow(
+            CapabilityJobSnapshot(
+                jobId = "job_surviving",
+                capabilityName = "publishToMangaDex",
+                status = CapabilityJobStatus.RUNNING,
+                primaryProgress = ProgressData.ratio(1.0, 4.0, "pages", "MangaDex Ch. 1: 1/4"),
+                startedAtEpochMs = 1_700_000_000_500L
+            )
+        )
+        PersistedJobStore(sharedStorage).upsert(survivingFlow.value)
+
+        // Open Session 2: fresh empty capabilityJobs on UiSessionContext, only observeCapabilityJob("job_surviving") active
+        val base2 = FakePluginContext(
+            fileSystem = pluginFs,
+            storage = sharedStorage,
+            initialSettings = configuredSettings()
+        )
+        val session2 = FakeSessionContext(
+            entry = MangaUploaderPluginPluginEntry(plugin),
+            scope = this,
+            base = base2,
+            locksState = MutableStateFlow(plugin.checkLocks(base2))
+        )
+        session2.observedJobs["job_surviving"] = survivingFlow
+        session2.observedJobs["job_vanished"] = emptyFlow()
+
+        val events2 = MutableSharedFlow<UiEvent>(extraBufferCapacity = 8)
+        var latestTree2: UiNodeTree? = null
+        val job2 = launch {
+            runMangaUploaderSession(session2, events2, services, reattachTimeoutMs = 25L).collect { latestTree2 = it }
+        }
+        advanceUntilIdle()
+
+        // Surviving job is synced live in Queue & blocks duplicate MangaDex push; vanished job is skipped!
+        val navViews2 = latestTree2!!.findById(Ids.NAV_VIEWS) as ButtonGroupNode
+        assertEquals("Queue (1)", navViews2.items.first { it.key == MainView.QUEUE.key }.label)
+        assertFalse((latestTree2!!.findById("btn_push_mangadex") as ButtonNode).modifier.enabled)
+
+        events2.emit(UiEvent.Click(Ids.NAV_VIEWS, Ids.ACT_VIEW + MainView.QUEUE.key))
+        advanceUntilIdle()
+        assertNotNull(latestTree2!!.findById("job_job_surviving_progress"))
+        assertNull(latestTree2!!.findById("job_job_vanished_progress"))
+        // Historical terminal job launched in Session 1 is preserved in Queue history too
+        assertNotNull(latestTree2!!.findById("job_${launchedId}_progress"))
+
+        // When surviving job completes on host, Session 2 updates Queue & enables Clear History
+        survivingFlow.value = survivingFlow.value.copy(
+            status = CapabilityJobStatus.COMPLETED,
+            primaryProgress = ProgressData.ratio(4.0, 4.0, "pages", "MangaDex Ch. 1: 4/4"),
+            completedAtEpochMs = 1_700_000_010_000L
+        )
+        advanceUntilIdle()
+        assertNotNull(latestTree2!!.findById("btn_clear_job_history"))
+        events2.emit(UiEvent.Click("btn_clear_job_history", Ids.ACT_CLEAR_JOB_HISTORY))
+        advanceUntilIdle()
+        assertNull(latestTree2!!.findById("job_job_surviving_progress"))
+
+        job2.cancel()
+    }
+
+    // ─────────────────── v1.0.7 Incremental Upload Tests ───────────────────
+
+    @Test
+    fun `planCycleSafeRenames handles shifts swaps and mixed cycles without overwriting sources`() {
+        fun execute(initial: Map<String, String>, moves: List<Pair<String, String>>): MutableMap<String, String> {
+            val fs = initial.toMutableMap()
+            val ops = IncrementalPagePlanner.planCycleSafeRenames(moves) { src, seq ->
+                val dir = src.substringBeforeLast('/', "")
+                if (dir.isBlank()) ".tmp_$seq" else "$dir/.tmp_$seq"
+            }
+            for ((src, dst) in ops) {
+                val content = fs.remove(src) ?: error("Missing source $src during step ($src -> $dst)")
+                fs[dst] = content
+            }
+            return fs
+        }
+
+        // Right shift (e.g. insert new page 0): 1->2, 2->3, 3->4 needs zero temps
+        val shiftRightOps = IncrementalPagePlanner.planCycleSafeRenames(
+            listOf("/c/1.png" to "/c/2.png", "/c/2.png" to "/c/3.png", "/c/3.png" to "/c/4.png")
+        ) { _, seq -> "/c/.tmp_$seq.png" }
+        assertTrue(shiftRightOps.none { ".tmp_" in it.second })
+        val afterRight = execute(
+            mapOf("/c/1.png" to "A", "/c/2.png" to "B", "/c/3.png" to "C"),
+            listOf("/c/1.png" to "/c/2.png", "/c/2.png" to "/c/3.png", "/c/3.png" to "/c/4.png")
+        )
+        assertEquals(mapOf("/c/2.png" to "A", "/c/3.png" to "B", "/c/4.png" to "C"), afterRight)
+
+        // Pure 3-cycle + independent shift + swap: (1->2, 2->3, 3->1, 4->5, 5->4)
+        val mixedAfter = execute(
+            mapOf("/c/1.png" to "A", "/c/2.png" to "B", "/c/3.png" to "C", "/c/4.png" to "D", "/c/5.png" to "E"),
+            listOf(
+                "/c/1.png" to "/c/2.png",
+                "/c/2.png" to "/c/3.png",
+                "/c/3.png" to "/c/1.png",
+                "/c/4.png" to "/c/5.png",
+                "/c/5.png" to "/c/4.png"
+            )
+        )
+        assertEquals(
+            mapOf("/c/2.png" to "A", "/c/3.png" to "B", "/c/1.png" to "C", "/c/5.png" to "D", "/c/4.png" to "E"),
+            mixedAfter
+        )
+    }
+
+    @Test
+    fun `publishToArubaAndCubari incremental insert swap delete and replace minimize uploads via server renames`() = runTest {
+        val series = Series(id = "sr_inc", title = "Incremental Saga", cubariSlug = "inc-saga")
+        val pA = PageImporter.storeChapterPage(pluginFs, "ch_1", "01.png", "page-A".encodeToByteArray())
+        val pB = PageImporter.storeChapterPage(pluginFs, "ch_1", "02.png", "page-B".encodeToByteArray())
+        val pC = PageImporter.storeChapterPage(pluginFs, "ch_1", "03.png", "page-C".encodeToByteArray())
+        val chapter = Chapter(id = "ch_1", seriesId = "sr_inc", volume = "1", number = "1", title = "One", pages = listOf(pA, pB, pC))
+        LibraryStore(pluginFs).mutate { it.copy(series = listOf(series), chapters = listOf(chapter)) }
+        val ctx = FakePluginContext(fileSystem = pluginFs, initialSettings = configuredSettings())
+        val workers = UploaderWorkers(ctx, services)
+
+        // Initial publish uploads all 3 pages
+        assertTrue(workers.publishToArubaAndCubari("sr_inc", "ch_1", UploaderWorkers.OP_PUBLISH, null) is ExecutionResult.Success)
+        assertEquals(3, services.aruba.uploadedPaths.size)
+        assertTrue(services.aruba.renamed.isEmpty())
+
+        // 1) Insert 1 new page at the start -> only 001.png should upload, old 001..003 shift to 002..004 via rename
+        services.aruba.uploadedPaths.clear()
+        services.aruba.renamed.clear()
+        val pNew = PageImporter.storeChapterPage(pluginFs, "ch_1", "00.png", "page-NEW".encodeToByteArray())
+        LibraryStore(pluginFs).mutate {
+            LibraryOps.upsertChapter(it, it.chapterById("ch_1")!!.copy(pages = listOf(pNew, pA, pB, pC)))
+        }
+        assertTrue(workers.publishToArubaAndCubari("sr_inc", "ch_1", UploaderWorkers.OP_PUBLISH, null) is ExecutionResult.Success)
+        assertEquals(listOf("/chapters/Incremental Saga/ch1/001.png"), services.aruba.uploadedPaths)
+        assertEquals(3, services.aruba.renamed.size)
+        assertEquals("page-NEW", services.aruba.files["/chapters/Incremental Saga/ch1/001.png"]!!.decodeToString())
+        assertEquals("page-A", services.aruba.files["/chapters/Incremental Saga/ch1/002.png"]!!.decodeToString())
+        assertEquals("page-B", services.aruba.files["/chapters/Incremental Saga/ch1/003.png"]!!.decodeToString())
+        assertEquals("page-C", services.aruba.files["/chapters/Incremental Saga/ch1/004.png"]!!.decodeToString())
+
+        // 2) Delete middle pages (pNew, pB) and swap (pC, pA) -> 0 uploads, cycle-safe rename, stale 003 & 004 deleted
+        services.aruba.uploadedPaths.clear()
+        services.aruba.renamed.clear()
+        services.aruba.deleted.clear()
+        LibraryStore(pluginFs).mutate {
+            LibraryOps.upsertChapter(it, it.chapterById("ch_1")!!.copy(pages = listOf(pC, pA)))
+        }
+        assertTrue(workers.publishToArubaAndCubari("sr_inc", "ch_1", UploaderWorkers.OP_PUBLISH, null) is ExecutionResult.Success)
+        assertTrue(services.aruba.uploadedPaths.isEmpty())
+        assertTrue(services.aruba.renamed.isNotEmpty())
+        assertEquals("page-C", services.aruba.files["/chapters/Incremental Saga/ch1/001.png"]!!.decodeToString())
+        assertEquals("page-A", services.aruba.files["/chapters/Incremental Saga/ch1/002.png"]!!.decodeToString())
+        assertEquals(
+            setOf("/chapters/Incremental Saga/ch1/001.png", "/chapters/Incremental Saga/ch1/002.png"),
+            services.aruba.files.keys
+        )
+
+        // 3) Replace only page 2 (index 1) -> only 002.png is uploaded, 001.png untouched
+        services.aruba.uploadedPaths.clear()
+        services.aruba.renamed.clear()
+        val pA2 = PageImporter.storeChapterPage(pluginFs, "ch_1", "02.png", "page-A-edited".encodeToByteArray())
+        LibraryStore(pluginFs).mutate {
+            LibraryOps.upsertChapter(it, it.chapterById("ch_1")!!.copy(pages = listOf(pC, pA2)))
+        }
+        assertTrue(workers.publishToArubaAndCubari("sr_inc", "ch_1", UploaderWorkers.OP_PUBLISH, null) is ExecutionResult.Success)
+        assertEquals(listOf("/chapters/Incremental Saga/ch1/002.png"), services.aruba.uploadedPaths)
+        assertTrue(services.aruba.renamed.isEmpty())
+        assertEquals("page-C", services.aruba.files["/chapters/Incremental Saga/ch1/001.png"]!!.decodeToString())
+        assertEquals("page-A-edited", services.aruba.files["/chapters/Incremental Saga/ch1/002.png"]!!.decodeToString())
+    }
+
+    @Test
+    fun `publishToArubaAndCubari reuses unchanged pages after Download All MODE_LOAD`() = runTest {
+        val url1 = "https://cdn.aruba.test/chapters/Loaded%20Series/ch5/001.png"
+        val url2 = "https://cdn.aruba.test/chapters/Loaded%20Series/ch5/002.png"
+        val series = Series(id = "sr_load", title = "Loaded Series", cubariSlug = "loaded-series")
+        val chapter = Chapter(
+            id = "ch_5",
+            seriesId = "sr_load",
+            number = "5",
+            title = "Five",
+            cubariPublishedAtEpochSec = 1_700_000_000L,
+            cubariPageUrls = listOf(url1, url2)
+        )
+        LibraryStore(pluginFs).mutate { it.copy(series = listOf(series), chapters = listOf(chapter)) }
+        services.git.remoteSeries["loaded-series"] = CubariJson.parse(
+            """{"title":"Loaded Series","chapters":{"5":{"title":"Five","volume":"","groups":{"ScanGroup":["$url1","$url2"]}}}}"""
+        )
+        services.aruba.files["/chapters/Loaded Series/ch5/001.png"] = "remote-1".encodeToByteArray()
+        services.aruba.files["/chapters/Loaded Series/ch5/002.png"] = "remote-2".encodeToByteArray()
+        services.mangadex.downloadedBytes[url1] = "remote-1".encodeToByteArray()
+        services.mangadex.downloadedBytes[url2] = "remote-2".encodeToByteArray()
+
+        val ctx = FakePluginContext(fileSystem = pluginFs, initialSettings = configuredSettings())
+        val workers = UploaderWorkers(ctx, services)
+        assertTrue(workers.fetchChapterPages("sr_load", "ch_5", UploaderWorkers.SOURCE_CUBARI, UploaderWorkers.MODE_LOAD, replace = true, resume = null) is ExecutionResult.Success)
+
+        val loadedPages = LibraryStore(pluginFs).load().chapterById("ch_5")!!.pages
+        assertEquals(2, loadedPages.size)
+        assertEquals(url1, loadedPages[0].remoteUrl)
+        assertNotNull(loadedPages[0].contentHash)
+
+        // Insert a new page between page 1 and page 2, then push -> only 002.png uploads, old 002.png shifts to 003.png
+        val pMid = PageImporter.storeChapterPage(pluginFs, "ch_5", "mid.png", "brand-new".encodeToByteArray())
+        LibraryStore(pluginFs).mutate {
+            LibraryOps.upsertChapter(it, it.chapterById("ch_5")!!.copy(pages = listOf(loadedPages[0], pMid, loadedPages[1])))
+        }
+        assertTrue(workers.publishToArubaAndCubari("sr_load", "ch_5", UploaderWorkers.OP_PUBLISH, null) is ExecutionResult.Success)
+        assertEquals(listOf("/chapters/Loaded Series/ch5/002.png"), services.aruba.uploadedPaths)
+        assertEquals(listOf("/chapters/Loaded Series/ch5/002.png" to "/chapters/Loaded Series/ch5/003.png"), services.aruba.renamed)
+        assertEquals("remote-1", services.aruba.files["/chapters/Loaded Series/ch5/001.png"]!!.decodeToString())
+        assertEquals("brand-new", services.aruba.files["/chapters/Loaded Series/ch5/002.png"]!!.decodeToString())
+        assertEquals("remote-2", services.aruba.files["/chapters/Loaded Series/ch5/003.png"]!!.decodeToString())
+    }
+
+    @Test
+    fun `publishToMangaDex incremental edit reuses prefilled session files on insert reorder delete and falls back safely`() = runTest {
+        val series = Series(
+            id = "sr_md_inc",
+            title = "MD Incremental",
+            cubariSlug = "md-inc",
+            mangadexId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        )
+        val p0 = PageImporter.storeChapterPage(pluginFs, "ch_md", "01.png", "md-page-0".encodeToByteArray())
+        val p1 = PageImporter.storeChapterPage(pluginFs, "ch_md", "02.png", "md-page-1".encodeToByteArray())
+        val p2 = PageImporter.storeChapterPage(pluginFs, "ch_md", "03.png", "md-page-2".encodeToByteArray())
+        val chapter = Chapter(id = "ch_md", seriesId = "sr_md_inc", volume = "1", number = "1", title = "One", pages = listOf(p0, p1, p2))
+        LibraryStore(pluginFs).mutate { it.copy(series = listOf(series), chapters = listOf(chapter)) }
+        val ctx = FakePluginContext(fileSystem = pluginFs, initialSettings = configuredSettings())
+        val workers = UploaderWorkers(ctx, services)
+
+        // Initial publish uploads all 3 pages
+        assertTrue(workers.publishToMangaDex("sr_md_inc", "ch_md", null) is ExecutionResult.Success)
+        assertEquals(3, services.mangadex.uploadedFiles.size)
+        val firstChapterId = LibraryStore(pluginFs).load().chapterById("ch_md")!!.mangadexChapterId!!
+
+        // 1) Insert 1 page at index 0 -> ONLY the new page uploads, committed pageOrder places it first + reuses 3 prefilled IDs
+        services.mangadex.uploadedFiles.clear()
+        services.mangadex.committedPageOrders.clear()
+        val pNew = PageImporter.storeChapterPage(pluginFs, "ch_md", "00.png", "md-page-NEW".encodeToByteArray())
+        LibraryStore(pluginFs).mutate {
+            LibraryOps.upsertChapter(it, it.chapterById("ch_md")!!.copy(pages = listOf(pNew, p0, p1, p2)))
+        }
+        assertTrue(workers.publishToMangaDex("sr_md_inc", "ch_md", null) is ExecutionResult.Success)
+        assertEquals(1, services.mangadex.uploadedFiles.size)
+        assertEquals("md-page-NEW", services.mangadex.uploadedFiles.single().bytes.decodeToString())
+        val orderAfterInsert = services.mangadex.committedPageOrders.single()
+        assertEquals(4, orderAfterInsert.size)
+        assertEquals(
+            listOf("${firstChapterId}_v1_prev_0", "${firstChapterId}_v1_prev_1", "${firstChapterId}_v1_prev_2"),
+            orderAfterInsert.drop(1)
+        )
+
+        // 2) Delete middle & reorder (keep p2 then p0) -> ZERO uploads, pageOrder references prefilled v2 files [3, 1]
+        services.mangadex.uploadedFiles.clear()
+        services.mangadex.committedPageOrders.clear()
+        LibraryStore(pluginFs).mutate {
+            LibraryOps.upsertChapter(it, it.chapterById("ch_md")!!.copy(pages = listOf(p2, p0)))
+        }
+        assertTrue(workers.publishToMangaDex("sr_md_inc", "ch_md", null) is ExecutionResult.Success)
+        assertTrue(services.mangadex.uploadedFiles.isEmpty())
+        assertEquals(
+            listOf("${firstChapterId}_v2_prev_3", "${firstChapterId}_v2_prev_1"),
+            services.mangadex.committedPageOrders.single()
+        )
+
+        // 3) Safety fallback: if prefilled files are empty/mismatched, fall back to uploading all pages
+        services.mangadex.uploadedFiles.clear()
+        services.mangadex.committedPageOrders.clear()
+        services.mangadex.prefilledFilesByChapter[firstChapterId] = emptyList()
+        LibraryStore(pluginFs).mutate {
+            LibraryOps.upsertChapter(it, it.chapterById("ch_md")!!.copy(pages = listOf(p0, p2)))
+        }
+        assertTrue(workers.publishToMangaDex("sr_md_inc", "ch_md", null) is ExecutionResult.Success)
+        assertEquals(2, services.mangadex.uploadedFiles.size)
+    }
+
+    @Test
+    fun `HttpMangaDexApi beginEditSession parses prefilled upload_session_file relationships and included attributes`() = runTest {
+        val fakeNet = FakeNetwork().apply {
+            responder = { req ->
+                if (req.url.endsWith("/upload/begin/ch_existing")) {
+                    HttpResponse(
+                        200,
+                        body = """
+                        {
+                          "result": "ok",
+                          "data": {
+                            "id": "edit_sess_99",
+                            "type": "upload_session",
+                            "relationships": [
+                              {"id": "f_0", "type": "upload_session_file"},
+                              {"id": "f_1", "type": "upload_session_file"}
+                            ]
+                          },
+                          "included": [
+                            {
+                              "id": "f_0",
+                              "type": "upload_session_file",
+                              "attributes": {"originalFileName": "01.png", "fileHash": "abc"}
+                            }
+                          ]
+                        }
+                        """.trimIndent().encodeToByteArray()
+                    )
+                } else {
+                    HttpResponse(404, body = ByteArray(0))
+                }
+            }
+        }
+        val api = HttpMangaDexApi(fakeNet)
+        val session = api.beginEditSession("tok", "ch_existing", 2)
+        assertEquals("edit_sess_99", session.sessionId)
+        assertEquals(2, session.prefilledFiles.size)
+        assertEquals(MdSessionFileInfo("f_0", "01.png", "abc"), session.prefilledFiles[0])
+        assertEquals(MdSessionFileInfo("f_1", null, null), session.prefilledFiles[1])
+    }
+
+    // ─────────────────── v1.0.8 Post-Publish Draft Sync & Cache Limit Tests ───────────────────
+
+    @Test
+    fun `publishToArubaAndCubari clears mixed remote-local edit draft and refreshes UI to canonical remote URLs`() = runTest {
+        val url1 = "https://cdn.aruba.test/chapters/Shift%20Series/ch242/001.png"
+        val url2 = "https://cdn.aruba.test/chapters/Shift%20Series/ch242/002.png"
+        services.aruba.files["/chapters/Shift Series/ch242/001.png"] = "old-p1".encodeToByteArray()
+        services.aruba.files["/chapters/Shift Series/ch242/002.png"] = "old-p2".encodeToByteArray()
+        val series = Series(id = "sr_shift", title = "Shift Series", cubariSlug = "shift-series")
+        val initialChapter = Chapter(
+            id = "ch_242",
+            seriesId = "sr_shift",
+            volume = "1",
+            number = "242",
+            title = "Edited",
+            cubariPublishedAtEpochSec = 1000L,
+            cubariUpdatedAtEpochSec = 1000L,
+            cubariPageUrls = listOf(url1, url2),
+            cubariSnapshot = CubariChapterSnapshot(
+                key = "242",
+                volume = "1",
+                title = "Edited",
+                pageUrls = listOf(url1, url2),
+                pageHashes = listOf(sha256Hex("old-p1".encodeToByteArray()), sha256Hex("old-p2".encodeToByteArray()))
+            )
+        )
+        // Mixed remote + local edit: user appended 000.png local and sorted/moved it to index 0
+        val newLocal = PageImporter.storeChapterPage(pluginFs, "ch_242", "000.png", "credits-new".encodeToByteArray())
+        val remotePages = PageImporter.remotePageRefs(listOf(url1, url2))
+        val mixedDraftPages = listOf(newLocal) + remotePages
+        val store = LibraryStore(pluginFs)
+        store.mutate {
+            it.copy(
+                series = listOf(series),
+                chapters = listOf(initialChapter.copy(pages = mixedDraftPages))
+            )
+        }
+        val storage = FakeStorage()
+        RemotePagesStore(storage).save(
+            RemoteChapterPages(
+                chapterId = "ch_242",
+                source = "cubari",
+                checkedAtEpochSec = 1000L,
+                pages = listOf(
+                    RemotePageStatus(0, url1, "001.png", 200),
+                    RemotePageStatus(1, url2, "002.png", 200)
+                )
+            )
+        )
+
+        val base = FakePluginContext(
+            fileSystem = pluginFs,
+            storage = storage,
+            initialSettings = configuredSettings()
+        )
+        val plugin = MangaUploaderPlugin(MangaUploaderSettings())
+        val sessionCtx = FakeSessionContext(
+            entry = MangaUploaderPluginPluginEntry(plugin),
+            scope = this,
+            base = base,
+            locksState = MutableStateFlow(plugin.checkLocks(base))
+        )
+        val events = MutableSharedFlow<UiEvent>(extraBufferCapacity = 32)
+        var latestTree: UiNodeTree? = null
+        val uiJob = launch { plugin.openUiSession(sessionCtx, events).collect { latestTree = it } }
+        advanceUntilIdle()
+
+        // Confirm pre-publish draft displays 000.png · Local first (with prior remote check badges on existing URLs)
+        val preGrid = latestTree!!.findById(Ids.PAGE_GRID) as GridNode
+        val preLabels = preGrid.children.map { card -> (card.findNodeById("${card.id}_lbl") as TextNode).text }
+        assertEquals(listOf("000.png · Local", "001.png · OK", "002.png · OK"), preLabels)
+
+        // Simulate job launch -> completion of publishToArubaAndCubari
+        val jobId = "job_pub_242"
+        sessionCtx.jobsState.value = listOf(CapabilityJobSnapshot(jobId, "publishToArubaAndCubari", CapabilityJobStatus.RUNNING))
+        advanceUntilIdle()
+
+        val workers = UploaderWorkers(base, services)
+        val res = workers.publishToArubaAndCubari("sr_shift", "ch_242", UploaderWorkers.OP_PUBLISH, null)
+        assertTrue(res is ExecutionResult.Success)
+        sessionCtx.jobsState.value = listOf(CapabilityJobSnapshot(jobId, "publishToArubaAndCubari", CapabilityJobStatus.COMPLETED))
+        advanceUntilIdle()
+
+        // Only the new page uploaded; existing 2 shifted cleanly on Aruba
+        assertEquals(listOf("/chapters/Shift Series/ch242/001.png"), services.aruba.uploadedPaths)
+        assertEquals("credits-new", services.aruba.files["/chapters/Shift Series/ch242/001.png"]!!.decodeToString())
+        assertEquals("old-p1", services.aruba.files["/chapters/Shift Series/ch242/002.png"]!!.decodeToString())
+        assertEquals("old-p2", services.aruba.files["/chapters/Shift Series/ch242/003.png"]!!.decodeToString())
+
+        // Library draft cleared & temporary local file pruned; stale remote report invalidated
+        val saved = store.load().chapterById("ch_242")!!
+        assertTrue(saved.pages.isEmpty())
+        assertEquals(3, saved.cubariPageUrls.size)
+        assertTrue(saved.cubariPageUrls.last().endsWith("/003.png"))
+        assertFalse(pluginFs.exists(relPath(newLocal.storedPath)))
+        assertTrue(RemotePagesStore(storage).loadAll().isEmpty())
+
+        // UI refreshed immediately to 3 canonical remote pages (no 000.png · Local duplicate!)
+        val postGrid = latestTree!!.findById(Ids.PAGE_GRID) as GridNode
+        val postLabels = postGrid.children.map { card -> (card.findNodeById("${card.id}_lbl") as TextNode).text }
+        val postAssets = postGrid.children.map { card -> (card.findNodeById("${card.id}_img") as ImageNode).asset }
+        assertEquals(listOf("001.png · Remote", "002.png · Remote", "003.png · Remote"), postLabels)
+        assertEquals(saved.cubariPageUrls.map { AssetReference.Uri(it) }, postAssets)
+        assertEquals(TargetPushKind.UP_TO_DATE, ChangeDetector.planCubariPush(series, saved).kind)
+
+        uiJob.cancel()
+    }
+
+    @Test
+    fun `ImageCacheManager prunes orphans heals stale mixed chapters and enforces maxCacheMb oldest-first without touching unpublished drafts`() = runTest {
+        val series = Series(id = "sr_cache", title = "Cache Series", cubariSlug = "cache-series")
+        val bytes12 = ByteArray(12) { 1 }
+        val bytes14 = ByteArray(14) { 2 }
+        val bytes10 = ByteArray(10) { 3 }
+
+        val pOld = PageImporter.storeChapterPage(pluginFs, "ch_old", "01.png", bytes12, remoteUrl = "https://cdn/old/001.png")
+        val pNew = PageImporter.storeChapterPage(pluginFs, "ch_new", "01.png", bytes14, remoteUrl = "https://cdn/new/001.png")
+        val pUnpub = PageImporter.storeChapterPage(pluginFs, "ch_unpub", "01.png", bytes10)
+        val pStale = PageImporter.storeChapterPage(pluginFs, "ch_stale", "00.png", ByteArray(8) { 4 })
+        val orphanPath = relPath("chapters/ch_old/orphan.png")
+        pluginFs.writeFile(orphanPath, ByteArray(16) { 9 })
+
+        val chOld = Chapter(
+            id = "ch_old",
+            seriesId = "sr_cache",
+            number = "1",
+            pages = listOf(pOld),
+            cubariPublishedAtEpochSec = 100L,
+            cubariUpdatedAtEpochSec = 100L,
+            cubariPageUrls = listOf("https://cdn/old/001.png"),
+            cubariSnapshot = CubariChapterSnapshot("1", pageUrls = listOf("https://cdn/old/001.png"), pageSignature = ChangeDetector.pageListSignature(listOf(pOld)))
+        )
+        val chNew = Chapter(
+            id = "ch_new",
+            seriesId = "sr_cache",
+            number = "2",
+            pages = listOf(pNew),
+            cubariPublishedAtEpochSec = 200L,
+            cubariUpdatedAtEpochSec = 200L,
+            cubariPageUrls = listOf("https://cdn/new/001.png"),
+            cubariSnapshot = CubariChapterSnapshot("2", pageUrls = listOf("https://cdn/new/001.png"), pageSignature = ChangeDetector.pageListSignature(listOf(pNew)))
+        )
+        val chUnpub = Chapter(
+            id = "ch_unpub",
+            seriesId = "sr_cache",
+            number = "3",
+            pages = listOf(pUnpub)
+        )
+        val stalePages = listOf(pStale, PageImporter.remotePageRefs(listOf("https://cdn/stale/001.png")).single())
+        val chStale = Chapter(
+            id = "ch_stale",
+            seriesId = "sr_cache",
+            number = "4",
+            pages = stalePages,
+            cubariPublishedAtEpochSec = 300L,
+            cubariUpdatedAtEpochSec = 300L,
+            cubariPageUrls = listOf("https://cdn/stale/001.png", "https://cdn/stale/002.png"),
+            cubariSnapshot = CubariChapterSnapshot("4", pageUrls = listOf("https://cdn/stale/001.png", "https://cdn/stale/002.png"), pageSignature = ChangeDetector.pageListSignature(stalePages))
+        )
+
+        val store = LibraryStore(pluginFs)
+        store.mutate { it.copy(series = listOf(series), chapters = listOf(chOld, chNew, chUnpub, chStale)) }
+
+        // Limit = 24 bytes: remaining non-orphan bytes = 12 + 14 + 10 = 36 bytes -> must evict chOld (12B),
+        // leaving 24B (chNew 14B + chUnpub 10B), and heal chStale + clean both orphans!
+        val result = ImageCacheManager.prune(pluginFs, store, maxCacheMb = 1, maxBytesOverride = 24L)
+        assertEquals(2, result.orphanFilesRemoved) // ch_deleted/orphan.png + healed ch_stale/00.png
+        assertEquals(1, result.evictedChapters)
+        assertEquals(24L, result.remainingBytes)
+        assertFalse(pluginFs.exists(orphanPath))
+        assertFalse(pluginFs.exists(relPath(pStale.storedPath)))
+        assertFalse(pluginFs.exists(relPath(pOld.storedPath)))
+        assertTrue(pluginFs.exists(relPath(pNew.storedPath)))
+        assertTrue(pluginFs.exists(relPath(pUnpub.storedPath)))
+
+        val reloaded = store.load()
+        assertTrue(reloaded.chapterById("ch_old")!!.pages.isEmpty())
+        assertTrue(reloaded.chapterById("ch_stale")!!.pages.isEmpty())
+        assertEquals(1, reloaded.chapterById("ch_new")!!.pages.size)
+        assertEquals(1, reloaded.chapterById("ch_unpub")!!.pages.size)
+    }
+
+    @Test
+    fun `Settings MAX_CACHE_MB and ACT_PRUNE_CACHE button update config and prune orphans`() = runTest {
+        val series = Series(id = "sr_set", title = "Set Series")
+        val ch = Chapter(id = "ch_set", seriesId = "sr_set", number = "1", pages = emptyList())
+        LibraryStore(pluginFs).mutate { it.copy(series = listOf(series), chapters = listOf(ch)) }
+        pluginFs.writeFile(relPath("chapters/ch_set/stale.png"), ByteArray(64) { 7 })
+        val settings = configuredSettings() + (SettingKeys.MAX_CACHE_MB to JsonPrimitive(250))
+        assertEquals(250, MangaUploaderConfig.from(settings).maxCacheMb)
+
+        val base = FakePluginContext(fileSystem = pluginFs, initialSettings = settings)
+        val plugin = MangaUploaderPlugin(MangaUploaderSettings())
+        val sessionCtx = FakeSessionContext(
+            entry = MangaUploaderPluginPluginEntry(plugin),
+            scope = this,
+            base = base,
+            locksState = MutableStateFlow(plugin.checkLocks(base))
+        )
+        val events = MutableSharedFlow<UiEvent>(extraBufferCapacity = 32)
+        var latestTree: UiNodeTree? = null
+        val uiJob = launch { plugin.openUiSession(sessionCtx, events).collect { latestTree = it } }
+        advanceUntilIdle()
+
+        // Orphan should already be pruned cleanly on session start
+        assertFalse(pluginFs.exists(relPath("chapters/ch_set/stale.png")))
+
+        // Navigate to settings view and click Prune Cache button
+        events.emit(UiEvent.Click(Ids.NAV_VIEWS, Ids.ACT_VIEW + MainView.SETTINGS.key))
+        advanceUntilIdle()
+        assertNotNull(latestTree!!.findById(Ids.SETTING_PREFIX + SettingKeys.MAX_CACHE_MB) as? TextInputNode)
+        assertNotNull(latestTree!!.findById("btn_prune_cache") as? ButtonNode)
+
+        pluginFs.writeFile(relPath("chapters/ch_set/another.png"), ByteArray(32) { 5 })
+        events.emit(UiEvent.Click("btn_prune_cache", Ids.ACT_PRUNE_CACHE))
+        advanceUntilIdle()
+
+        assertFalse(pluginFs.exists(relPath("chapters/ch_set/another.png")))
+        assertTrue(base.toasts.last().contains("removed 1 orphan"))
+        uiJob.cancel()
     }
 }

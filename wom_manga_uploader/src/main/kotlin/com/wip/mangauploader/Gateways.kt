@@ -14,26 +14,64 @@ object SystemClock : Clock {
     override fun nowNanos(): Long = System.nanoTime()
 }
 
+/** Snapshot of bytes/timing observed by a [BandwidthThrottle]. */
+data class ThrottleStats(
+    val bytes: Long,
+    val limitKbps: Int,
+    val waitedMs: Long,
+    val elapsedMs: Long,
+    val effectiveKbps: Double
+)
+
 /**
- * Limits throughput to `kbps` KB/s (0 = unlimited) by delaying callers.
- * [limitProvider] is evaluated on every call so setting changes apply to running jobs.
+ * Thread-safe leaky-bucket rate limiter targeting `kbps` KB/s (`0` = unlimited).
+ * [limitProvider] is evaluated on every call so setting changes apply to running jobs immediately.
  */
 class BandwidthThrottle(
     private val limitProvider: () -> Int,
     private val clock: Clock = SystemClock,
     private val sleeper: suspend (Long) -> Unit = { delay(it) }
 ) {
+    private val lock = Any()
     private var nextFreeNanos: Long = 0L
+    private var firstAcquireNanos: Long? = null
+    private var totalBytes: Long = 0L
+    private var totalWaitedMs: Long = 0L
 
     suspend fun acquire(bytes: Int) {
+        if (bytes <= 0) return
         val kbps = limitProvider()
-        if (kbps <= 0 || bytes <= 0) return
+        val waitMs = synchronized(lock) {
+            val now = clock.nowNanos()
+            if (firstAcquireNanos == null) firstAcquireNanos = now
+            totalBytes += bytes.toLong()
+            if (kbps <= 0) {
+                0L
+            } else {
+                val start = maxOf(now, nextFreeNanos)
+                val cost = bytes.toLong() * 1_000_000_000L / (kbps.toLong() * 1024L)
+                nextFreeNanos = start + cost
+                val delayMs = (start - now) / 1_000_000L
+                if (delayMs > 0L) totalWaitedMs += delayMs
+                delayMs
+            }
+        }
+        if (waitMs > 0L) sleeper(waitMs)
+    }
+
+    fun stats(): ThrottleStats = synchronized(lock) {
         val now = clock.nowNanos()
-        val start = maxOf(now, nextFreeNanos)
-        val cost = bytes.toLong() * 1_000_000_000L / (kbps.toLong() * 1024L)
-        nextFreeNanos = start + cost
-        val waitMs = (start - now) / 1_000_000L
-        if (waitMs > 0) sleeper(waitMs)
+        val elapsedMs = firstAcquireNanos?.let { ((now - it) / 1_000_000L).coerceAtLeast(0L) } ?: 0L
+        val effectiveKbps = if (elapsedMs > 0L && totalBytes > 0L) {
+            (totalBytes / 1024.0) / (elapsedMs / 1000.0)
+        } else 0.0
+        ThrottleStats(
+            bytes = totalBytes,
+            limitKbps = limitProvider().coerceAtLeast(0),
+            waitedMs = totalWaitedMs,
+            elapsedMs = elapsedMs,
+            effectiveKbps = effectiveKbps
+        )
     }
 }
 
@@ -69,6 +107,7 @@ interface RepoFiles {
 /** Remote Aruba storage (SFTP/FTP). Paths are absolute remote paths. */
 interface ArubaStorage : AutoCloseable {
     suspend fun upload(remotePath: String, bytes: ByteArray)
+    suspend fun rename(fromPath: String, toPath: String)
     suspend fun delete(remotePath: String)
     suspend fun listNames(remoteDir: String): List<String>
 
@@ -328,6 +367,9 @@ class ThrottledStorage(private val delegate: ArubaStorage, private val throttle:
         delegate.upload(remotePath, bytes)
     }
 
+    fun stats(): ThrottleStats = throttle.stats()
+
+    override suspend fun rename(fromPath: String, toPath: String) = delegate.rename(fromPath, toPath)
     override suspend fun delete(remotePath: String) = delegate.delete(remotePath)
     override suspend fun listNames(remoteDir: String) = delegate.listNames(remoteDir)
     override suspend fun listDirectoryNames(remoteDir: String) = delegate.listDirectoryNames(remoteDir)

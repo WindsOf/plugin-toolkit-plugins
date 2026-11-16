@@ -59,7 +59,31 @@ data class MdUploadSession(
     val isCommitted: Boolean = false,
     val isProcessed: Boolean = false,
     val isDeleted: Boolean = false,
-    val createdAt: String? = null
+    val createdAt: String? = null,
+    val updatedAt: String? = null
+) {
+    /** Most recent session activity timestamp (prefers [updatedAt], falls back to [createdAt]). */
+    val lastActivityEpochSec: Long?
+        get() = listOfNotNull(updatedAt, createdAt)
+            .mapNotNull { raw -> runCatching { OffsetDateTime.parse(raw.trim()).toEpochSecond() }.getOrNull() }
+            .maxOrNull()
+
+    /** Age in seconds relative to [nowEpochSec], or `null` when timestamps are unavailable/unparseable. */
+    fun ageSeconds(nowEpochSec: Long): Long? =
+        lastActivityEpochSec?.let { (nowEpochSec - it).coerceAtLeast(0L) }
+}
+
+/** One file entry pre-populated inside a MangaDex edit upload session. */
+data class MdSessionFileInfo(
+    val id: String,
+    val originalFileName: String? = null,
+    val fileHash: String? = null
+)
+
+/** Active MangaDex chapter-edit session together with its pre-existing session file entries. */
+data class MdEditSession(
+    val sessionId: String,
+    val prefilledFiles: List<MdSessionFileInfo> = emptyList()
 )
 
 class MangaDexException(val statusCode: Int, message: String) : RuntimeException(message)
@@ -90,6 +114,8 @@ interface MangaDexApi {
 
     suspend fun beginUpload(accessToken: String, mangaId: String, groupId: String): String
     suspend fun beginEdit(accessToken: String, chapterId: String, version: Int): String
+    suspend fun beginEditSession(accessToken: String, chapterId: String, version: Int): MdEditSession =
+        MdEditSession(beginEdit(accessToken, chapterId, version))
     suspend fun updateChapterMetadata(accessToken: String, chapterId: String, version: Int, draft: MdChapterDraft): MdChapter =
         throw UnsupportedOperationException("Metadata-only chapter update not implemented")
     suspend fun uploadPages(accessToken: String, sessionId: String, files: List<MdUploadFile>): List<String>
@@ -274,7 +300,8 @@ class HttpMangaDexApi(
             isCommitted = attrs.bool("isCommitted"),
             isProcessed = attrs.bool("isProcessed"),
             isDeleted = attrs.bool("isDeleted"),
-            createdAt = attrs.str("createdAt")
+            createdAt = attrs.str("createdAt"),
+            updatedAt = attrs.str("updatedAt")
         )
     }
 
@@ -290,9 +317,22 @@ class HttpMangaDexApi(
         return beginSession("$api/upload/begin", accessToken, body)
     }
 
-    override suspend fun beginEdit(accessToken: String, chapterId: String, version: Int): String {
-        val body = buildJsonObject { put("version", version) }
-        return beginSession("$api/upload/begin/$chapterId", accessToken, body)
+    override suspend fun beginEdit(accessToken: String, chapterId: String, version: Int): String =
+        beginEditSession(accessToken, chapterId, version).sessionId
+
+    override suspend fun beginEditSession(accessToken: String, chapterId: String, version: Int): MdEditSession {
+        suspend fun openEdit(ver: Int): MdEditSession {
+            val body = buildJsonObject { put("version", ver) }
+            return parseEditSession(send(post("$api/upload/begin/$chapterId", accessToken, body)))
+        }
+        return try {
+            openEdit(version)
+        } catch (e: MangaDexException) {
+            if (e.statusCode != 409) throw e
+            val latest = parse(send(get("$api/chapter/$chapterId", accessToken)))["data"]?.jsonObject ?: throw e
+            val latestVer = latest["attributes"]?.jsonObject?.get("version")?.jsonPrimitive?.intOrNull ?: throw e
+            openEdit(latestVer)
+        }
     }
 
     override suspend fun updateChapterMetadata(
@@ -345,13 +385,72 @@ class HttpMangaDexApi(
                 timeoutMs = 120_000L
             )
         )
-        val data = parse(response)["data"]?.jsonArray ?: throw MangaDexException(response.statusCode, "No upload data")
-        // MangaDex answers in arbitrary order: map back to input order by original file name.
-        val byName = data.associate {
-            val o = it.jsonObject
-            o["attributes"]!!.jsonObject.str("originalFileName").orEmpty() to o.str("id").orEmpty()
+        val json = parse(response)
+        val serverErrors = json["errors"]?.jsonArray.orEmpty().mapNotNull { errEl ->
+            val errObj = errEl as? JsonObject ?: return@mapNotNull null
+            val detail = errObj.str("detail")?.trim().orEmpty()
+            val title = errObj.str("title")?.trim().orEmpty()
+            val status = errObj["status"]?.jsonPrimitive?.intOrNull
+            listOfNotNull(
+                status?.let { "HTTP $it" },
+                title.ifBlank { null },
+                detail.ifBlank { null }
+            ).joinToString(": ").ifBlank { null }
         }
-        return files.map { byName[it.fileName] ?: throw MangaDexException(0, "Upload of ${it.fileName} was not acknowledged") }
+        val data = json["data"]?.jsonArray
+        if (data == null || (data.isEmpty() && serverErrors.isNotEmpty())) {
+            val detail = if (serverErrors.isNotEmpty()) serverErrors.joinToString("; ") else "No upload data"
+            throw MangaDexException(response.statusCode, "MangaDex upload batch rejected: $detail")
+        }
+        val acks = data.mapNotNull { el ->
+            val o = el as? JsonObject ?: return@mapNotNull null
+            val id = o.str("id")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val origName = o["attributes"]?.jsonObject?.str("originalFileName").orEmpty()
+            id to origName
+        }
+        if (serverErrors.isNotEmpty() && acks.size < files.size) {
+            throw MangaDexException(
+                response.statusCode,
+                "MangaDex upload errors: ${serverErrors.joinToString("; ")}"
+            )
+        }
+        val remaining = acks.toMutableList()
+        fun consumeMatch(predicate: (String) -> Boolean): String? {
+            val idx = remaining.indexOfFirst { predicate(it.second) }
+            return if (idx >= 0) remaining.removeAt(idx).first else null
+        }
+        val resultIds = arrayOfNulls<String>(files.size)
+        // Pass 1: exact originalFileName match.
+        files.forEachIndexed { idx, file ->
+            resultIds[idx] = consumeMatch { it == file.fileName }
+        }
+        // Pass 2: case-insensitive / stripped-path match.
+        fun normName(name: String): String = name.substringAfterLast('/').substringAfterLast('\\').trim().lowercase()
+        files.forEachIndexed { idx, file ->
+            if (resultIds[idx] == null) {
+                val target = normName(file.fileName)
+                resultIds[idx] = consumeMatch { normName(it) == target }
+            }
+        }
+        // Pass 3: positional fallback when server reported no errors and every uploaded file has an ID.
+        val missingIndices = files.indices.filter { resultIds[it] == null }
+        if (missingIndices.isNotEmpty() && serverErrors.isEmpty() && remaining.size == missingIndices.size) {
+            logger?.warn(
+                "MangaDex uploadPages returned ${remaining.size} filename(s) differing from input " +
+                    "(${remaining.joinToString { it.second }}); matching positionally"
+            )
+            missingIndices.forEach { idx ->
+                resultIds[idx] = remaining.removeAt(0).first
+            }
+        }
+        return files.mapIndexed { idx, file ->
+            resultIds[idx] ?: run {
+                val errHint = if (serverErrors.isNotEmpty()) " (errors: ${serverErrors.joinToString("; ")})" else ""
+                val ackNames = acks.mapNotNull { it.second.ifBlank { null } }
+                val ackHint = if (ackNames.isNotEmpty()) " [acknowledged: ${ackNames.joinToString()}]" else ""
+                throw MangaDexException(0, "Upload of ${file.fileName} was not acknowledged$errHint$ackHint")
+            }
+        }
     }
 
     override suspend fun commit(accessToken: String, sessionId: String, draft: MdChapterDraft, pageOrder: List<String>): MdChapter {
@@ -378,6 +477,37 @@ class HttpMangaDexApi(
 
     private fun sessionId(response: HttpResponse): String =
         parse(response)["data"]?.jsonObject?.str("id") ?: throw MangaDexException(response.statusCode, "No upload session id")
+
+    private fun parseEditSession(response: HttpResponse): MdEditSession {
+        val root = parse(response)
+        val data = root["data"]?.jsonObject ?: throw MangaDexException(response.statusCode, "No upload session id")
+        val id = data.str("id") ?: throw MangaDexException(response.statusCode, "No upload session id")
+        val includedAttrs = (root["included"] as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+            ?.filter { it.str("type") == "upload_session_file" }
+            ?.mapNotNull { item ->
+                val fileId = item.str("id") ?: return@mapNotNull null
+                val attrs = item["attributes"]?.jsonObject
+                fileId to (attrs?.str("originalFileName") to (attrs?.str("fileHash") ?: attrs?.str("hash")))
+            }
+            ?.toMap()
+            .orEmpty()
+        val prefilled = (data["relationships"] as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+            ?.filter { it.str("type") == "upload_session_file" }
+            ?.mapNotNull { rel ->
+                val fileId = rel.str("id") ?: return@mapNotNull null
+                val attrs = rel["attributes"]?.jsonObject
+                val inc = includedAttrs[fileId]
+                MdSessionFileInfo(
+                    id = fileId,
+                    originalFileName = attrs?.str("originalFileName") ?: inc?.first,
+                    fileHash = attrs?.str("fileHash") ?: attrs?.str("hash") ?: inc?.second
+                )
+            }
+            .orEmpty()
+        return MdEditSession(sessionId = id, prefilledFiles = prefilled)
+    }
 
     private fun parseChapter(obj: JsonObject): MdChapter {
         val attrs = obj["attributes"]?.jsonObject ?: JsonObject(emptyMap())
