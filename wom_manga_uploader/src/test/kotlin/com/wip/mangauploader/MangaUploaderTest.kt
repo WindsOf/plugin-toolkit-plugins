@@ -1364,8 +1364,11 @@ class MangaUploaderTest {
     // ─────────────────── v1.0.3 Tests ───────────────────
 
     @Test
-    fun `plugin version is bumped to 1_0_8`() {
-        assertEquals("1.0.8", MangaUploaderPluginManifest.manifest.plugin.version)
+    fun `plugin version is bumped to 1_0_9 and publishToMangaDex enforces single concurrent execution`() {
+        val manifest = MangaUploaderPluginManifest.manifest
+        assertEquals("1.0.9", manifest.plugin.version)
+        val mdCap = manifest.capabilities.first { it.name == "publishToMangaDex" }
+        assertEquals(1, mdCap.maxConcurrentExecutions)
     }
 
     @Test
@@ -2260,10 +2263,23 @@ class MangaUploaderTest {
         assertEquals(1, services.mangadex.maxObservedConcurrentUploads)
         assertEquals(2, services.mangadex.committedDrafts.size)
 
-        // UI session prevents starting another MangaDex upload operation while one is already active
+        // UI session prevents duplicate same-chapter MangaDex upload while allowing queueing other chapters
         val plugin = MangaUploaderPlugin(MangaUploaderSettings())
         val sessionCtx = FakeSessionContext(entry = MangaUploaderPluginPluginEntry(plugin), scope = this, base = base)
         sessionCtx.locksState.value = mapOf(LockKeys.STAGE1 to true, LockKeys.STAGE2 to true, LockKeys.CUBARI to true, LockKeys.ARUBA to true, LockKeys.MANGADEX to true, LockKeys.SYNC to true)
+        PersistedJobStore(base.storage).upsert(
+            snapshot = CapabilityJobSnapshot(
+                jobId = "active_md_1",
+                capabilityName = "publishToMangaDex",
+                status = CapabilityJobStatus.RUNNING,
+                primaryProgress = ProgressData.ratio(2048.0, 4096.0, "KB", "MangaDex Ch. 1: 1/2"),
+                secondaryProgress = ProgressData.ratio(1.0, 2.0, "pages", "Pages 1/2"),
+                startedAtEpochMs = 1_700_000_000_000L - 10_000L
+            ),
+            displayTitle = "MangaDex · Concurrent Guard Ch. 1",
+            targetSeriesId = "sr_conc",
+            targetChapterId = "ch_a"
+        )
         sessionCtx.jobsState.value = listOf(
             CapabilityJobSnapshot(
                 jobId = "active_md_1",
@@ -2285,15 +2301,29 @@ class MangaUploaderTest {
         val navViews = latestTree!!.findById(Ids.NAV_VIEWS) as ButtonGroupNode
         val queueNavItem = navViews.items.first { it.key == MainView.QUEUE.key }
         assertEquals("Queue (1)", queueNavItem.label)
-        assertTrue(queueNavItem.tooltip.orEmpty().contains("publishToMangaDex"))
-        val pushMdBtn = latestTree!!.findById("btn_push_mangadex") as ButtonNode
-        assertFalse(pushMdBtn.modifier.enabled)
+        assertTrue(queueNavItem.tooltip.orEmpty().contains("Concurrent Guard"))
 
+        // Select ch_a (the already-running chapter): button is disabled and duplicate click is ignored
+        events.emit(UiEvent.Click("ch_row_ch_a", Ids.ACT_OPEN_CHAPTER + "ch_a"))
+        advanceUntilIdle()
+        val pushMdBtnSame = latestTree!!.findById("btn_push_mangadex") as ButtonNode
+        assertFalse(pushMdBtnSame.modifier.enabled)
         val beforeLaunches = sessionCtx.launchedCapabilities.size
         events.emit(UiEvent.Click("btn_push_mangadex", Ids.ACT_CH_PUSH_MANGADEX))
         advanceUntilIdle()
         assertEquals(beforeLaunches, sessionCtx.launchedCapabilities.size)
-        assertTrue(base.toasts.any { "already running or queued" in it })
+        assertTrue(base.toasts.any { "already queued or uploading" in it })
+
+        // Switch to ch_b (different chapter): button IS enabled and queues ch_b onto MangaDex
+        events.emit(UiEvent.Click("ch_row_ch_b", Ids.ACT_OPEN_CHAPTER + "ch_b"))
+        advanceUntilIdle()
+        val pushMdBtnOther = latestTree!!.findById("btn_push_mangadex") as ButtonNode
+        assertTrue(pushMdBtnOther.modifier.enabled)
+        assertTrue("Queue Ch. -> MD" in pushMdBtnOther.label)
+        events.emit(UiEvent.Click("btn_push_mangadex", Ids.ACT_CH_PUSH_MANGADEX))
+        advanceUntilIdle()
+        assertEquals("publishToMangaDex", sessionCtx.launchedCapabilities.last().second)
+        assertEquals("ch_b", sessionCtx.launchedCapabilities.last().third["chapterId"]?.jsonPrimitive?.content)
 
         // Verify Queue view renders primary + secondary progress bars & tooltips on job actions
         events.emit(UiEvent.Click(Ids.NAV_VIEWS, Ids.ACT_VIEW + MainView.QUEUE.key))
@@ -2556,7 +2586,12 @@ class MangaUploaderTest {
                 startedAtEpochMs = 1_700_000_000_500L
             )
         )
-        PersistedJobStore(sharedStorage).upsert(survivingFlow.value)
+        PersistedJobStore(sharedStorage).upsert(
+            snapshot = survivingFlow.value,
+            displayTitle = "MangaDex · Persistent Ch. 1",
+            targetSeriesId = "sr_p",
+            targetChapterId = "ch_p"
+        )
 
         // Open Session 2: fresh empty capabilityJobs on UiSessionContext, only observeCapabilityJob("job_surviving") active
         val base2 = FakePluginContext(
@@ -3081,5 +3116,156 @@ class MangaUploaderTest {
         assertFalse(pluginFs.exists(relPath("chapters/ch_set/another.png")))
         assertTrue(base.toasts.last().contains("removed 1 orphan"))
         uiJob.cancel()
+    }
+
+    // ─────────────────── v1.0.9 Layout, Source-Aware Actions, Persistence & Concurrency Tests ───────────────────
+
+    @Test
+    fun `source-aware primary actions adapt to remote source, new chapter sits in chapters pane, and 2-pane mode toggles cleanly`() = runTest {
+        val sr1 = Series(id = "sr_1", title = "Series Alpha", order = 0, mangadexId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        val sr2 = Series(id = "sr_2", title = "Series Beta", order = 1)
+        val ch1 = Chapter(id = "ch_1", seriesId = "sr_1", number = "1", title = "One")
+        val ch2 = Chapter(id = "ch_2", seriesId = "sr_1", number = "2", title = "Two")
+        LibraryStore(pluginFs).mutate { it.copy(series = listOf(sr1, sr2), chapters = listOf(ch1, ch2)) }
+
+        val plugin = MangaUploaderPlugin(MangaUploaderSettings())
+        val base = FakePluginContext(fileSystem = pluginFs, initialSettings = configuredSettings())
+        val sessionCtx = FakeSessionContext(
+            entry = MangaUploaderPluginPluginEntry(plugin),
+            scope = this,
+            base = base,
+            locksState = MutableStateFlow(plugin.checkLocks(base))
+        )
+        val events = MutableSharedFlow<UiEvent>(extraBufferCapacity = 32)
+        var latestTree: UiNodeTree? = null
+        val job = launch { plugin.openUiSession(sessionCtx, events).collect { latestTree = it } }
+        advanceUntilIdle()
+
+        // + New Chapter lives inside Chapters pane (NOT TopBar)
+        val topBar = latestTree!!.findById("top_bar")!!
+        val chaptersCol = latestTree!!.findById("col_chapters")!!
+        assertNull(topBar.findNodeById("btn_new_chapter"))
+        assertNotNull(chaptersCol.findNodeById("btn_new_chapter"))
+
+        // Remote Source = Cubari -> Push Ch. -> Cubari is primary, Push Ch. -> MD is tonal
+        assertTrue((latestTree!!.findById("btn_push_cubari") as ButtonNode).isPrimary)
+        assertFalse((latestTree!!.findById("btn_push_mangadex") as ButtonNode).isPrimary)
+
+        // Switch Remote Source -> MangaDex -> Push Ch. -> MD becomes primary!
+        events.emit(UiEvent.OptionSelected(Ids.REMOTE_SOURCE, UploaderWorkers.SOURCE_MANGADEX))
+        advanceUntilIdle()
+        assertTrue((latestTree!!.findById("btn_push_mangadex") as ButtonNode).isPrimary)
+        assertFalse((latestTree!!.findById("btn_push_cubari") as ButtonNode).isPrimary)
+
+        // Toggle 2-Pane Mode
+        events.emit(UiEvent.Click("btn_toggle_layout", Ids.ACT_TOGGLE_LAYOUT))
+        advanceUntilIdle()
+        assertNotNull(latestTree!!.findById("ws_split_two_pane"))
+        assertNull(latestTree!!.findById("ws_split_outer"))
+        assertNotNull(latestTree!!.findById("col_chapters"))
+
+        // Switch to Series tab inside 2-Pane Left Navigator, select Series Beta -> auto-switches to Chapters
+        events.emit(UiEvent.Click("two_pane_tabs", Ids.ACT_TWO_PANE_TAB + TwoPaneLeftTab.SERIES.key))
+        advanceUntilIdle()
+        assertNotNull(latestTree!!.findById("col_series"))
+        events.emit(UiEvent.Click("series_sr_2", Ids.ACT_SELECT_SERIES + "sr_2"))
+        advanceUntilIdle()
+        assertNotNull(latestTree!!.findById("col_chapters"))
+
+        // Delete local chapter draft removes ch_2 after confirmation
+        events.emit(UiEvent.Click("two_pane_tabs", Ids.ACT_TWO_PANE_TAB + TwoPaneLeftTab.SERIES.key))
+        events.emit(UiEvent.Click("series_sr_1", Ids.ACT_SELECT_SERIES + "sr_1"))
+        advanceUntilIdle()
+        events.emit(UiEvent.Click("btn_delete_chapter_draft", Ids.ACT_CH_DELETE_DRAFT))
+        advanceUntilIdle()
+        assertNotNull(latestTree!!.findById(Ids.DLG_CONFIRM))
+        events.emit(UiEvent.DialogAction(Ids.DLG_CONFIRM, isConfirmed = true))
+        advanceUntilIdle()
+        assertEquals(1, LibraryStore(pluginFs).load().chaptersOf("sr_1").size)
+
+        job.cancel()
+    }
+
+    @Test
+    fun `closing GUI preserves search filters layout mode dirty drafts and worker-completed job history`() = runTest {
+        val sr1 = Series(id = "sr_1", title = "Obsidian", order = 0, cubariSlug = "obsidian")
+        val sr2 = Series(id = "sr_2", title = "Crimson", order = 1, cubariSlug = "crimson")
+        val ch1 = Chapter(id = "ch_1", seriesId = "sr_1", number = "1", title = "Initial Title")
+        val ch2 = Chapter(
+            id = "ch_2", seriesId = "sr_1", number = "2", title = "Two",
+            pages = listOf(PageRef("pg1", "chapters/ch_2/1.png", "1.png"))
+        )
+        pluginFs.writeFile(relPath("chapters/ch_2/1.png"), "img".encodeToByteArray())
+        LibraryStore(pluginFs).mutate { it.copy(series = listOf(sr1, sr2), chapters = listOf(ch1, ch2)) }
+
+        val sharedStorage = FakeStorage()
+        val plugin = MangaUploaderPlugin(MangaUploaderSettings())
+        val base1 = FakePluginContext(fileSystem = pluginFs, storage = sharedStorage, initialSettings = configuredSettings())
+        val session1 = FakeSessionContext(
+            entry = MangaUploaderPluginPluginEntry(plugin),
+            scope = this,
+            base = base1,
+            locksState = MutableStateFlow(plugin.checkLocks(base1))
+        )
+        val events1 = MutableSharedFlow<UiEvent>(extraBufferCapacity = 32)
+        val ui1 = launch { runMangaUploaderSession(session1, events1, services, reattachTimeoutMs = 25L).collect {} }
+        advanceUntilIdle()
+
+        // Edit ch_2 title WITHOUT clicking Save, then switch to ch_1 -> dirty draft must auto-save!
+        events1.emit(UiEvent.Click("ch_ch_2", Ids.ACT_OPEN_CHAPTER + "ch_2"))
+        events1.emit(UiEvent.TextChanged(Ids.CH_TITLE, "AutoSaved Title"))
+        events1.emit(UiEvent.Click("ch_ch_1", Ids.ACT_OPEN_CHAPTER + "ch_1"))
+        advanceUntilIdle()
+        assertEquals("AutoSaved Title", LibraryStore(pluginFs).load().chapterById("ch_2")!!.title)
+
+        // Set search, filters, 2-pane layout, and launch a background job
+        events1.emit(UiEvent.TextChanged(Ids.SERIES_SEARCH, "Obs"))
+        events1.emit(UiEvent.TextChanged(Ids.CHAPTER_SEARCH, "2"))
+        events1.emit(UiEvent.Click("btn_toggle_layout", Ids.ACT_TOGGLE_LAYOUT))
+        advanceUntilIdle()
+
+        PersistedJobStore(sharedStorage).upsert(
+            snapshot = CapabilityJobSnapshot("job_bg_1", "publishToArubaAndCubari", CapabilityJobStatus.QUEUED),
+            fallbackStartedMs = 1_700_000_000_000L,
+            displayTitle = "Cubari · Obsidian Ch. 2",
+            targetSeriesId = "sr_1",
+            targetChapterId = "ch_2"
+        )
+
+        // Close GUI session 1
+        ui1.cancel()
+
+        // Worker runs and finishes while GUI is closed (updates PersistedJobStore directly)
+        val bgCtx = FakePluginContext(fileSystem = pluginFs, storage = sharedStorage, initialSettings = configuredSettings())
+        val res = UploaderWorkers(bgCtx, services).publishToArubaAndCubari("sr_1", "ch_2", UploaderWorkers.OP_PUBLISH, null)
+        assertTrue(res is ExecutionResult.Success)
+
+        // Reopen GUI session 2 (empty live host capabilityJobs): restored search, 2-pane layout, and completed job!
+        val base2 = FakePluginContext(fileSystem = pluginFs, storage = sharedStorage, initialSettings = configuredSettings())
+        val session2 = FakeSessionContext(
+            entry = MangaUploaderPluginPluginEntry(plugin),
+            scope = this,
+            base = base2,
+            locksState = MutableStateFlow(plugin.checkLocks(base2))
+        )
+        val events2 = MutableSharedFlow<UiEvent>(extraBufferCapacity = 32)
+        var tree2: UiNodeTree? = null
+        val ui2 = launch { runMangaUploaderSession(session2, events2, services, reattachTimeoutMs = 25L).collect { tree2 = it } }
+        advanceUntilIdle()
+
+        assertNotNull(tree2!!.findById("ws_split_two_pane"))
+        assertEquals("2", (tree2!!.findById(Ids.CHAPTER_SEARCH) as TextInputNode).text)
+        events2.emit(UiEvent.Click("two_pane_tabs", Ids.ACT_TWO_PANE_TAB + TwoPaneLeftTab.SERIES.key))
+        advanceUntilIdle()
+        assertEquals("Obs", (tree2!!.findById(Ids.SERIES_SEARCH) as TextInputNode).text)
+
+        // Finished background job is preserved in Queue with its human-readable title!
+        events2.emit(UiEvent.Click(Ids.NAV_VIEWS, Ids.ACT_VIEW + MainView.QUEUE.key))
+        advanceUntilIdle()
+        val jobNameNode = tree2!!.findById("job_job_bg_1_name") as? TextNode
+        assertNotNull(jobNameNode)
+        assertTrue("Cubari · Obsidian Ch. 2" in jobNameNode.text)
+
+        ui2.cancel()
     }
 }

@@ -51,7 +51,45 @@ enum class ChapterFilter(val key: String, val label: String) {
 
 enum class InspectorMode { CHAPTER, SERIES_EDIT }
 
-enum class ConfirmKind { REMOVE_CUBARI, DELETE_SERIES, PUSH_DURING_HOLD, LOAD_REMOTE_PAGES, BACKFILL_ALL_MISSING, RESTORE_GIT, FORCE_CANCEL_MD_SESSION, REVERT_LOCAL_CHAPTER, REVERT_LOCAL_SERIES }
+enum class WorkspaceLayoutMode(val key: String, val label: String) {
+    THREE_PANE("three_pane", "3-Pane"),
+    TWO_PANE("two_pane", "2-Pane");
+
+    companion object {
+        fun fromKey(key: String?): WorkspaceLayoutMode =
+            entries.firstOrNull { it.key == key } ?: THREE_PANE
+    }
+}
+
+enum class TwoPaneLeftTab(val key: String, val label: String) {
+    SERIES("series", "Series"),
+    CHAPTERS("chapters", "Chapters");
+
+    companion object {
+        fun fromKey(key: String?): TwoPaneLeftTab =
+            entries.firstOrNull { it.key == key } ?: CHAPTERS
+    }
+}
+
+enum class ConfirmKind {
+    REMOVE_CUBARI,
+    DELETE_CHAPTER_DRAFT,
+    DELETE_SERIES,
+    PUSH_DURING_HOLD,
+    LOAD_REMOTE_PAGES,
+    BACKFILL_ALL_MISSING,
+    RESTORE_GIT,
+    FORCE_CANCEL_MD_SESSION,
+    REVERT_LOCAL_CHAPTER,
+    REVERT_LOCAL_SERIES
+}
+
+/** Human-readable target metadata for a launched or persisted capability job. */
+data class JobTarget(
+    val displayTitle: String = "",
+    val seriesId: String? = null,
+    val chapterId: String? = null
+)
 
 /** Pending modal confirmation (rendered as `DialogNode`). */
 data class Confirm(
@@ -84,6 +122,8 @@ data class SeriesDraft(
 /** Complete local UI state of the interactive session. */
 data class UiState(
     val view: MainView = MainView.WORKSPACE,
+    val layoutMode: WorkspaceLayoutMode = WorkspaceLayoutMode.THREE_PANE,
+    val twoPaneLeftTab: TwoPaneLeftTab = TwoPaneLeftTab.CHAPTERS,
     val loaded: Boolean = false,
     val library: Library = Library(),
     val arubaFolders: List<String> = emptyList(),
@@ -105,6 +145,7 @@ data class UiState(
     val previewRemoteLabel: String? = null,
     val remoteSourceByChapter: Map<String, String> = emptyMap(),
     val remotePages: Map<String, RemoteChapterPages> = emptyMap(),
+    val jobTargets: Map<String, JobTarget> = emptyMap(),
     val confirm: Confirm? = null,
     val focusedCard: String? = null,
     val settingsRevision: Int = 0,
@@ -210,7 +251,8 @@ object UiSelectors {
     /** Picks the default source (`cubari` or `mangadex`) for inspecting/loading uploaded images. */
     fun defaultRemoteSource(chapter: Chapter?, series: Series?): String = when {
         chapter?.isOnCubari == true -> UploaderWorkers.SOURCE_CUBARI
-        chapter?.isOnMangaDex == true || !series?.mangadexId.isNullOrBlank() -> UploaderWorkers.SOURCE_MANGADEX
+        chapter?.isOnMangaDex == true -> UploaderWorkers.SOURCE_MANGADEX
+        chapter == null && !series?.mangadexId.isNullOrBlank() -> UploaderWorkers.SOURCE_MANGADEX
         else -> UploaderWorkers.SOURCE_CUBARI
     }
 

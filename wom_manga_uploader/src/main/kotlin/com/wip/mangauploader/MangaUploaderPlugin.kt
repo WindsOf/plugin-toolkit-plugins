@@ -156,7 +156,7 @@ data class MangaUploaderSettings(
 @PluginInfo(
     id = "com.wip.mangauploader",
     name = "WOM Manga Uploader",
-    version = "1.0.8",
+    version = "1.0.9",
     description = "2-Stage Manga Uploader for Stage 1 (Aruba FTP/SFTP + GitHub Cubari JSON + Cubari.moe) and Stage 2 (MangaDex) with missing-chapter backfill.",
     supportedOs = [OS.WINDOWS, OS.LINUX, OS.MACOS]
 )
@@ -328,7 +328,8 @@ class MangaUploaderPlugin(val settings: MangaUploaderSettings) : InteractiveUiPr
     @Capability(
         name = "publishToMangaDex",
         description = "Uploads or updates a chapter on MangaDex with scanlation group association and upload rate limiting.",
-        supportsPause = true
+        supportsPause = true,
+        maxConcurrentExecutions = 1
     )
     @RequiresLock([LockKeys.STAGE2])
     suspend fun publishToMangaDex(

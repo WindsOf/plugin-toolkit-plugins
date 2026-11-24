@@ -5,6 +5,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
@@ -41,6 +44,7 @@ internal fun runMangaUploaderSession(
     val remotePagesStore = RemotePagesStore(context.storage)
     val arubaFoldersStore = ArubaFoldersStore(context.storage)
     val persistedJobStore = PersistedJobStore(context.storage)
+    val uiStateStore = UiSessionStateStore(context.storage)
     val importer = PageImporter(context.fileSystem, context.hostFileSystem, context.logger)
     val stateFlow = MutableStateFlow(UiState())
     val historicalJobsState = MutableStateFlow<Map<String, CapabilityJobSnapshot>>(emptyMap())
@@ -66,7 +70,10 @@ internal fun runMangaUploaderSession(
     suspend fun launchTrackedCapability(
         capabilityName: String,
         parameters: Map<String, JsonElement>,
-        runInBackgroundQueue: Boolean = true
+        runInBackgroundQueue: Boolean = true,
+        displayTitle: String? = null,
+        targetSeriesId: String? = null,
+        targetChapterId: String? = null
     ): String {
         val startedMs = services.clock.nowEpochSec() * 1000L
         val jobId = context.launchCapability(
@@ -76,14 +83,28 @@ internal fun runMangaUploaderSession(
         )
         if (jobId.isNotBlank()) {
             persistedJobStore.upsert(
-                CapabilityJobSnapshot(
+                snapshot = CapabilityJobSnapshot(
                     jobId = jobId,
                     capabilityName = capabilityName,
                     status = CapabilityJobStatus.QUEUED,
                     startedAtEpochMs = startedMs
                 ),
-                fallbackStartedMs = startedMs
+                fallbackStartedMs = startedMs,
+                displayTitle = displayTitle,
+                targetSeriesId = targetSeriesId,
+                targetChapterId = targetChapterId
             )
+            if (!displayTitle.isNullOrBlank() || targetSeriesId != null || targetChapterId != null) {
+                stateFlow.update { st ->
+                    st.copy(
+                        jobTargets = st.jobTargets + (jobId to JobTarget(
+                            displayTitle = displayTitle.orEmpty(),
+                            seriesId = targetSeriesId,
+                            chapterId = targetChapterId
+                        ))
+                    )
+                }
+            }
         }
         return jobId
     }
@@ -139,17 +160,32 @@ internal fun runMangaUploaderSession(
         val diags = diagnosticsStore.loadAll()
         val remotes = remotePagesStore.loadAll()
         val folders = arubaFoldersStore.load()
+        val savedUi = if (!stateFlow.value.loaded) uiStateStore.load() else null
         stateFlow.update { st ->
+            val restoredView = savedUi?.let { MainView.fromKey(it.viewKey) } ?: st.view
+            val restoredLayout = savedUi?.let { WorkspaceLayoutMode.fromKey(it.layoutModeKey) } ?: st.layoutMode
+            val restoredTwoPaneTab = savedUi?.let { TwoPaneLeftTab.fromKey(it.twoPaneLeftTabKey) } ?: st.twoPaneLeftTab
+            val restoredSeriesSearch = savedUi?.seriesSearch ?: st.seriesSearch
+            val restoredSeriesSort = savedUi?.let { SeriesSort.fromKey(it.seriesSortKey) } ?: st.seriesSort
+            val restoredSeriesFilter = savedUi?.let { SeriesFilter.fromKey(it.seriesFilterKey) } ?: st.seriesFilter
+            val restoredChapterSearch = savedUi?.chapterSearch ?: st.chapterSearch
+            val restoredChapterFilter = savedUi?.let { ChapterFilter.fromKey(it.chapterFilterKey) } ?: st.chapterFilter
+            val restoredGridExpanded = savedUi?.gridExpanded ?: st.gridExpanded
+            val restoredRemoteMap = savedUi?.remoteSourceByChapter?.takeIf { it.isNotEmpty() } ?: st.remoteSourceByChapter
+            val restoredChecked = savedUi?.checkedChapterIds ?: st.checkedChapterIds
+
             val validSeriesIds = lib.series.map { it.id }.toSet()
             val reqSeries = (context.initialParameters["seriesId"] as? JsonPrimitive)?.content?.takeIf { !st.loaded && it in validSeriesIds }
             val reqChapter = (context.initialParameters["chapterId"] as? JsonPrimitive)?.content?.takeIf { !st.loaded && lib.chapterById(it) != null }
             val nextSeriesId = reqSeries
                 ?: reqChapter?.let { lib.chapterById(it)?.seriesId }
                 ?: st.activeSeriesId?.takeIf { it in validSeriesIds }
+                ?: savedUi?.activeSeriesId?.takeIf { !st.loaded && it in validSeriesIds }
                 ?: lib.series.sortedBy { it.order }.firstOrNull()?.id
             val seriesChapters = nextSeriesId?.let { lib.chaptersOf(it) }.orEmpty()
             val nextChapterId = reqChapter
                 ?: st.activeChapterId?.takeIf { id -> seriesChapters.any { it.id == id } }
+                ?: savedUi?.activeChapterId?.takeIf { !st.loaded && seriesChapters.any { ch -> ch.id == it } }
                 ?: seriesChapters.firstOrNull()?.id
             val nextChapter = lib.chapterById(nextChapterId)
             val prevChapter = st.library.chapterById(nextChapterId)
@@ -158,7 +194,7 @@ internal fun runMangaUploaderSession(
             val keepDirty = !(forceDraftRefresh && pagesChanged) &&
                 st.chapterDraft != null && st.chapterDraft.chapterId == nextChapterId && st.chapterDraft.dirty
             val nextDraft = if (keepDirty) st.chapterDraft else openChapterDraft(nextChapter, st.chapterDraft?.revision ?: 0)
-            val activeSource = nextChapterId?.let { st.remoteSourceByChapter[it] }
+            val activeSource = nextChapterId?.let { restoredRemoteMap[it] }
                 ?: UiSelectors.defaultRemoteSource(nextChapter, nextSeriesId?.let { lib.seriesById(it) })
             val validPageIds = UiSelectors.unifiedPages(
                 nextDraft,
@@ -167,12 +203,22 @@ internal fun runMangaUploaderSession(
                 activeSource
             ).mapTo(mutableSetOf()) { it.id }
             st.copy(
+                view = restoredView,
+                layoutMode = restoredLayout,
+                twoPaneLeftTab = restoredTwoPaneTab,
+                seriesSearch = restoredSeriesSearch,
+                seriesSort = restoredSeriesSort,
+                seriesFilter = restoredSeriesFilter,
+                chapterSearch = restoredChapterSearch,
+                chapterFilter = restoredChapterFilter,
+                gridExpanded = restoredGridExpanded,
+                remoteSourceByChapter = restoredRemoteMap,
                 loaded = true,
                 library = lib,
                 arubaFolders = folders,
                 activeSeriesId = nextSeriesId,
                 activeChapterId = nextChapterId,
-                checkedChapterIds = st.checkedChapterIds.filterTo(mutableSetOf()) { lib.chapterById(it) != null },
+                checkedChapterIds = restoredChecked.filterTo(mutableSetOf()) { lib.chapterById(it) != null },
                 chapterDraft = nextDraft,
                 selectedPageId = st.selectedPageId?.takeIf { it in validPageIds },
                 previewPageId = st.previewPageId?.takeIf { it in validPageIds },
@@ -238,6 +284,8 @@ internal fun runMangaUploaderSession(
             context.showToast("Open a chapter first")
             return
         }
+        val seriesTitle = stateFlow.value.library.seriesById(ch.seriesId)?.title.orEmpty()
+        val labelPrefix = if (pageIndex >= 0) "Page #${pageIndex + 1}" else if (mode == UploaderWorkers.MODE_LOAD) "Load Pages" else "Check Pages"
         launchTrackedCapability(
             capabilityName = "fetchChapterPages",
             parameters = mapOf(
@@ -248,7 +296,10 @@ internal fun runMangaUploaderSession(
                 "replace" to JsonPrimitive(replace),
                 "pageIndex" to JsonPrimitive(pageIndex)
             ),
-            runInBackgroundQueue = true
+            runInBackgroundQueue = true,
+            displayTitle = "$labelPrefix · ${seriesTitle.ifBlank { "Series" }} Ch. ${ch.number} (${UiSelectors.remoteSourceLabel(source)})",
+            targetSeriesId = ch.seriesId,
+            targetChapterId = ch.id
         )
         val verb = when {
             pageIndex >= 0 -> "Downloading page #${pageIndex + 1} from"
@@ -312,6 +363,7 @@ internal fun runMangaUploaderSession(
         var queued = 0
         for (id in chapterIds) {
             val ch = lib.chapterById(id) ?: continue
+            val seriesTitle = lib.seriesById(ch.seriesId)?.title.orEmpty()
             launchTrackedCapability(
                 capabilityName = "publishToArubaAndCubari",
                 parameters = mapOf(
@@ -319,7 +371,10 @@ internal fun runMangaUploaderSession(
                     "chapterId" to JsonPrimitive(ch.id),
                     "operation" to JsonPrimitive(UploaderWorkers.OP_PUBLISH)
                 ),
-                runInBackgroundQueue = true
+                runInBackgroundQueue = true,
+                displayTitle = "Cubari · ${seriesTitle.ifBlank { "Series" }} Ch. ${ch.number}",
+                targetSeriesId = ch.seriesId,
+                targetChapterId = ch.id
             )
             queued++
         }
@@ -333,12 +388,14 @@ internal fun runMangaUploaderSession(
         }
         val activeMdJobs = mergeJobs(historicalJobsState.value, reattachedJobsState.value, context.capabilityJobs.value)
             .filter { it.capabilityName == "publishToMangaDex" && !it.isTerminal }
-        if (activeMdJobs.isNotEmpty()) {
-            context.showToast("A MangaDex upload operation is already running or queued — wait for it to finish (single upload session limit)")
+        val activeMdChapterIds = activeMdJobs.mapNotNull { stateFlow.value.jobTargets[it.jobId]?.chapterId }.toSet()
+        val uniqueIds = chapterIds.distinct().filterNot { it in activeMdChapterIds }
+        if (uniqueIds.isEmpty()) {
+            if (chapterIds.isNotEmpty() && activeMdJobs.isNotEmpty()) {
+                context.showToast("Selected chapter(s) are already queued or uploading to MangaDex")
+            }
             return
         }
-        val uniqueIds = chapterIds.distinct()
-        if (uniqueIds.isEmpty()) return
         val activeId = stateFlow.value.chapterDraft?.chapterId
         if (activeId != null && activeId in uniqueIds) persistChapterDraft()
         val lib = stateFlow.value.library
@@ -373,17 +430,28 @@ internal fun runMangaUploaderSession(
         var queued = 0
         for (id in uniqueIds) {
             val ch = lib.chapterById(id) ?: continue
+            val seriesTitle = lib.seriesById(ch.seriesId)?.title.orEmpty()
             launchTrackedCapability(
                 capabilityName = "publishToMangaDex",
                 parameters = mapOf(
                     "seriesId" to JsonPrimitive(ch.seriesId),
                     "chapterId" to JsonPrimitive(ch.id)
                 ),
-                runInBackgroundQueue = true
+                runInBackgroundQueue = true,
+                displayTitle = "MangaDex · ${seriesTitle.ifBlank { "Series" }} Ch. ${ch.number}",
+                targetSeriesId = ch.seriesId,
+                targetChapterId = ch.id
             )
             queued++
         }
-        if (queued > 0) context.showToast("Job queued ($queued chapter(s) -> MangaDex)")
+        if (queued > 0) {
+            val msg = if (activeMdJobs.isNotEmpty()) {
+                "Queued $queued chapter(s) -> MangaDex (${activeMdJobs.size} active)"
+            } else {
+                "Job queued ($queued chapter(s) -> MangaDex)"
+            }
+            context.showToast(msg)
+        }
     }
 
     fun requireSeriesForMangaDexSync(): Series? {
@@ -404,6 +472,12 @@ internal fun runMangaUploaderSession(
             context.showToast("Sync locked — configure Stage 1 & MangaDex login first")
             return
         }
+        val seriesTitle = stateFlow.value.library.seriesById(seriesId)?.title.orEmpty()
+        val title = when {
+            scanOnly -> "Scan MD · ${seriesTitle.ifBlank { "Series" }}"
+            backfillAll -> "Backfill All · ${seriesTitle.ifBlank { "Series" }}"
+            else -> "Pull Ch. $chapterNumbers · ${seriesTitle.ifBlank { "Series" }}"
+        }
         launchTrackedCapability(
             capabilityName = "syncMangaDexToCubari",
             parameters = mapOf(
@@ -412,7 +486,9 @@ internal fun runMangaUploaderSession(
                 "scanOnly" to JsonPrimitive(scanOnly),
                 "backfillAll" to JsonPrimitive(backfillAll)
             ),
-            runInBackgroundQueue = true
+            runInBackgroundQueue = true,
+            displayTitle = title,
+            targetSeriesId = seriesId
         )
         val toast = when {
             scanOnly -> "Scanning MangaDex..."
@@ -537,13 +613,25 @@ internal fun runMangaUploaderSession(
                 stateFlow.update { it.copy(view = MainView.SETTINGS, focusedCard = target) }
                 context.showToast("Opened $target settings")
             }
+            action == Ids.ACT_TOGGLE_LAYOUT -> {
+                stateFlow.update { st ->
+                    val nextMode = if (st.layoutMode == WorkspaceLayoutMode.TWO_PANE) WorkspaceLayoutMode.THREE_PANE else WorkspaceLayoutMode.TWO_PANE
+                    st.copy(layoutMode = nextMode)
+                }
+            }
+            action.startsWith(Ids.ACT_TWO_PANE_TAB) -> {
+                val tab = TwoPaneLeftTab.fromKey(action.removePrefix(Ids.ACT_TWO_PANE_TAB))
+                stateFlow.update { it.copy(twoPaneLeftTab = tab) }
+            }
             action.startsWith(Ids.ACT_SELECT_SERIES) -> {
+                if (stateFlow.value.chapterDraft?.dirty == true) persistChapterDraft()
                 val seriesId = action.removePrefix(Ids.ACT_SELECT_SERIES)
                 val chapters = stateFlow.value.library.chaptersOf(seriesId)
                 val firstChapter = chapters.firstOrNull()
                 stateFlow.update {
                     it.copy(
                         activeSeriesId = seriesId,
+                        twoPaneLeftTab = TwoPaneLeftTab.CHAPTERS,
                         activeChapterId = firstChapter?.id,
                         checkedChapterIds = emptySet(),
                         inspector = InspectorMode.CHAPTER,
@@ -554,6 +642,7 @@ internal fun runMangaUploaderSession(
                 }
             }
             action.startsWith(Ids.ACT_OPEN_CHAPTER) -> {
+                if (stateFlow.value.chapterDraft?.dirty == true) persistChapterDraft()
                 val chapterId = action.removePrefix(Ids.ACT_OPEN_CHAPTER)
                 val ch = stateFlow.value.library.chapterById(chapterId) ?: return
                 stateFlow.update {
@@ -670,6 +759,7 @@ internal fun runMangaUploaderSession(
                     context.showToast("Create or select a series first")
                     return
                 }
+                if (stateFlow.value.chapterDraft?.dirty == true) persistChapterDraft()
                 val ch = Chapter(
                     id = newId("ch"),
                     seriesId = seriesId,
@@ -680,6 +770,7 @@ internal fun runMangaUploaderSession(
                 stateFlow.update {
                     it.copy(
                         view = MainView.WORKSPACE,
+                        twoPaneLeftTab = TwoPaneLeftTab.CHAPTERS,
                         library = updated,
                         activeChapterId = ch.id,
                         inspector = InspectorMode.CHAPTER,
@@ -819,6 +910,23 @@ internal fun runMangaUploaderSession(
                 }
             }
 
+            action == Ids.ACT_CH_DELETE_DRAFT -> {
+                val chId = UiSelectors.activeChapterId(stateFlow.value) ?: run {
+                    context.showToast("Open a chapter first")
+                    return
+                }
+                val ch = stateFlow.value.library.chapterById(chId) ?: return
+                stateFlow.update {
+                    it.copy(
+                        confirm = Confirm(
+                            kind = ConfirmKind.DELETE_CHAPTER_DRAFT,
+                            message = "Delete local draft Ch. ${ch.number} and its cached local page files?",
+                            chapterIds = listOf(chId)
+                        )
+                    )
+                }
+            }
+
             action == Ids.ACT_RESTORE_GIT -> {
                 if (!isUnlocked(LockKeys.CUBARI)) {
                     context.showToast("Cubari locked — configure GitHub settings first")
@@ -842,12 +950,14 @@ internal fun runMangaUploaderSession(
                 launchTrackedCapability(
                     capabilityName = "syncCubariGitRepo",
                     parameters = mapOf("push" to JsonPrimitive(false)),
-                    runInBackgroundQueue = true
+                    runInBackgroundQueue = true,
+                    displayTitle = "Resync Cubari Repository"
                 )
                 context.showToast("Repo sync job queued")
             }
 
             action == Ids.ACT_SERIES_NEW -> {
+                if (stateFlow.value.chapterDraft?.dirty == true) persistChapterDraft()
                 val draft = SeriesDraft(
                     isNew = true,
                     series = Series(id = newId("sr"), cubariSlug = ""),
@@ -857,6 +967,7 @@ internal fun runMangaUploaderSession(
             }
 
             action == Ids.ACT_SERIES_EDIT -> {
+                if (stateFlow.value.chapterDraft?.dirty == true) persistChapterDraft()
                 val series = stateFlow.value.library.seriesById(stateFlow.value.activeSeriesId) ?: return
                 val draft = SeriesDraft(
                     isNew = false,
@@ -1179,41 +1290,65 @@ internal fun runMangaUploaderSession(
         )
         reloadFromDisk()
         val saved = persistedJobStore.loadAll()
-        if (saved.isEmpty()) return@launch
-        val terminalSaved = saved.filter { it.isTerminal }
-        if (terminalSaved.isNotEmpty()) {
-            historicalJobsState.update { cur ->
-                cur + terminalSaved.associate { it.jobId to it.toSnapshot() }
+        if (saved.isNotEmpty()) {
+            val restoredTargets = saved.mapNotNull { rec ->
+                rec.toJobTarget()?.let { rec.jobId to it }
+            }.toMap()
+            if (restoredTargets.isNotEmpty()) {
+                stateFlow.update { st -> st.copy(jobTargets = restoredTargets + st.jobTargets) }
             }
-        }
-        saved.filterNot { it.isTerminal }.forEach { rec ->
-            lastJobStatuses[rec.jobId] = rec.status
-            launch {
-                if (context.capabilityJobs.value.any { it.jobId == rec.jobId }) return@launch
-                var sawAny = false
-                val collector = launch {
-                    context.observeCapabilityJob(rec.jobId).collect { snap ->
-                        if (!sawAny) {
-                            sawAny = true
-                            context.logger.info("Reattached to persisted capability job ${rec.jobId} (${rec.capabilityName}, status=${snap.status})")
+            val terminalSaved = saved.filter { it.isTerminal }
+            if (terminalSaved.isNotEmpty()) {
+                historicalJobsState.update { cur ->
+                    cur + terminalSaved.associate { it.jobId to it.toSnapshot() }
+                }
+            }
+            saved.filterNot { it.isTerminal }.forEach { rec ->
+                lastJobStatuses[rec.jobId] = rec.status
+                launch {
+                    if (context.capabilityJobs.value.any { it.jobId == rec.jobId }) return@launch
+                    var sawAny = false
+                    val collector = launch {
+                        context.observeCapabilityJob(rec.jobId).collect { snap ->
+                            if (!sawAny) {
+                                sawAny = true
+                                context.logger.info("Reattached to persisted capability job ${rec.jobId} (${rec.capabilityName}, status=${snap.status})")
+                            }
+                            reattachedJobsState.update { it + (rec.jobId to snap) }
+                            persistedJobStore.upsert(snap, fallbackStartedMs = rec.startedAtEpochMs)
+                            handleTerminalJobTransitions(listOf(snap))
                         }
-                        reattachedJobsState.update { it + (rec.jobId to snap) }
-                        persistedJobStore.upsert(snap, fallbackStartedMs = rec.startedAtEpochMs)
-                        handleTerminalJobTransitions(listOf(snap))
+                    }
+                    val deadline = launch {
+                        delay(reattachTimeoutMs)
+                        if (!sawAny) collector.cancel()
+                    }
+                    collector.join()
+                    deadline.cancel()
+                    if (!sawAny) {
+                        val latestRec = persistedJobStore.loadAll().firstOrNull { it.jobId == rec.jobId }
+                        if (latestRec != null && latestRec.isTerminal) {
+                            historicalJobsState.update { cur -> cur + (latestRec.jobId to latestRec.toSnapshot()) }
+                            reloadFromDisk(forceDraftRefresh = true)
+                        } else {
+                            context.logger.info("Skipping persisted job ${rec.jobId} (${rec.capabilityName}): no longer active on host")
+                            persistedJobStore.removeByIds(setOf(rec.jobId))
+                        }
                     }
                 }
-                val deadline = launch {
-                    delay(reattachTimeoutMs)
-                    if (!sawAny) collector.cancel()
-                }
-                collector.join()
-                deadline.cancel()
-                if (!sawAny) {
-                    context.logger.info("Skipping persisted job ${rec.jobId} (${rec.capabilityName}): no longer active on host")
-                    persistedJobStore.removeByIds(setOf(rec.jobId))
-                }
             }
         }
+    }
+
+    // Persist workspace search, filters, layout mode, and active selection across GUI close/reopen cycles.
+    launch {
+        stateFlow
+            .filter { it.loaded }
+            .map { PersistedUiState.from(it) }
+            .distinctUntilChanged()
+            .collect { persisted ->
+                uiStateStore.save(persisted)
+            }
     }
 
     // Synchronise library & persist live capability progress/status for cross-session Queue tracking.
@@ -1366,6 +1501,7 @@ internal fun runMangaUploaderSession(
 
                 is UiEvent.ShortcutTriggered -> when (event.action) {
                     Ids.ACT_SAVE_DRAFT -> persistChapterDraft(showToast = true)
+                    Ids.ACT_TOGGLE_LAYOUT -> handleAction(Ids.ACT_TOGGLE_LAYOUT)
                     Ids.ACT_DELETE_PAGE -> deleteSelectedPage()
                     Ids.ACT_DISMISS -> stateFlow.update { st ->
                         when {
@@ -1389,6 +1525,7 @@ internal fun runMangaUploaderSession(
                                     val lib = stateFlow.value.library
                                     for (id in confirm.chapterIds) {
                                         val ch = lib.chapterById(id) ?: continue
+                                        val seriesTitle = lib.seriesById(ch.seriesId)?.title.orEmpty()
                                         launchTrackedCapability(
                                             capabilityName = "publishToArubaAndCubari",
                                             parameters = mapOf(
@@ -1396,10 +1533,39 @@ internal fun runMangaUploaderSession(
                                                 "chapterId" to JsonPrimitive(ch.id),
                                                 "operation" to JsonPrimitive(UploaderWorkers.OP_REMOVE)
                                             ),
-                                            runInBackgroundQueue = true
+                                            runInBackgroundQueue = true,
+                                            displayTitle = "Remove Cubari · ${seriesTitle.ifBlank { "Series" }} Ch. ${ch.number}",
+                                            targetSeriesId = ch.seriesId,
+                                            targetChapterId = ch.id
                                         )
                                     }
                                     context.showToast("Removal job queued")
+                                }
+                                ConfirmKind.DELETE_CHAPTER_DRAFT -> {
+                                    val deleteIds = confirm.chapterIds.toSet()
+                                    val updatedLib = store.mutate { LibraryOps.deleteChapters(it, deleteIds) }
+                                    ImageCacheManager.prune(
+                                        fs = context.fileSystem,
+                                        store = store,
+                                        maxCacheMb = currentConfig().maxCacheMb,
+                                        logger = context.logger
+                                    )
+                                    stateFlow.update { st ->
+                                        val remaining = st.activeSeriesId?.let { updatedLib.chaptersOf(it) }.orEmpty()
+                                        val nextCh = st.activeChapterId
+                                            ?.takeIf { id -> id !in deleteIds }
+                                            ?.let { id -> remaining.firstOrNull { it.id == id } }
+                                            ?: remaining.firstOrNull()
+                                        st.copy(
+                                            library = updatedLib,
+                                            checkedChapterIds = st.checkedChapterIds - deleteIds,
+                                            activeChapterId = nextCh?.id,
+                                            chapterDraft = openChapterDraft(nextCh, st.chapterDraft?.revision ?: 0),
+                                            selectedPageId = nextCh?.pages?.firstOrNull()?.id,
+                                            previewPageId = null
+                                        )
+                                    }
+                                    context.showToast("Deleted local chapter draft")
                                 }
                                 ConfirmKind.DELETE_SERIES -> {
                                     val id = confirm.seriesId ?: return@collect

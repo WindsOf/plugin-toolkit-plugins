@@ -1,6 +1,7 @@
 package com.wip.mangauploader
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -9,19 +10,24 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 import org.wip.plugintoolkit.api.ExecutionResult
 import org.wip.plugintoolkit.api.PluginContext
 import org.wip.plugintoolkit.api.PluginNotificationType
 import org.wip.plugintoolkit.api.PluginResponse
 import org.wip.plugintoolkit.api.ProgressData
+import org.wip.plugintoolkit.api.sdui.CapabilityJobStatus
 import java.util.concurrent.atomic.AtomicInteger
 
 @Serializable
@@ -56,6 +62,7 @@ class UploaderWorkers(
     private val services: ServiceFactory = MangaUploaderServices.factory
 ) {
     private val store = LibraryStore(context.fileSystem, context.logger)
+    private val persistedJobs = PersistedJobStore(context.storage)
     private val gate = PauseGate(context)
     private val config: MangaUploaderConfig get() = MangaUploaderConfig.from(context.settings)
     private val clock get() = services.clock
@@ -66,14 +73,6 @@ class UploaderWorkers(
         val cfg = config
         val git = services.git(context, cfg)
         val repo = CubariRepo.create(context, cfg, git)
-        context.progress.report(ProgressData.indeterminate("Cloning / pulling Cubari repository"))
-        repo.prepare()
-        git.resolveBranch(repo.dir)?.takeIf { it.isNotBlank() && it != cfg.cubariBranch.trim() }?.let { branch ->
-            context.logger.info("Resolved Cubari repo branch '$branch' (updating setting from '${cfg.cubariBranch}')")
-            context.updateSetting(SettingKeys.CUBARI_BRANCH, branch)
-        }
-
-        val slugs = repo.listSlugs()
         val foldersStore = ArubaFoldersStore(context.storage)
         val cachedFolders = foldersStore.load()
         val liveFolders = if (cfg.arubaHost.isNotBlank() && cfg.arubaUsername.isNotBlank()) {
@@ -87,53 +86,69 @@ class UploaderWorkers(
         val prevResume = decode(resume, RepoSyncResumeState.serializer())
         val start = prevResume?.nextIndex ?: 0
         val skipped = (prevResume?.skipped ?: emptyList()).toMutableList()
-        val index = loadIndex().filterKeys { it in slugs }.toMutableMap()
-        context.logger.info("Cubari repo has ${slugs.size} series file(s); resuming at $start")
+        var index: MutableMap<String, CubariIndexEntry> = mutableMapOf()
+        var pushed = false
 
-        for (i in start until slugs.size) {
-            if (gate.pauseCheckpoint()) {
-                saveIndex(index)
-                return@guarded ExecutionResult.Paused(encode(RepoSyncResumeState(i, skipped), RepoSyncResumeState.serializer()))
+        if (cubariGitMutex.isLocked) {
+            context.progress.report(ProgressData.indeterminate("Waiting for another Cubari Git operation..."))
+        }
+        cubariGitMutex.withLock {
+            context.progress.report(ProgressData.indeterminate("Cloning / pulling Cubari repository"))
+            repo.prepare()
+            git.resolveBranch(repo.dir)?.takeIf { it.isNotBlank() && it != cfg.cubariBranch.trim() }?.let { branch ->
+                context.logger.info("Resolved Cubari repo branch '$branch' (updating setting from '${cfg.cubariBranch}')")
+                context.updateSetting(SettingKeys.CUBARI_BRANCH, branch)
             }
-            val slug = slugs[i]
-            val json = try {
-                repo.readSeries(slug)
-            } catch (e: SecurityException) {
-                // Known host RelativePath.TRAVERSAL_REGEX false positive for filenames containing '...' / '....'.
-                context.logger.error("Skipped '$slug.json': ${e.message}", e)
-                skipped += "$slug.json"
-                context.progress.report(ProgressData.ratio((i + 1).toDouble(), slugs.size.toDouble(), "series", "Skipped $slug"))
-                continue
-            }
-            if (json != null && CubariJson.looksLikeCubariSeries(json)) {
-                store.mutate {
-                    LibraryOps.mergeCubariSeries(
-                        library = it,
-                        slug = slug,
-                        json = json,
-                        group = cfg.cubariGroupName,
-                        nowEpochSec = clock.nowEpochSec(),
-                        arubaPublicBaseUrl = cfg.arubaPublicBaseUrl,
-                        availableArubaFolders = availableFolders
+
+            val slugs = repo.listSlugs()
+            index = loadIndex().filterKeys { it in slugs }.toMutableMap()
+            context.logger.info("Cubari repo has ${slugs.size} series file(s); resuming at $start")
+
+            for (i in start until slugs.size) {
+                if (gate.pauseCheckpoint()) {
+                    saveIndex(index)
+                    return@guarded ExecutionResult.Paused(encode(RepoSyncResumeState(i, skipped), RepoSyncResumeState.serializer()))
+                }
+                val slug = slugs[i]
+                val json = try {
+                    repo.readSeries(slug)
+                } catch (e: SecurityException) {
+                    // Known host RelativePath.TRAVERSAL_REGEX false positive for filenames containing '...' / '....'.
+                    context.logger.error("Skipped '$slug.json': ${e.message}", e)
+                    skipped += "$slug.json"
+                    context.progress.report(ProgressData.ratio((i + 1).toDouble(), slugs.size.toDouble(), "series", "Skipped $slug"))
+                    continue
+                }
+                if (json != null && CubariJson.looksLikeCubariSeries(json)) {
+                    store.mutate {
+                        LibraryOps.mergeCubariSeries(
+                            library = it,
+                            slug = slug,
+                            json = json,
+                            group = cfg.cubariGroupName,
+                            nowEpochSec = clock.nowEpochSec(),
+                            arubaPublicBaseUrl = cfg.arubaPublicBaseUrl,
+                            availableArubaFolders = availableFolders
+                        )
+                    }
+                    index[slug] = CubariIndexEntry(
+                        slug, CubariJson.string(json, "title") ?: slug,
+                        CubariJson.chapterKeys(json).toList(), CubariJson.lastUpdated(json)
                     )
                 }
-                index[slug] = CubariIndexEntry(
-                    slug, CubariJson.string(json, "title") ?: slug,
-                    CubariJson.chapterKeys(json).toList(), CubariJson.lastUpdated(json)
-                )
+                context.progress.report(ProgressData.ratio((i + 1).toDouble(), slugs.size.toDouble(), "series", "Read $slug"))
             }
-            context.progress.report(ProgressData.ratio((i + 1).toDouble(), slugs.size.toDouble(), "series", "Read $slug"))
-        }
-        if (availableFolders.isNotEmpty()) {
-            store.mutate { LibraryOps.applyArubaFolders(it, cfg.arubaPublicBaseUrl, availableFolders) }
-        }
-        saveIndex(index)
+            if (availableFolders.isNotEmpty()) {
+                store.mutate { LibraryOps.applyArubaFolders(it, cfg.arubaPublicBaseUrl, availableFolders) }
+            }
+            saveIndex(index)
 
-        val pushed = if (push) {
-            context.progress.report(ProgressData.indeterminate("Committing & pushing Cubari changes..."))
-            repo.commitAndPush("Sync Cubari repository")
-        } else false
-        context.progress.report(ProgressData.ratio(slugs.size.toDouble(), slugs.size.coerceAtLeast(1).toDouble(), "series", "Synced ${index.size} series"))
+            pushed = if (push) {
+                context.progress.report(ProgressData.indeterminate("Committing & pushing Cubari changes..."))
+                repo.commitAndPush("Sync Cubari repository")
+            } else false
+            context.progress.report(ProgressData.ratio(slugs.size.toDouble(), slugs.size.coerceAtLeast(1).toDouble(), "series", "Synced ${index.size} series"))
+        }
         if (skipped.isNotEmpty()) {
             context.showNotification(
                 "Cubari sync skipped ${skipped.size} file(s)",
@@ -154,20 +169,26 @@ class UploaderWorkers(
         chapterId: String,
         operation: String,
         resume: JsonElement?
-    ): ExecutionResult = guarded("publishToArubaAndCubari") {
+    ): ExecutionResult = guarded(
+        name = "publishToArubaAndCubari",
+        targetSeriesId = seriesId,
+        targetChapterId = chapterId.ifBlank { null }
+    ) {
         val cfg = config
         val library = store.load()
         val series = library.seriesById(seriesId) ?: error("Series $seriesId not found")
         val repo = CubariRepo.create(context, cfg, services.git(context, cfg))
-        context.progress.report(ProgressData.indeterminate("Preparing Cubari repository"))
-        repo.prepare()
 
         if (operation == OP_SERIES_META) {
             val now = clock.nowEpochSec()
-            context.progress.report(ProgressData.indeterminate("Updating ${series.title} metadata on Cubari..."))
-            val updatedJson = CubariJson.applySeriesMeta(repo.readSeries(series.cubariSlug), series, now)
-            repo.writeSeries(series.cubariSlug, updatedJson)
-            repo.commitAndPush("Update ${series.title} series metadata")
+            cubariGitMutex.withLock {
+                context.progress.report(ProgressData.indeterminate("Preparing Cubari repository"))
+                repo.prepare()
+                context.progress.report(ProgressData.indeterminate("Updating ${series.title} metadata on Cubari..."))
+                val updatedJson = CubariJson.applySeriesMeta(repo.readSeries(series.cubariSlug), series, now)
+                repo.writeSeries(series.cubariSlug, updatedJson)
+                repo.commitAndPush("Update ${series.title} series metadata")
+            }
             store.mutate { lib ->
                 val latest = lib.seriesById(seriesId) ?: series
                 LibraryOps.upsertSeries(
@@ -201,40 +222,45 @@ class UploaderWorkers(
 
         require(chapter.number.isNotBlank()) { "Chapter number is required" }
 
-        // Metadata-only path: update Cubari JSON (including key renames) without touching Aruba storage.
-        val existingJson = repo.readSeries(series.cubariSlug)
-        val hostedUrls = if (plan.kind == TargetPushKind.METADATA_ONLY) {
-            (plan.previousRemoteKey?.let { CubariJson.pageUrls(existingJson, it, cfg.cubariGroupName) }?.ifEmpty { null }
-                ?: CubariJson.pageUrls(existingJson, chapter.cubariKey, cfg.cubariGroupName).ifEmpty { null }
-                ?: chapter.cubariPageUrls)
-        } else emptyList()
+        // Metadata-only path & initial JSON snapshot read under Git mutex.
+        val existingJson = cubariGitMutex.withLock {
+            context.progress.report(ProgressData.indeterminate("Preparing Cubari repository"))
+            repo.prepare()
+            val curJson = repo.readSeries(series.cubariSlug)
+            val hostedUrls = if (plan.kind == TargetPushKind.METADATA_ONLY) {
+                (plan.previousRemoteKey?.let { CubariJson.pageUrls(curJson, it, cfg.cubariGroupName) }?.ifEmpty { null }
+                    ?: CubariJson.pageUrls(curJson, chapter.cubariKey, cfg.cubariGroupName).ifEmpty { null }
+                    ?: chapter.cubariPageUrls)
+            } else emptyList()
 
-        if (plan.kind == TargetPushKind.METADATA_ONLY && hostedUrls.isNotEmpty()) {
-            val now = clock.nowEpochSec()
-            context.progress.report(ProgressData.indeterminate("Updating Cubari metadata for ch. ${chapter.number}..."))
-            val updatedJson = writeCubariChapterJson(
-                existing = existingJson,
-                series = series,
-                chapter = chapter,
-                group = cfg.cubariGroupName,
-                urls = hostedUrls,
-                previousRemoteKey = plan.previousRemoteKey,
-                now = now
-            )
-            repo.writeSeries(series.cubariSlug, updatedJson)
-            repo.commitAndPush("Update ${series.title} ch. ${chapter.number} metadata")
-            recordCubariPublish(series, chapter, hostedUrls, now)
-            context.progress.report(ProgressData.ratio(1.0, 1.0, "chapter", "Updated ch. ${chapter.number} metadata"))
-            context.showNotification(
-                "Updated Cubari metadata",
-                "${series.title} ch. ${chapter.number} (${plan.changedFields.joinToString()})",
-                PluginNotificationType.SUCCESS
-            )
-            return@guarded success("Updated metadata for ch. ${chapter.number} on Cubari") {
-                put("metadataOnly", true)
-                put("pages", hostedUrls.size)
-                put("lastUpdated", now)
+            if (plan.kind == TargetPushKind.METADATA_ONLY && hostedUrls.isNotEmpty()) {
+                val now = clock.nowEpochSec()
+                context.progress.report(ProgressData.indeterminate("Updating Cubari metadata for ch. ${chapter.number}..."))
+                val updatedJson = writeCubariChapterJson(
+                    existing = curJson,
+                    series = series,
+                    chapter = chapter,
+                    group = cfg.cubariGroupName,
+                    urls = hostedUrls,
+                    previousRemoteKey = plan.previousRemoteKey,
+                    now = now
+                )
+                repo.writeSeries(series.cubariSlug, updatedJson)
+                repo.commitAndPush("Update ${series.title} ch. ${chapter.number} metadata")
+                recordCubariPublish(series, chapter, hostedUrls, now)
+                context.progress.report(ProgressData.ratio(1.0, 1.0, "chapter", "Updated ch. ${chapter.number} metadata"))
+                context.showNotification(
+                    "Updated Cubari metadata",
+                    "${series.title} ch. ${chapter.number} (${plan.changedFields.joinToString()})",
+                    PluginNotificationType.SUCCESS
+                )
+                return@guarded success("Updated metadata for ch. ${chapter.number} on Cubari") {
+                    put("metadataOnly", true)
+                    put("pages", hostedUrls.size)
+                    put("lastUpdated", now)
+                }
             }
+            curJson
         }
 
         val remoteDir = ArubaPaths.chapterDir(arubaCfg, series.effectiveArubaFolder, chapter.cubariKey)
@@ -408,17 +434,20 @@ class UploaderWorkers(
 
             val now = clock.nowEpochSec()
             val wasPublished = chapter.isOnCubari
-            val json = writeCubariChapterJson(
-                existing = repo.readSeries(series.cubariSlug),
-                series = series,
-                chapter = chapter,
-                group = cfg.cubariGroupName,
-                urls = urls,
-                previousRemoteKey = plan.previousRemoteKey,
-                now = now
-            )
-            repo.writeSeries(series.cubariSlug, json)
-            repo.commitAndPush("${if (wasPublished) "Update" else "Add"} ${series.title} ch. ${chapter.number}")
+            cubariGitMutex.withLock {
+                repo.prepare()
+                val json = writeCubariChapterJson(
+                    existing = repo.readSeries(series.cubariSlug),
+                    series = series,
+                    chapter = chapter,
+                    group = cfg.cubariGroupName,
+                    urls = urls,
+                    previousRemoteKey = plan.previousRemoteKey,
+                    now = now
+                )
+                repo.writeSeries(series.cubariSlug, json)
+                repo.commitAndPush("${if (wasPublished) "Update" else "Add"} ${series.title} ch. ${chapter.number}")
+            }
 
             val resolvedHashes = currentHashes.filterNotNull().takeIf { it.size == effectivePages.size }
             recordCubariPublish(series, chapter, urls, now, resolvedHashes)
@@ -522,13 +551,16 @@ class UploaderWorkers(
         remoteKey: String = chapter.cubariKey
     ): ExecutionResult {
         val now = clock.nowEpochSec()
-        val existing = repo.readSeries(series.cubariSlug)
-        if (existing != null) {
-            repo.writeSeries(series.cubariSlug, CubariJson.removeChapter(existing, remoteKey, cfg.cubariGroupName, now))
-        }
         runCatching { storage.listNames(remoteDir).forEach { storage.delete("$remoteDir/$it") } }
             .onFailure { context.logger.warn("Could not delete remote pages in $remoteDir: ${it.message}") }
-        repo.commitAndPush("Remove ${series.title} ch. ${chapter.number}")
+        cubariGitMutex.withLock {
+            repo.prepare()
+            val existing = repo.readSeries(series.cubariSlug)
+            if (existing != null) {
+                repo.writeSeries(series.cubariSlug, CubariJson.removeChapter(existing, remoteKey, cfg.cubariGroupName, now))
+            }
+            repo.commitAndPush("Remove ${series.title} ch. ${chapter.number}")
+        }
         store.mutate { lib ->
             val latest = lib.chapterById(chapter.id) ?: chapter
             LibraryOps.touchSeries(
@@ -563,46 +595,46 @@ class UploaderWorkers(
     // ───────────────────────── publishToMangaDex ─────────────────────────
 
     suspend fun publishToMangaDex(seriesId: String, chapterId: String, resume: JsonElement?): ExecutionResult =
-        guarded("publishToMangaDex") {
-            val cfg = config
-            val library = store.load()
-            val series = library.seriesById(seriesId) ?: error("Series $seriesId not found")
-            val chapter = library.chapterById(chapterId) ?: error("Chapter $chapterId not found")
-            val mangaId = series.mangadexId?.let { MangaUploaderConfig.extractUuid(it) }
-                ?: error("Series '${series.title}' has no MangaDex manga id (set it in the series editor)")
-            val groupId = cfg.mdGroupId ?: error("No MangaDex scanlation group configured")
-
-            val api = services.mangadex(context, cfg)
-            val token = ensureMangaDexToken(api, cfg)
-            val plan = ChangeDetector.planMangaDexPush(chapter, cfg.mdLanguage)
-            val draft = MdChapterDraft(chapter.volume, chapter.number, chapter.title, cfg.mdLanguage)
-
-            if (plan.kind == TargetPushKind.METADATA_ONLY && !chapter.mangadexChapterId.isNullOrBlank()) {
-                context.progress.report(ProgressData.indeterminate("Updating MangaDex metadata for ch. ${chapter.number}..."))
-                val updated = api.updateChapterMetadata(token, chapter.mangadexChapterId, chapter.mangadexVersion ?: 1, draft)
-                val now = clock.nowEpochSec()
-                val sig = chapter.mdSnapshot?.pageSignature ?: ChangeDetector.pageListSignature(chapter.pages)
-                recordMangaDexPublish(chapterId, chapter, updated, cfg.mdLanguage, now, sig)
-                context.progress.report(ProgressData.ratio(1.0, 1.0, "chapter", "Updated MangaDex metadata for ch. ${chapter.number}"))
-                context.showNotification(
-                    "Updated MangaDex metadata",
-                    "${series.title} ch. ${chapter.number} (${plan.changedFields.joinToString()})",
-                    PluginNotificationType.SUCCESS
-                )
-                return@guarded success("Updated metadata for ch. ${chapter.number} on MangaDex") {
-                    put("mangadexChapterId", updated.id)
-                    put("metadataOnly", true)
-                }
-            }
-
-            val effectivePages = chapter.pages.ifEmpty { PageImporter.remotePageRefs(chapter.cubariPageUrls) }
-            require(effectivePages.isNotEmpty()) { "Chapter has no pages" }
-            val currentHashes = resolvePageHashes(effectivePages)
-
+        guarded("publishToMangaDex", targetSeriesId = seriesId, targetChapterId = chapterId) {
             if (mdUploadMutex.isLocked) {
                 context.progress.report(ProgressData.indeterminate("Waiting for active MangaDex upload session to finish..."))
             }
             mdUploadMutex.withLock {
+                val cfg = config
+                val library = store.load()
+                val series = library.seriesById(seriesId) ?: error("Series $seriesId not found")
+                val chapter = library.chapterById(chapterId) ?: error("Chapter $chapterId not found")
+                val mangaId = series.mangadexId?.let { MangaUploaderConfig.extractUuid(it) }
+                    ?: error("Series '${series.title}' has no MangaDex manga id (set it in the series editor)")
+                val groupId = cfg.mdGroupId ?: error("No MangaDex scanlation group configured")
+
+                val api = services.mangadex(context, cfg)
+                val token = ensureMangaDexToken(api, cfg)
+                val plan = ChangeDetector.planMangaDexPush(chapter, cfg.mdLanguage)
+                val draft = MdChapterDraft(chapter.volume, chapter.number, chapter.title, cfg.mdLanguage)
+
+                if (plan.kind == TargetPushKind.METADATA_ONLY && !chapter.mangadexChapterId.isNullOrBlank()) {
+                    context.progress.report(ProgressData.indeterminate("Updating MangaDex metadata for ch. ${chapter.number}..."))
+                    val updated = api.updateChapterMetadata(token, chapter.mangadexChapterId, chapter.mangadexVersion ?: 1, draft)
+                    val now = clock.nowEpochSec()
+                    val sig = chapter.mdSnapshot?.pageSignature ?: ChangeDetector.pageListSignature(chapter.pages)
+                    recordMangaDexPublish(chapterId, chapter, updated, cfg.mdLanguage, now, sig)
+                    context.progress.report(ProgressData.ratio(1.0, 1.0, "chapter", "Updated MangaDex metadata for ch. ${chapter.number}"))
+                    context.showNotification(
+                        "Updated MangaDex metadata",
+                        "${series.title} ch. ${chapter.number} (${plan.changedFields.joinToString()})",
+                        PluginNotificationType.SUCCESS
+                    )
+                    return@guarded success("Updated metadata for ch. ${chapter.number} on MangaDex") {
+                        put("mangadexChapterId", updated.id)
+                        put("metadataOnly", true)
+                    }
+                }
+
+                val effectivePages = chapter.pages.ifEmpty { PageImporter.remotePageRefs(chapter.cubariPageUrls) }
+                require(effectivePages.isNotEmpty()) { "Chapter has no pages" }
+                val currentHashes = resolvePageHashes(effectivePages)
+
                 val state = decode(resume, MangaDexResumeState.serializer()) ?: MangaDexResumeState()
                 if (state.sessionId == null) {
                     context.progress.report(ProgressData.indeterminate("Checking active MangaDex upload sessions..."))
@@ -933,7 +965,7 @@ class UploaderWorkers(
         scanOnly: Boolean,
         backfillAll: Boolean = false,
         resume: JsonElement? = null
-    ): ExecutionResult = guarded("syncMangaDexToCubari") {
+    ): ExecutionResult = guarded("syncMangaDexToCubari", targetSeriesId = seriesId) {
         val cfg = config
         val requested = chapterNumbers.split(',').map { normalizeChapterKey(it) }.filter { it.isNotEmpty() }.toSet()
         if (!scanOnly && !backfillAll && requested.isEmpty()) {
@@ -946,10 +978,12 @@ class UploaderWorkers(
         val api = services.mangadex(context, cfg)
         val repo = CubariRepo.create(context, cfg, services.git(context, cfg))
         context.progress.report(ProgressData.indeterminate("Reading MangaDex feed and Cubari repository"))
-        repo.prepare()
+        var json = cubariGitMutex.withLock {
+            repo.prepare()
+            repo.readSeries(series.cubariSlug)
+        }
 
         val mdChapters = fetchFeedChapters(api, mangaId, cfg, allowGroupFallback = false).filter { it.key.isNotBlank() }
-        var json = repo.readSeries(series.cubariSlug)
         val existingCubariKeys = CubariJson.chapterKeys(json)
         val missingCount = mdChapters.count { it.key !in existingCubariKeys }
         val targets = when {
@@ -996,7 +1030,9 @@ class UploaderWorkers(
                 if (md.key in done) continue
                 if (gate.pauseCheckpoint()) {
                     context.logger.info("Backfill paused after ${done.size}/${targets.size} chapters")
-                    repo.commitAndPush("Backfill ${effectiveSeries.title} from MangaDex (partial)")
+                    cubariGitMutex.withLock {
+                        repo.commitAndPush("Backfill ${effectiveSeries.title} from MangaDex (partial)")
+                    }
                     return@guarded ExecutionResult.Paused(encode(BackfillResumeState(done), BackfillResumeState.serializer()))
                 }
                 val sources = api.pageUrls(md.id)
@@ -1053,7 +1089,9 @@ class UploaderWorkers(
                     renamedJson, md.key, mdTitle, mdVolume, cfg.cubariGroupName, urls, mdTs
                 )
                 json = nextJson
-                repo.writeSeries(series.cubariSlug, nextJson)
+                cubariGitMutex.withLock {
+                    repo.writeSeries(series.cubariSlug, nextJson)
+                }
                 store.mutate { lib ->
                     val local = lib.chapters.firstOrNull { it.seriesId == seriesId && (it.mangadexChapterId == md.id || it.cubariKey == md.key) }
                     val syncedPages = emptyList<PageRef>()
@@ -1098,7 +1136,9 @@ class UploaderWorkers(
             }
             context.progress.clearSecondary()
             context.progress.report(ProgressData.indeterminate("Pushing synced Cubari chapters to Git..."))
-            repo.commitAndPush("Sync ${series.title} from MangaDex (${done.size} chapter(s))")
+            cubariGitMutex.withLock {
+                repo.commitAndPush("Sync ${series.title} from MangaDex (${done.size} chapter(s))")
+            }
         }
         context.showNotification("MangaDex -> Cubari complete", "${series.title}: ${done.size} chapter(s) synced", PluginNotificationType.SUCCESS)
         success("Synced ${done.size} chapter(s) from MangaDex") { put("chapters", done.size) }
@@ -1107,11 +1147,11 @@ class UploaderWorkers(
     // ───────────────────────── uploadOrRemoveCubariCover ─────────────────────────
 
     suspend fun uploadOrRemoveCubariCover(seriesId: String, action: String, coverRelativePath: String): ExecutionResult =
-        guarded("uploadOrRemoveCubariCover") {
+        guarded("uploadOrRemoveCubariCover", targetSeriesId = seriesId) {
             val cfg = config
             val series = store.load().seriesById(seriesId) ?: error("Series $seriesId not found")
             val repo = CubariRepo.create(context, cfg, services.git(context, cfg))
-            repo.prepare()
+            cubariGitMutex.withLock { repo.prepare() }
             val arubaCfg = ArubaConfig.from(cfg)
             val now = clock.nowEpochSec()
 
@@ -1122,9 +1162,11 @@ class UploaderWorkers(
                             ?: ArubaPaths.coverPath(arubaCfg, series.effectiveArubaFolder, PageImporter.extension(url))
                         runCatching { storage.delete(remote) }.onFailure { context.logger.warn("Could not delete remote cover: ${it.message}") }
                     }
-                    val json = repo.readSeries(series.cubariSlug)
-                    if (json != null) repo.writeSeries(series.cubariSlug, CubariJson.setCover(json, null, now))
-                    repo.commitAndPush("Remove cover of ${series.title}")
+                    cubariGitMutex.withLock {
+                        val json = repo.readSeries(series.cubariSlug)
+                        if (json != null) repo.writeSeries(series.cubariSlug, CubariJson.setCover(json, null, now))
+                        repo.commitAndPush("Remove cover of ${series.title}")
+                    }
                     store.mutate { lib ->
                         val nextSeries = (lib.seriesById(seriesId) ?: series).copy(coverUrl = null, coverPath = null, lastUpdatedEpochSec = now)
                         LibraryOps.upsertSeries(lib, nextSeries.copy(cubariSnapshot = ChangeDetector.cubariSeriesSnapshot(nextSeries)))
@@ -1140,9 +1182,11 @@ class UploaderWorkers(
                 val url = ArubaPaths.publicUrl(arubaCfg, remote)
                 val baseSeries = (store.load().seriesById(seriesId) ?: series).copy(coverUrl = url, coverPath = coverRelativePath, lastUpdatedEpochSec = now)
                 val updatedSeries = baseSeries.copy(cubariSnapshot = ChangeDetector.cubariSeriesSnapshot(baseSeries))
-                val base = repo.readSeries(series.cubariSlug) ?: CubariJson.applySeriesMeta(null, updatedSeries, now)
-                repo.writeSeries(series.cubariSlug, CubariJson.setCover(base, url, now))
-                repo.commitAndPush("Update cover of ${series.title}")
+                cubariGitMutex.withLock {
+                    val base = repo.readSeries(series.cubariSlug) ?: CubariJson.applySeriesMeta(null, updatedSeries, now)
+                    repo.writeSeries(series.cubariSlug, CubariJson.setCover(base, url, now))
+                    repo.commitAndPush("Update cover of ${series.title}")
+                }
                 store.mutate { LibraryOps.upsertSeries(it, updatedSeries) }
                 success("Cover uploaded") { put("cover", url) }
             }
@@ -1158,7 +1202,7 @@ class UploaderWorkers(
         replace: Boolean,
         pageIndex: Int = -1,
         resume: JsonElement?
-    ): ExecutionResult = guarded("fetchChapterPages") {
+    ): ExecutionResult = guarded("fetchChapterPages", targetSeriesId = seriesId, targetChapterId = chapterId) {
         val cfg = config
         val library = store.load()
         val series = library.seriesById(seriesId) ?: error("Series $seriesId not found")
@@ -1349,8 +1393,10 @@ class UploaderWorkers(
         if (LockEvaluator.evaluate(cfg).cubari.readiness == Readiness.READY) {
             val repo = CubariRepo.create(context, cfg, services.git(context, cfg))
             val json = runCatching {
-                repo.prepare()
-                repo.readSeries(series.cubariSlug)
+                cubariGitMutex.withLock {
+                    repo.prepare()
+                    repo.readSeries(series.cubariSlug)
+                }
             }.getOrNull()
             val repoUrls = CubariJson.pageUrls(json, chapter.cubariKey, cfg.cubariGroupName)
             if (repoUrls.isNotEmpty()) {
@@ -1410,14 +1456,75 @@ class UploaderWorkers(
     private suspend fun ensureMangaDexToken(api: MangaDexApi, cfg: MangaUploaderConfig): String =
         ensureValidMangaDexToken(context, api, cfg)
 
-    private suspend fun guarded(name: String, block: suspend () -> ExecutionResult): ExecutionResult = try {
-        block()
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        context.logger.error("$name failed: ${e.message}", e)
-        context.showNotification("$name failed", e.message ?: e::class.simpleName.orEmpty(), PluginNotificationType.ERROR)
-        ExecutionResult.Error(e)
+    private suspend fun guarded(
+        name: String,
+        targetSeriesId: String? = null,
+        targetChapterId: String? = null,
+        block: suspend () -> ExecutionResult
+    ): ExecutionResult {
+        persistedJobs.updateMatchingWorker(
+            capabilityName = name,
+            targetSeriesId = targetSeriesId,
+            targetChapterId = targetChapterId,
+            status = CapabilityJobStatus.RUNNING
+        )
+        return try {
+            val res = block()
+            val endMs = clock.nowEpochSec() * 1000L
+            when (res) {
+                is ExecutionResult.Success -> {
+                    val msg = (res.response.result as? JsonObject)
+                        ?.get("message")
+                        ?.let { (it as? JsonPrimitive)?.contentOrNull }
+                    persistedJobs.updateMatchingWorker(
+                        capabilityName = name,
+                        targetSeriesId = targetSeriesId,
+                        targetChapterId = targetChapterId,
+                        status = CapabilityJobStatus.COMPLETED,
+                        progress = ProgressData.ratio(1.0, 1.0, null, msg),
+                        completedAtEpochMs = endMs
+                    )
+                }
+                is ExecutionResult.Paused -> persistedJobs.updateMatchingWorker(
+                    capabilityName = name,
+                    targetSeriesId = targetSeriesId,
+                    targetChapterId = targetChapterId,
+                    status = CapabilityJobStatus.PAUSED
+                )
+                is ExecutionResult.Error -> persistedJobs.updateMatchingWorker(
+                    capabilityName = name,
+                    targetSeriesId = targetSeriesId,
+                    targetChapterId = targetChapterId,
+                    status = CapabilityJobStatus.FAILED,
+                    errorMessage = res.message,
+                    completedAtEpochMs = endMs
+                )
+            }
+            res
+        } catch (e: CancellationException) {
+            withContext(NonCancellable) {
+                persistedJobs.updateMatchingWorker(
+                    capabilityName = name,
+                    targetSeriesId = targetSeriesId,
+                    targetChapterId = targetChapterId,
+                    status = CapabilityJobStatus.CANCELLED,
+                    completedAtEpochMs = clock.nowEpochSec() * 1000L
+                )
+            }
+            throw e
+        } catch (e: Exception) {
+            context.logger.error("$name failed: ${e.message}", e)
+            context.showNotification("$name failed", e.message ?: e::class.simpleName.orEmpty(), PluginNotificationType.ERROR)
+            persistedJobs.updateMatchingWorker(
+                capabilityName = name,
+                targetSeriesId = targetSeriesId,
+                targetChapterId = targetChapterId,
+                status = CapabilityJobStatus.FAILED,
+                errorMessage = e.message ?: e::class.simpleName.orEmpty(),
+                completedAtEpochMs = clock.nowEpochSec() * 1000L
+            )
+            ExecutionResult.Error(e)
+        }
     }
 
     private fun success(message: String, extra: JsonObjectBuilder.() -> Unit = {}): ExecutionResult {
@@ -1488,6 +1595,7 @@ class UploaderWorkers(
         private const val MD_MAX_BATCH_BYTES = 3L * 1024L * 1024L
         private val STALE_PAGE = Regex("^\\d+\\.(png|jpe?g|webp|gif)$", RegexOption.IGNORE_CASE)
         private val mdUploadMutex = Mutex()
+        private val cubariGitMutex = Mutex()
     }
 }
 

@@ -1,3 +1,17 @@
+Version: 1.0.9
+Date: 2026-11-23
+Added:
+  - 2-Pane workspace mode (`2-Pane` / `3-Pane` toggle in TopBar and `Ctrl+L` shortcut) with Series/Chapters left-pane switcher for half-screen and narrow windows.
+  - Multi-chapter MangaDex queueing: `publishToMangaDex` now sets `maxConcurrentExecutions = 1`, moves library/OAuth refresh inside `mdUploadMutex`, prevents duplicate same-chapter queueing, and allows queueing other chapters while an upload is active.
+  - Cross-session UI state persistence (`UiSessionStateStore` for search queries, sort/filters, layout mode, active series/chapter, and remote source selection) plus automatic saving of dirty chapter drafts when switching chapters or series.
+  - Worker-side `PersistedJobStore` completion/progress tracking with human-readable Series/Chapter titles so jobs that finish while the GUI is closed remain in Queue history.
+  - `Delete Draft...` single-chapter action to delete local chapter drafts and prune their cached pages.
+Changed:
+  - Moved `+ New Chapter` from the global TopBar into the Chapters pane header alongside `Scan MangaDex`.
+  - Made Single Chapter Actions adapt to the selected `Remote Source` (`Cubari / Aruba` vs `MangaDex`) and split them into two non-clipping rows; condensed `chapters_bulk_bar` and `chapter_links_group` to eliminate horizontal overflow.
+Fixed:
+  - Added `cubariGitMutex` around all `CubariRepo` Git prepare/write/commit/push operations so concurrent Stage 1 jobs never collide on `.git/index.lock`.
+-------------------------------------------------------------------------------------------------
 Version: 1.0.2
 Date: 2026-11-15
 Fixed:

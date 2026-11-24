@@ -8,5 +8,10 @@
     "fromVersion": "1.0.1",
     "toVersion": "1.0.2",
     "capabilityMigrations": []
+  },
+  {
+    "fromVersion": "1.0.8",
+    "toVersion": "1.0.9",
+    "capabilityMigrations": []
   }
 ]

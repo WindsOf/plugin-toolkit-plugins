@@ -684,7 +684,10 @@ data class PersistedJobRecord(
     val recentLogs: List<String> = emptyList(),
     val errorMessage: String? = null,
     val startedAtEpochMs: Long? = null,
-    val completedAtEpochMs: Long? = null
+    val completedAtEpochMs: Long? = null,
+    val displayTitle: String? = null,
+    val targetSeriesId: String? = null,
+    val targetChapterId: String? = null
 ) {
     val isTerminal: Boolean
         get() = status == CapabilityJobStatus.COMPLETED ||
@@ -704,8 +707,18 @@ data class PersistedJobRecord(
         completedAtEpochMs = completedAtEpochMs
     )
 
+    fun toJobTarget(): JobTarget? =
+        if (displayTitle.isNullOrBlank() && targetSeriesId == null && targetChapterId == null) null
+        else JobTarget(displayTitle = displayTitle.orEmpty(), seriesId = targetSeriesId, chapterId = targetChapterId)
+
     companion object {
-        fun from(snap: CapabilityJobSnapshot, fallbackStartedMs: Long? = null): PersistedJobRecord = PersistedJobRecord(
+        fun from(
+            snap: CapabilityJobSnapshot,
+            fallbackStartedMs: Long? = null,
+            displayTitle: String? = null,
+            targetSeriesId: String? = null,
+            targetChapterId: String? = null
+        ): PersistedJobRecord = PersistedJobRecord(
             jobId = snap.jobId,
             capabilityName = snap.capabilityName,
             status = snap.status,
@@ -715,7 +728,10 @@ data class PersistedJobRecord(
             recentLogs = snap.recentLogs.takeLast(10),
             errorMessage = snap.errorMessage,
             startedAtEpochMs = snap.startedAtEpochMs ?: fallbackStartedMs,
-            completedAtEpochMs = snap.completedAtEpochMs
+            completedAtEpochMs = snap.completedAtEpochMs,
+            displayTitle = displayTitle,
+            targetSeriesId = targetSeriesId,
+            targetChapterId = targetChapterId
         )
     }
 }
@@ -726,10 +742,22 @@ class PersistedJobStore(private val storage: PluginStorage) {
         loadUnlocked()
     }
 
-    suspend fun upsert(snapshot: CapabilityJobSnapshot, fallbackStartedMs: Long? = null) = MUTEX.withLock {
+    suspend fun upsert(
+        snapshot: CapabilityJobSnapshot,
+        fallbackStartedMs: Long? = null,
+        displayTitle: String? = null,
+        targetSeriesId: String? = null,
+        targetChapterId: String? = null
+    ) = MUTEX.withLock {
         val current = loadUnlocked().associateBy { it.jobId }.toMutableMap()
-        val existingStart = current[snapshot.jobId]?.startedAtEpochMs
-        current[snapshot.jobId] = PersistedJobRecord.from(snapshot, existingStart ?: fallbackStartedMs)
+        val existing = current[snapshot.jobId]
+        current[snapshot.jobId] = PersistedJobRecord.from(
+            snap = snapshot,
+            fallbackStartedMs = existing?.startedAtEpochMs ?: fallbackStartedMs,
+            displayTitle = displayTitle ?: existing?.displayTitle,
+            targetSeriesId = targetSeriesId ?: existing?.targetSeriesId,
+            targetChapterId = targetChapterId ?: existing?.targetChapterId
+        )
         saveUnlocked(current.values.toList())
     }
 
@@ -737,10 +765,47 @@ class PersistedJobStore(private val storage: PluginStorage) {
         if (snapshots.isEmpty()) return@withLock
         val current = loadUnlocked().associateBy { it.jobId }.toMutableMap()
         for (snap in snapshots) {
-            val existingStart = current[snap.jobId]?.startedAtEpochMs
-            current[snap.jobId] = PersistedJobRecord.from(snap, existingStart ?: fallbackStartedMs)
+            val existing = current[snap.jobId]
+            current[snap.jobId] = PersistedJobRecord.from(
+                snap = snap,
+                fallbackStartedMs = existing?.startedAtEpochMs ?: fallbackStartedMs,
+                displayTitle = existing?.displayTitle,
+                targetSeriesId = existing?.targetSeriesId,
+                targetChapterId = existing?.targetChapterId
+            )
         }
         saveUnlocked(current.values.toList())
+    }
+
+    /**
+     * Updates the oldest matching active record directly from a background worker so jobs that
+     * finish or pause while the UI session is closed keep their authoritative final state.
+     */
+    suspend fun updateMatchingWorker(
+        capabilityName: String,
+        targetSeriesId: String? = null,
+        targetChapterId: String? = null,
+        status: CapabilityJobStatus,
+        progress: ProgressData? = null,
+        errorMessage: String? = null,
+        completedAtEpochMs: Long? = null
+    ) = MUTEX.withLock {
+        val list = loadUnlocked().toMutableList()
+        val matchIdx = list.indexOfFirst { rec ->
+            !rec.isTerminal &&
+                rec.capabilityName == capabilityName &&
+                (targetSeriesId == null || rec.targetSeriesId == null || rec.targetSeriesId == targetSeriesId) &&
+                (targetChapterId == null || rec.targetChapterId == null || rec.targetChapterId == targetChapterId)
+        }
+        if (matchIdx < 0) return@withLock
+        val rec = list[matchIdx]
+        list[matchIdx] = rec.copy(
+            status = status,
+            primaryProgress = progress?.let(PersistedProgress::from) ?: rec.primaryProgress,
+            errorMessage = errorMessage ?: if (status == CapabilityJobStatus.COMPLETED) null else rec.errorMessage,
+            completedAtEpochMs = completedAtEpochMs ?: rec.completedAtEpochMs
+        )
+        saveUnlocked(list)
     }
 
     suspend fun removeByIds(jobIds: Set<String>) = MUTEX.withLock {
@@ -771,6 +836,62 @@ class PersistedJobStore(private val storage: PluginStorage) {
         private const val KEY = "persisted_jobs"
         private const val MAX_RECORDS = 25
         private val MUTEX = Mutex()
+        private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    }
+}
+
+@Serializable
+data class PersistedUiState(
+    val viewKey: String = MainView.WORKSPACE.key,
+    val layoutModeKey: String = WorkspaceLayoutMode.THREE_PANE.key,
+    val twoPaneLeftTabKey: String = TwoPaneLeftTab.CHAPTERS.key,
+    val seriesSearch: String = "",
+    val seriesSortKey: String = SeriesSort.CUSTOM.key,
+    val seriesFilterKey: String = SeriesFilter.ALL.key,
+    val activeSeriesId: String? = null,
+    val chapterSearch: String = "",
+    val chapterFilterKey: String = ChapterFilter.ALL.key,
+    val checkedChapterIds: Set<String> = emptySet(),
+    val activeChapterId: String? = null,
+    val gridExpanded: Boolean = false,
+    val remoteSourceByChapter: Map<String, String> = emptyMap()
+) {
+    companion object {
+        fun from(state: UiState): PersistedUiState = PersistedUiState(
+            viewKey = state.view.key,
+            layoutModeKey = state.layoutMode.key,
+            twoPaneLeftTabKey = state.twoPaneLeftTab.key,
+            seriesSearch = state.seriesSearch,
+            seriesSortKey = state.seriesSort.key,
+            seriesFilterKey = state.seriesFilter.key,
+            activeSeriesId = state.activeSeriesId,
+            chapterSearch = state.chapterSearch,
+            chapterFilterKey = state.chapterFilter.key,
+            checkedChapterIds = state.checkedChapterIds,
+            activeChapterId = state.activeChapterId,
+            gridExpanded = state.gridExpanded,
+            remoteSourceByChapter = state.remoteSourceByChapter
+        )
+    }
+}
+
+/** Persists workspace navigation, search queries, filters, layout mode, and selection across GUI closes. */
+class UiSessionStateStore(private val storage: PluginStorage) {
+    suspend fun load(): PersistedUiState? {
+        val elem = storage.get(KEY) ?: return null
+        return runCatching { json.decodeFromJsonElement(PersistedUiState.serializer(), elem) }.getOrNull()
+    }
+
+    suspend fun save(persisted: PersistedUiState) {
+        storage.put(KEY, json.encodeToJsonElement(PersistedUiState.serializer(), persisted))
+    }
+
+    suspend fun save(state: UiState) {
+        save(PersistedUiState.from(state))
+    }
+
+    companion object {
+        private const val KEY = "ui_session_state"
         private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     }
 }
